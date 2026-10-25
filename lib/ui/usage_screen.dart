@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import '../agent/pricing.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -25,9 +26,6 @@ num _num(Object? o) => o is num ? o : 0;
 
 /// Credits with at most 2 decimals, trailing zeros trimmed (80.38, 1, 0.15).
 String _creditsFmt(num v) => v.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), '');
-
-/// Rupiah value of one GripHub credit, from the router pricing page (25 Oct 2026).
-const _kRupiahPerCredit = 300;
 
 /// Rupiah with dot thousands (Rp 24.114).
 String _rp(num v) {
@@ -170,7 +168,7 @@ class _UsageScreenState extends State<UsageScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${_creditsFmt(remaining)} credit', style: text.titleMedium),
-                    Text('≈ ${_rp(remaining * _kRupiahPerCredit)}', style: text.bodySmall?.copyWith(fontFamily: mono)),
+                    Text('≈ ${_rp(remaining * kRupiahPerCredit)}', style: text.bodySmall?.copyWith(fontFamily: mono)),
                   ],
                 ),
               ),
@@ -296,11 +294,26 @@ class _UsageScreenState extends State<UsageScreen> {
   List<Widget> _summary(BuildContext context, List<UsageRow> rows) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    final cost = rows.fold<double>(0, (a, r) => a + r.cost);
+    // pi's own cost is 0 for GripHub (the router reports no prices), so
+    // estimate from the hardcoded rate table instead. pi costs still win
+    // when present (other providers); a model with no known rate shows "—",
+    // never an invented number.
+    final piCost = rows.fold<double>(0, (a, r) => a + r.cost);
+    double estimatedTotal = 0;
+    var hasEstimate = false;
+    for (final r in rows) {
+      final e = estimatedCredits(model: r.model, inputTokens: r.input, outputTokens: r.output);
+      if (e != null) {
+        hasEstimate = true;
+        estimatedTotal += e;
+      }
+    }
+    final showPiCost = piCost > 0;
+    final showEstimate = !showPiCost && hasEstimate;
+
     final input = rows.fold<int>(0, (a, r) => a + r.input);
     final output = rows.fold<int>(0, (a, r) => a + r.output);
     final requests = rows.fold<int>(0, (a, r) => a + r.requests);
-    final useCost = cost > 0;
 
     final today = DateTime.now();
     final days = [
@@ -310,29 +323,50 @@ class _UsageScreenState extends State<UsageScreen> {
     final perDay = {for (final d in days) d: 0.0};
     for (final r in rows) {
       if (perDay.containsKey(r.day)) {
-        perDay[r.day] = perDay[r.day]! + (useCost ? r.cost : (r.input + r.output).toDouble());
+        final v = showPiCost
+            ? r.cost
+            : showEstimate
+                ? (estimatedCredits(model: r.model, inputTokens: r.input, outputTokens: r.output) ?? 0)
+                : (r.input + r.output).toDouble();
+        perDay[r.day] = perDay[r.day]! + v;
       }
     }
 
-    final byModel = <String, ({String provider, String model, int tokens, double cost})>{};
+    final byModel = <String, ({String provider, String model, int tokens, double cost, double estCost, bool hasRate})>{};
     for (final r in rows) {
       final k = '${r.provider}/${r.model}';
       final prev = byModel[k];
+      final e = estimatedCredits(model: r.model, inputTokens: r.input, outputTokens: r.output);
       byModel[k] = (
         provider: r.provider,
         model: r.model,
         tokens: (prev?.tokens ?? 0) + r.input + r.output,
         cost: (prev?.cost ?? 0) + r.cost,
+        estCost: (prev?.estCost ?? 0) + (e ?? 0),
+        hasRate: (prev?.hasRate ?? false) || e != null,
       );
     }
     final models = byModel.values.toList()
-      ..sort((a, b) => useCost ? b.cost.compareTo(a.cost) : b.tokens.compareTo(a.tokens));
+      ..sort((a, b) {
+        if (showPiCost) return b.cost.compareTo(a.cost);
+        if (showEstimate) return b.estCost.compareTo(a.estCost);
+        return b.tokens.compareTo(a.tokens);
+      });
 
     return [
       Row(
         children: [
           Expanded(
-            child: _StatCard(icon: LucideIcons.coins, color: p.accent, label: tr('Cost'), value: _money(cost)),
+            child: _StatCard(
+              icon: LucideIcons.coins,
+              color: p.accent,
+              label: tr('Cost'),
+              value: showPiCost
+                  ? _money(piCost)
+                  : showEstimate
+                      ? '${formatCredits(estimatedTotal)} credit'
+                      : '—',
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -367,10 +401,22 @@ class _UsageScreenState extends State<UsageScreen> {
           ),
         ],
       ),
-      SectionLabel(useCost ? 'Cost per day' : 'Tokens per day'),
+      SectionLabel(showPiCost || showEstimate ? 'Cost per day' : 'Tokens per day'),
       SurfaceCard(
-        child: _BarChart(values: [for (final d in days) perDay[d]!], labels: days, format: useCost ? _money : _compact),
+        child: _BarChart(
+          values: [for (final d in days) perDay[d]!],
+          labels: days,
+          format: showPiCost ? _money : showEstimate ? (v) => '${formatCredits(v)} credit' : _compact,
+        ),
       ),
+      if (showEstimate)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(
+            'Perkiraan dari tarif 25 Okt 2026 · total ≈ ${_rp(estimatedTotal * kRupiahPerCredit)} · angka pasti di kartu Credit GripHub di atas',
+            style: text.bodySmall,
+          ),
+        ),
       SectionLabel(tr('By model')),
       if (models.isEmpty)
         SurfaceCard(child: Text(tr('No requests in this period.'), style: text.bodySmall))
@@ -382,7 +428,10 @@ class _UsageScreenState extends State<UsageScreen> {
                 leading: BrandTile(id: m.provider, size: 30),
                 title: m.model.isEmpty ? 'unknown' : m.model,
                 subtitle: '${m.provider} · ${_compact(m.tokens)} tokens',
-                trailing: Text(_money(m.cost), style: text.titleSmall?.copyWith(fontFamily: mono)),
+                trailing: Text(
+                  showPiCost ? _money(m.cost) : m.hasRate ? '${formatCredits(m.estCost)} credit' : '—',
+                  style: text.titleSmall?.copyWith(fontFamily: mono),
+                ),
               ),
           ],
         ),
@@ -417,7 +466,7 @@ class _UsageScreenState extends State<UsageScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${_compact(total)} tokens', style: text.titleMedium),
-                    Text(_money(cost), style: text.bodySmall?.copyWith(fontFamily: mono)),
+                    if (cost > 0) Text(_money(cost), style: text.bodySmall?.copyWith(fontFamily: mono)),
                   ],
                 ),
               ),
