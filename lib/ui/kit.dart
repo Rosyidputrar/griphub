@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
@@ -111,6 +112,98 @@ class OnSurface extends StatelessWidget {
     return Theme(
       data: theme.copyWith(inputDecorationTheme: theme.inputDecorationTheme.copyWith(fillColor: context.palette.bg)),
       child: child,
+    );
+  }
+}
+
+/// The app's one segmented control: the options sit in a soft track and the
+/// chosen one in a solid pill. Every segment keeps its rounded shape (a
+/// SegmentedButton squares off the inner corners of the middle ones).
+class PillSegments<T> extends StatelessWidget {
+  const PillSegments({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.icons = const {},
+    this.expand = true,
+  });
+  final T value;
+  final Map<T, String> options;
+  final Map<T, IconData> icons;
+  final ValueChanged<T> onChanged;
+
+  /// Full width with equal segments; false hugs the labels (a "7 / 30 days" switch).
+  final bool expand;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final style = Theme.of(context).textTheme.labelMedium;
+    final selected = options.containsKey(value) ? value : options.keys.first;
+
+    Widget segment(T key, String label) {
+      final on = key == selected;
+      final fg = on ? p.inverse : p.muted;
+      final icon = icons[key];
+      return Semantics(
+        button: true,
+        selected: on,
+        inMutuallyExclusiveGroup: true,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: on ? p.text : Colors.transparent,
+            borderRadius: BorderRadius.circular(Radii.pill),
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              customBorder: const StadiumBorder(),
+              onTap: on
+                  ? null
+                  : () {
+                      HapticFeedback.selectionClick();
+                      onChanged(key);
+                    },
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 40),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: style?.copyWith(color: fg),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
+      child: Row(
+        mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+        children: [
+          for (final e in options.entries)
+            if (expand) Expanded(child: segment(e.key, e.value)) else segment(e.key, e.value),
+        ],
+      ),
     );
   }
 }

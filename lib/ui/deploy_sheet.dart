@@ -10,6 +10,7 @@ import '../agent/integrations.dart';
 import 'accounts_screen.dart';
 import 'task_log.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 enum DeployTarget { vercel, cloudflare, githubPages, ssh }
@@ -349,14 +350,10 @@ class _DeploySheetState extends State<_DeploySheet> {
                 ),
               ] else ...[
                 if (target == DeployTarget.cloudflare) ...[
-                  SegmentedButton<CloudflareMode>(
-                    showSelectedIcon: false,
-                    segments: [
-                      ButtonSegment(value: CloudflareMode.workers, label: Text(tr('Workers'))),
-                      ButtonSegment(value: CloudflareMode.pages, label: Text(tr('Pages'))),
-                    ],
-                    selected: {mode},
-                    onSelectionChanged: (s) => setState(() => mode = s.first),
+                  PillSegments<CloudflareMode>(
+                    value: mode,
+                    options: {CloudflareMode.workers: tr('Workers'), CloudflareMode.pages: tr('Pages')},
+                    onChanged: (v) => setState(() => mode = v),
                   ),
                   const SizedBox(height: 6),
                   Text(

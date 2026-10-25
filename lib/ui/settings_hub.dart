@@ -525,21 +525,7 @@ class _Segmented<T> extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
             child: Text(label!, style: Theme.of(context).textTheme.labelMedium),
           ),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<T>(
-            showSelectedIcon: false,
-            segments: [
-              for (final e in options.entries)
-                ButtonSegment(
-                  value: e.key,
-                  label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            selected: {options.containsKey(value) ? value : options.keys.first},
-            onSelectionChanged: (s) => onChanged(s.first),
-          ),
-        ),
+        PillSegments<T>(value: value, options: options, onChanged: onChanged),
       ],
     );
   }

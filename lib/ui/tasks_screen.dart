@@ -193,15 +193,11 @@ class _TasksScreenState extends State<TasksScreen> {
                               ],
                             ),
                           ),
-                          SegmentedButton<int>(
-                            showSelectedIcon: false,
-                            segments: const [
-                              ButtonSegment(value: 1, label: Text('1')),
-                              ButtonSegment(value: 2, label: Text('2')),
-                              ButtonSegment(value: 3, label: Text('3')),
-                            ],
-                            selected: {f.concurrency.clamp(1, 3)},
-                            onSelectionChanged: (s) => _guard(() => f.setConcurrency(s.first)),
+                          PillSegments<int>(
+                            value: f.concurrency.clamp(1, 3),
+                            options: const {1: '1', 2: '2', 3: '3'},
+                            onChanged: (v) => _guard(() => f.setConcurrency(v)),
+                            expand: false,
                           ),
                         ],
                       ),
@@ -564,16 +560,15 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
               decoration: InputDecoration(labelText: tr('Prompt'), alignLabelWithHint: true),
             ),
             const SizedBox(height: 16),
-            SegmentedButton<_Kind>(
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(value: _Kind.interval, label: Text(tr('Interval'))),
-                ButtonSegment(value: _Kind.daily, label: Text(tr('Daily'))),
-                ButtonSegment(value: _Kind.github, label: Text(tr('GitHub trigger'))),
-              ],
-              selected: {_kind},
-              onSelectionChanged: (s) => setState(() {
-                _kind = s.first;
+            PillSegments<_Kind>(
+              value: _kind,
+              options: {
+                _Kind.interval: tr('Interval'),
+                _Kind.daily: tr('Daily'),
+                _Kind.github: tr('GitHub trigger'),
+              },
+              onChanged: (v) => setState(() {
+                _kind = v;
                 _problem = null;
               }),
             ),

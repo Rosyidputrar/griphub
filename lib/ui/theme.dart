@@ -445,15 +445,6 @@ ThemeData buildTheme(Brightness brightness) {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
       showCheckmark: false,
     ),
-    segmentedButtonTheme: SegmentedButtonThemeData(
-      style: ButtonStyle(
-        side: const WidgetStatePropertyAll(BorderSide.none),
-        shape: const WidgetStatePropertyAll(StadiumBorder()),
-        backgroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.text : p.surface),
-        foregroundColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.inverse : p.muted),
-        textStyle: WidgetStatePropertyAll(text.labelMedium),
-      ),
-    ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.inverse : p.faint),
       trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? p.text : p.raised),

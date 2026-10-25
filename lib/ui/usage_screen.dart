@@ -242,19 +242,17 @@ class _UsageScreenState extends State<UsageScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final d in const [7, 30])
-                  ChoiceChip(
-                    label: Text('$d ${tr('days')}'),
-                    selected: _days == d,
-                    onSelected: (_) {
-                      setState(() => _days = d);
-                      _load();
-                    },
-                  ),
-              ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: PillSegments<int>(
+                value: _days,
+                options: {for (final d in const [7, 30]) d: '$d ${tr('days')}'},
+                onChanged: (d) {
+                  setState(() => _days = d);
+                  _load();
+                },
+                expand: false,
+              ),
             ),
             const SizedBox(height: 14),
             SectionLabel(tr('GripHub credit')),
