@@ -793,11 +793,24 @@ class _HomeTabState extends State<_HomeTab> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    GestureDetector(
-                      onTap: () =>
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
-                      child: Avatar(name: gh?.name ?? gh?.login ?? 'GripHub AI Agent', url: gh?.avatarUrl, size: 44),
-                    ),
+                    // Signed out: a person icon, not initials made from the app name ("GA").
+                    if (gh == null)
+                      _CircleButton(
+                        icon: LucideIcons.userRound,
+                        label: tr('Accounts & servers'),
+                        onTap: () =>
+                            Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
+                      )
+                    else
+                      Semantics(
+                        button: true,
+                        label: tr('Accounts & servers'),
+                        child: GestureDetector(
+                          onTap: () =>
+                              Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
+                          child: Avatar(name: gh.name ?? gh.login, url: gh.avatarUrl, size: 44),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 26),
