@@ -37,10 +37,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return Scaffold(
           appBar: AppBar(
             title: Text(tr('Models & providers')),
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(1),
-              child: Divider(height: 1, color: p.border),
-            ),
           ),
           body: ListView(
             padding: const EdgeInsets.only(bottom: 32),

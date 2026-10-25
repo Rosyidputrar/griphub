@@ -37,9 +37,9 @@ class PrimaryButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.45,
       child: Material(
         color: p.text,
-        borderRadius: BorderRadius.circular(Radii.r18),
+        borderRadius: BorderRadius.circular(Radii.lg),
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.r18),
+          borderRadius: BorderRadius.circular(Radii.lg),
           onTap: enabled ? onPressed : null,
           child: SizedBox(
             height: 54,
@@ -84,7 +84,7 @@ class SurfaceCard extends StatelessWidget {
     return Material(
       color: p.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.r24),
+        borderRadius: BorderRadius.circular(Radii.xl),
         side: highlight ? BorderSide(color: p.text, width: 1.5) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
@@ -264,7 +264,7 @@ class SettingsGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r24)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.xl)),
       clipBehavior: Clip.antiAlias,
       child: OnSurface(
         child: Column(
@@ -325,9 +325,14 @@ class SettingsRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (trailing != null)
-              trailing!
-            else if (onTap != null)
+            if (trailing != null) ...[
+              trailing!,
+              // A status pill doesn't say the row opens something; keep the chevron beside it.
+              if (onTap != null && trailing is Pill) ...[
+                const SizedBox(width: 6),
+                Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+              ],
+            ] else if (onTap != null)
               Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
           ],
         ),

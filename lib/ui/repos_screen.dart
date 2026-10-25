@@ -47,10 +47,6 @@ class _ReposScreenState extends State<ReposScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(tr('Open a repository')),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: p.border),
-        ),
       ),
       body: it.github == null
           ? Center(
@@ -145,7 +141,7 @@ class _RepoTile extends StatelessWidget {
       if (repo.pushedAt != null) '${tr('updated')} ${formatAgo(repo.pushedAt!)}',
     ].join('  ·  ');
     return InkWell(
-      borderRadius: BorderRadius.circular(Radii.r10),
+      borderRadius: BorderRadius.circular(Radii.md),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),

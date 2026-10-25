@@ -139,7 +139,7 @@ class _UpdateSheet extends StatelessWidget {
               if (updater.phase == UpdatePhase.downloading) ...[
                 const SizedBox(height: 18),
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(Radii.r4),
+                  borderRadius: BorderRadius.circular(Radii.xs),
                   child: LinearProgressIndicator(value: d.status == 'running' ? d.progress : null, minHeight: 6),
                 ),
                 const SizedBox(height: 8),
@@ -176,7 +176,7 @@ class _UpdateSheet extends StatelessWidget {
                 ConstrainedBox(
                   constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.35),
                   child: Container(
-                    decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r14)),
+                    decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md)),
                     padding: const EdgeInsets.all(12),
                     child: SingleChildScrollView(
                       child: MarkdownBody(

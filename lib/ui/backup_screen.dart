@@ -148,7 +148,7 @@ class _BackupScreenState extends State<BackupScreen> {
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r14)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.md)),
                     child: Row(
                       children: [
                         Expanded(

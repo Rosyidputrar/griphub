@@ -324,7 +324,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
     final name = slash >= 0 ? f.path.substring(slash + 1) : f.path;
     final dir = slash >= 0 ? f.path.substring(0, slash) : '';
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r18)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -395,9 +395,9 @@ class _CheckpointChip extends StatelessWidget {
     final sub = selected ? p.inverse.withValues(alpha: 0.7) : p.muted;
     return Material(
       color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(Radii.r18),
+      borderRadius: BorderRadius.circular(Radii.lg),
       child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.r18),
+        borderRadius: BorderRadius.circular(Radii.lg),
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),

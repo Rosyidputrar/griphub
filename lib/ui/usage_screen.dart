@@ -560,7 +560,7 @@ class _BarChart extends StatelessWidget {
                       height: max == 0 ? 3 : (values[i] / max * 116).clamp(3, 116).toDouble(),
                       decoration: BoxDecoration(
                         color: values[i] == 0 ? p.border : p.accent,
-                        borderRadius: BorderRadius.circular(Radii.r4),
+                        borderRadius: BorderRadius.circular(Radii.xs),
                       ),
                     ),
                   ),

@@ -481,7 +481,7 @@ class _Result extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(Radii.r10),
+        borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.success.withValues(alpha: 0.5)),
       ),
       child: Row(

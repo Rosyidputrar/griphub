@@ -189,7 +189,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                   background: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 24),
-                    decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(Radii.r24)),
+                    decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(Radii.xl)),
                     child: const Icon(LucideIcons.trash2, color: Colors.white),
                   ),
                   child: SurfaceCard(

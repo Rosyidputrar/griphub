@@ -62,16 +62,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
     return ListenableBuilder(
       listenable: it,
       builder: (context, _) => Scaffold(
         appBar: AppBar(
           title: Text(tr('Accounts & servers')),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(1),
-            child: Divider(height: 1, color: p.border),
-          ),
         ),
         body: !it.loaded
             ? const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
@@ -339,7 +334,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r16)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.lg)),
                     alignment: Alignment.center,
                     child: Text(
                       f.userCode,
@@ -525,7 +520,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.r18),
+        borderRadius: BorderRadius.circular(Radii.lg),
         border: Border.all(color: p.border),
       ),
       child: Column(
@@ -545,7 +540,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                   controller: _id,
                   decoration: InputDecoration(
                     hintText: 'Ov23…',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r12)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md)),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
                   onSubmitted: (_) => _save(),
@@ -715,11 +710,11 @@ class _HostTile extends StatelessWidget {
       child: Material(
         color: p.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Radii.r14),
+          borderRadius: BorderRadius.circular(Radii.md),
           side: BorderSide(color: p.border),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.r14),
+          borderRadius: BorderRadius.circular(Radii.md),
           onTap: onEdit,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),

@@ -178,7 +178,7 @@ class CodeBox extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.r12),
+        borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.border),
       ),
       child: Column(
@@ -242,7 +242,7 @@ class _CopyButtonState extends State<CopyButton> {
     final color = copied ? p.success : p.muted;
     return InkWell(
       onTap: _copy,
-      borderRadius: BorderRadius.circular(Radii.r6),
+      borderRadius: BorderRadius.circular(Radii.sm),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(
@@ -274,7 +274,7 @@ class _HeaderAction extends StatelessWidget {
     final p = context.palette;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(Radii.r6),
+      borderRadius: BorderRadius.circular(Radii.sm),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(

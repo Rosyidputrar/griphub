@@ -123,7 +123,7 @@ class _MessageMenu extends StatelessWidget {
                   alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(Radii.r20),
+                      borderRadius: BorderRadius.circular(Radii.lg),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.18 * t),
@@ -158,7 +158,7 @@ class _MessageMenu extends StatelessWidget {
                     color: p.raised,
                     elevation: 12,
                     shadowColor: Colors.black.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(Radii.r14),
+                    borderRadius: BorderRadius.circular(Radii.md),
                     clipBehavior: Clip.antiAlias,
                     child: Column(
                       mainAxisSize: MainAxisSize.min,

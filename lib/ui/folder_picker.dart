@@ -318,7 +318,7 @@ class _Crumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(Radii.r8),
+      borderRadius: BorderRadius.circular(Radii.sm),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

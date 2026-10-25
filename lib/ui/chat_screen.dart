@@ -683,7 +683,7 @@ class _Composer extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(Radii.r24),
+              borderRadius: BorderRadius.circular(Radii.xl),
               border: Border.all(color: focus.hasFocus ? p.accent.withValues(alpha: 0.55) : p.border),
               boxShadow: [
                 BoxShadow(

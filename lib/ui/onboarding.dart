@@ -73,9 +73,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 children: [
                   Material(
                     color: p.surface,
-                    borderRadius: BorderRadius.circular(Radii.r12),
+                    borderRadius: BorderRadius.circular(Radii.md),
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(Radii.r12),
+                      borderRadius: BorderRadius.circular(Radii.md),
                       onTap: _start,
                       child: Padding(
                         padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
