@@ -401,6 +401,30 @@ class _TerminalScreenState extends State<TerminalScreen> {
     focus.requestFocus();
   }
 
+  /// True when [s] may receive keystrokes sent on the user's behalf. At a
+  /// local shell prompt they go to the shell; anywhere else (vim, less, ssh,
+  /// a REPL, an exited shell) they would drive whatever program is running,
+  /// so the user confirms first instead of the keystrokes going out silently.
+  Future<bool> _confirmSendIfNeeded(ShellSession s) async {
+    if (s.atShellPrompt) return true;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Not at a shell prompt')),
+        content: Text(
+          tr(
+            'This tab is not sitting at a local shell prompt. Sending this would type into whatever program is running here (for example vim, less, ssh, or a REPL) instead of the shell. Send it anyway?',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Send anyway'))),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
   Future<void> _sshMenu() async {
     final hosts = agent.integrations.hosts;
     if (hosts.isEmpty) {
@@ -435,7 +459,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
         ),
       ),
     );
-    if (name != null) session?.run('ssh $name');
+    final s = session;
+    if (name != null && s != null && await _confirmSendIfNeeded(s)) s.run('ssh $name');
     focus.requestFocus();
   }
 
@@ -445,7 +470,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('No commands yet'))));
       return;
     }
-    final command = await showModalBottomSheet<String>(
+    final pick = await showModalBottomSheet<({String command, bool run})>(
       context: context,
       isScrollControlled: true,
       builder: (context) => SafeArea(
@@ -460,20 +485,29 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 ListTile(
                   dense: true,
                   leading: const Icon(LucideIcons.history, size: 18),
-                  title: Text(
-                    c,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontFamily: mono, fontSize: 13),
+                  // Full wrap: a long command drops down instead of being cut.
+                  title: Text(c, style: const TextStyle(fontFamily: mono, fontSize: 13)),
+                  // Tap inserts the command for editing; the play button runs it.
+                  onTap: () => Navigator.of(context).pop((command: c, run: false)),
+                  trailing: IconButton(
+                    tooltip: tr('Run'),
+                    icon: const Icon(LucideIcons.play, size: 18),
+                    onPressed: () => Navigator.of(context).pop((command: c, run: true)),
                   ),
-                  onTap: () => Navigator.of(context).pop(c),
                 ),
             ],
           ),
         ),
       ),
     );
-    if (command != null) session?.run(command);
+    final s = session;
+    if (pick != null && s != null) {
+      if (pick.run) {
+        if (await _confirmSendIfNeeded(s)) s.run(pick.command);
+      } else {
+        s.type(pick.command);
+      }
+    }
     focus.requestFocus();
   }
 
