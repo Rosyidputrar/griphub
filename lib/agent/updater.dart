@@ -98,12 +98,21 @@ class Updater extends ChangeNotifier {
   Future<String?> init() async {
     if (initialized) return null;
     initialized = true;
-    if (repo.isEmpty) return null;
-    if (!Platform.isAndroid || appFlavor == 'play') return null;
+    if (!Platform.isAndroid) return null;
+    final Map<String, dynamic> info;
     try {
-      final info = (await _channel.invokeMapMethod<String, dynamic>('info'))!;
+      info = (await _channel.invokeMapMethod<String, dynamic>('info'))!;
+    } on PlatformException {
+      return null;
+    }
+    // Settings shows the version on every build, including ones that don't update themselves.
+    currentVersion = info['version'] as String? ?? '';
+    if (repo.isEmpty || appFlavor == 'play') {
+      notifyListeners();
+      return null;
+    }
+    try {
       supported = info['supported'] == true;
-      currentVersion = info['version'] as String? ?? '';
       abis = (info['abis'] as List? ?? const []).cast<String>();
       final prefs = (await _channel.invokeMapMethod<String, dynamic>('prefs')) ?? const {};
       autoCheck = prefs['autoCheck'] as bool? ?? true;
