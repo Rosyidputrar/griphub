@@ -765,6 +765,8 @@ const _id = <String, String>{
       'Agent berjalan di HP kamu. Masuk ke provider atau tambahkan API key untuk memilih modelnya.',
   'Coding agent on your phone': 'Agent coding di HP kamu',
   'Working': 'Bekerja',
+  'Advanced': 'Lanjutan',
+  'Built-in GripHub app': 'App bawaan GripHub',
   'credits': 'kredit',
   '{n} per day': '{n} per hari',
   'Earliest batch expires {date} ({n})': 'Batch paling cepat kedaluwarsa {date} ({n})',
@@ -856,8 +858,8 @@ const _id = <String, String>{
   'Confirm deploy': 'Konfirmasi deploy',
   'Custom DoH': 'DoH kustom',
   'DoH URL': 'URL DoH',
-  'For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.':
-      'Untuk login device-flow. Buat OAuth App sendiri dengan Device Flow aktif lalu tempel Client ID-nya di sini (publik, bukan rahasia). Kosong berarti login GitHub belum dikonfigurasi.',
+  'Only for a build with its own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.':
+      'Hanya untuk build dengan OAuth App GitHub sendiri (Device Flow aktif): tempel Client ID-nya di sini. Ini publik, bukan rahasia. Kosongkan untuk login dengan app bawaan.',
   'GitHub OAuth client ID': 'Client ID OAuth GitHub',
   'Headers': 'Header',
   'Linux shell (box)': 'Shell Linux (box)',

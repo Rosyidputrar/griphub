@@ -74,7 +74,6 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
                   _Header(tr('GitHub')),
-                  _GithubClientIdField(agent: widget.agent, onSaved: _snack),
                   it.github == null
                       ? _GithubConnect(
                           agent: widget.agent,
@@ -177,6 +176,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
                       ),
                     ),
                   for (final h in it.hosts) _HostTile(host: h, onEdit: () => _editHost(h), onTest: () => _testHost(h)),
+                  // Build configuration, not something to set up first: last and folded.
+                  _Header(tr('Advanced')),
+                  _GithubClientIdField(agent: widget.agent, onSaved: _snack),
                 ],
               ),
       ),
@@ -492,6 +494,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
     text: widget.agent.integrations.settings?.githubClientId ?? '',
   );
   bool _saving = false;
+  bool _open = false;
 
   @override
   void dispose() {
@@ -515,44 +518,72 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.lg),
-        border: Border.all(color: p.border),
-      ),
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
-          const SizedBox(height: 4),
-          Text(
-            tr('For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.'),
-            style: text.bodySmall,
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _id,
-                  decoration: InputDecoration(
-                    hintText: 'Ov23…',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            borderRadius: BorderRadius.circular(Radii.md),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
+                        const SizedBox(height: 2),
+                        Text(
+                          _id.text.trim().isEmpty ? tr('Built-in GripHub app') : _id.text.trim(),
+                          style: text.bodySmall,
+                        ),
+                      ],
+                    ),
                   ),
-                  onSubmitted: (_) => _save(),
-                ),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(LucideIcons.chevronDown, size: 18, color: p.faint),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(tr('Save')),
-              ),
-            ],
+            ),
           ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 4, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr('Only for a build with its own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.'),
+                    style: text.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _id,
+                          autocorrect: false,
+                          style: const TextStyle(fontFamily: mono, fontSize: 14),
+                          decoration: const InputDecoration(hintText: 'Ov23…'),
+                          onSubmitted: (_) => _save(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(onPressed: _saving ? null : _save, child: Text(tr('Save'))),
+                    ],
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -709,21 +740,19 @@ class _HostTile extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
+      // The same borderless card and icon tile as every other row on this screen.
       child: Material(
         color: p.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Radii.md),
-          side: BorderSide(color: p.border),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.xl)),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.md),
           onTap: onEdit,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             child: Row(
               children: [
-                Icon(LucideIcons.server, size: 20, color: p.muted),
-                const SizedBox(width: 12),
+                IconTile(icon: LucideIcons.server, color: p.muted),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
