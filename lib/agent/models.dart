@@ -14,6 +14,18 @@ class ModelInfo {
   String get key => '$provider/$id';
 }
 
+/// Favorite models in the order they were starred, not catalog order. Keys
+/// missing from the catalog are skipped here but stay in storage, so they
+/// reappear if the model returns. Repeated keys show the model once.
+List<ModelInfo> favoriteModelsInOrder(List<ModelInfo> models, List<String> favoriteKeys) {
+  final byKey = {for (final m in models) m.key: m};
+  final seen = <String>{};
+  return [
+    for (final key in favoriteKeys)
+      if (byKey[key] != null && seen.add(key)) byKey[key]!,
+  ];
+}
+
 class ProviderInfo {
   ProviderInfo(this.json);
   final Map<String, dynamic> json;

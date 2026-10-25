@@ -145,6 +145,10 @@ class Appearance extends ValueNotifier<ThemeMode> {
         for (final e in (saved['deployTargets'] as Map? ?? {}).entries)
           if (e.key is String && e.value is String) e.key as String: e.value as String,
       };
+      favoriteModels = [
+        for (final e in (saved['favoriteModels'] as List? ?? []))
+          if (e is String) e,
+      ];
     } catch (_) {}
   }
 
@@ -190,6 +194,19 @@ class Appearance extends ValueNotifier<ThemeMode> {
     _save();
   }
 
+  /// Model keys ('provider/id') starred in the model picker, in starring order.
+  /// Keys whose model left the catalog stay stored, so they reappear if it returns.
+  List<String> favoriteModels = [];
+
+  bool isFavorite(String key) => favoriteModels.contains(key);
+
+  void toggleFavorite(String key) {
+    favoriteModels = List.of(favoriteModels);
+    if (!favoriteModels.remove(key)) favoriteModels.add(key);
+    _save();
+    notifyListeners();
+  }
+
   /// The deploy target last used per project folder, so the deploy sheet opens on it.
   Map<String, String> deployTargets = {};
 
@@ -223,6 +240,7 @@ class Appearance extends ValueNotifier<ThemeMode> {
           'appLock': appLock,
           'terminalFontSize': terminalFontSize,
           'deployTargets': deployTargets,
+          'favoriteModels': favoriteModels,
         }),
       );
     } catch (_) {}
