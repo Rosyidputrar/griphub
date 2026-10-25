@@ -396,8 +396,9 @@ class _NavBar extends StatelessWidget {
   static const _items = [
     (LucideIcons.house, 'Home'),
     (LucideIcons.messagesSquare, 'Chats'),
-    (LucideIcons.compass, 'Skills'),
-    (LucideIcons.layoutGrid, 'Projects'),
+    // The same icons the Settings rows and project tiles use for these.
+    (LucideIcons.puzzle, 'Skills'),
+    (LucideIcons.folders, 'Projects'),
   ];
 
   @override
@@ -472,46 +473,51 @@ class _NavItemState extends State<_NavItem> {
   Widget build(BuildContext context) {
     const ink = Color(0xFF111113);
     final selected = widget.selected;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: widget.label,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => setState(() => pressed = true),
-        onTapCancel: () => setState(() => pressed = false),
-        onTapUp: (_) {
-          setState(() => pressed = false);
-          HapticFeedback.selectionClick();
-          widget.onTap();
-        },
-        child: SizedBox.square(
-          dimension: 52,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // The white disc grows in with a little overshoot.
-              AnimatedScale(
-                scale: selected ? 1 : 0,
-                duration: const Duration(milliseconds: 380),
-                curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+    // Icon-only bar: a long press names the tab (the label also reaches screen readers).
+    return Tooltip(
+      message: widget.label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: widget.label,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (_) => setState(() => pressed = true),
+          onTapCancel: () => setState(() => pressed = false),
+          onTapUp: (_) {
+            setState(() => pressed = false);
+            HapticFeedback.selectionClick();
+            widget.onTap();
+          },
+          child: SizedBox.square(
+            dimension: 52,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // The white disc grows in with a little overshoot.
+                AnimatedScale(
+                  scale: selected ? 1 : 0,
+                  duration: const Duration(milliseconds: 380),
+                  curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                  ),
                 ),
-              ),
-              AnimatedScale(
-                scale: pressed ? 0.8 : (selected ? 1.08 : 1),
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                child: TweenAnimationBuilder<Color?>(
-                  tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
+                AnimatedScale(
+                  scale: pressed ? 0.8 : (selected ? 1.08 : 1),
                   duration: const Duration(milliseconds: 220),
-                  builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
+                  curve: Curves.easeOutBack,
+                  child: TweenAnimationBuilder<Color?>(
+                    tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
+                    duration: const Duration(milliseconds: 220),
+                    builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
