@@ -309,7 +309,7 @@ class _GitScreenState extends State<GitScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(Radii.r12),
             onTap: _branches,
             child: Row(
               children: [
@@ -459,7 +459,7 @@ class _GitScreenState extends State<GitScreen> {
                 Row(
                   children: [
                     InkWell(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(Radii.r10),
                       onTap: () => setState(() => _commitAll = !_commitAll),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
@@ -590,7 +590,7 @@ class _GitScreenState extends State<GitScreen> {
               width: 22,
               height: 22,
               alignment: Alignment.center,
-              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(Radii.r6)),
               child: Text(
                 letter,
                 style: TextStyle(fontFamily: mono, fontSize: 11.5, fontWeight: FontWeight.w700, color: color),
@@ -631,7 +631,7 @@ class _GitScreenState extends State<GitScreen> {
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(8)),
+                          decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r8)),
                           child: Text(
                             c.hash.length > 7 ? c.hash.substring(0, 7) : c.hash,
                             style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.accent),
@@ -789,9 +789,9 @@ class _TabChip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -816,9 +816,9 @@ class _SmallButton extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: p.raised,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(Radii.r12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.r12),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

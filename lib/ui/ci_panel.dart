@@ -57,7 +57,7 @@ class _Run extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.r12),
         border: Border.all(color: p.border),
       ),
       child: Column(

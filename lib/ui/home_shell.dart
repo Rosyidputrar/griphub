@@ -421,7 +421,7 @@ class _NavBar extends StatelessWidget {
                 height: 68,
                 decoration: BoxDecoration(
                   color: p.nav,
-                  borderRadius: BorderRadius.circular(34),
+                  borderRadius: BorderRadius.circular(Radii.r34),
                   boxShadow: [
                     BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 26, offset: const Offset(0, 12)),
                   ],
@@ -826,7 +826,7 @@ class _ConnectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.r24)),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
@@ -929,7 +929,7 @@ class _QuickCard extends StatelessWidget {
       width: 164,
       child: Material(
         color: p.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(Radii.r24),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -1001,7 +1001,7 @@ class _SessionRow extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final folder = sessionFolder(session.cwd, workspace);
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(Radii.r18),
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
@@ -1472,7 +1472,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                                   decoration: BoxDecoration(
                                                     color: Colors.white.withValues(alpha: 0.85),
-                                                    borderRadius: BorderRadius.circular(99),
+                                                    borderRadius: BorderRadius.circular(Radii.pill),
                                                   ),
                                                   child: Row(
                                                     mainAxisSize: MainAxisSize.min,

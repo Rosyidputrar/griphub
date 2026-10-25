@@ -76,7 +76,11 @@ class _McpScreenState extends State<McpScreen> {
         content: Text('"${s.name}" ${tr('and its tools will be removed from pi.')}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Remove'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Remove')),
+          ),
         ],
       ),
     );
@@ -256,7 +260,7 @@ class _ServerCard extends StatelessWidget {
                 onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
                 itemBuilder: (_) => [
                   PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
-                  PopupMenuItem(value: 'delete', child: Text(tr('Remove'))),
+                  PopupMenuItem(value: 'delete', child: Text(tr('Remove'), style: TextStyle(color: p.danger))),
                 ],
               ),
             ],

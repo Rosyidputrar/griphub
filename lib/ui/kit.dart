@@ -36,9 +36,9 @@ class PrimaryButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.45,
       child: Material(
         color: p.text,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(Radii.r18),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(Radii.r18),
           onTap: enabled ? onPressed : null,
           child: SizedBox(
             height: 54,
@@ -83,7 +83,7 @@ class SurfaceCard extends StatelessWidget {
     return Material(
       color: p.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(Radii.r24),
         side: highlight ? BorderSide(color: p.text, width: 1.5) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
@@ -151,7 +151,7 @@ class SettingsGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r24)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
@@ -237,7 +237,7 @@ class Pill extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         border: Border.all(color: c.withValues(alpha: 0.25)),
       ),
       child: Row(

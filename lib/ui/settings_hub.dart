@@ -617,9 +617,9 @@ class _LinkChip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: p.raised,
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

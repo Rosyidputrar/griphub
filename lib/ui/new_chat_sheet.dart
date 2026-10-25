@@ -159,7 +159,7 @@ class _NewChatSheetState extends State<_NewChatSheet> {
                         label: Text(pr.name, style: const TextStyle(fontFamily: mono, fontSize: 12.5)),
                         backgroundColor: p.raised,
                         side: BorderSide(color: p.border),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.pill)),
                         onPressed: () => Navigator.pop(context, pr.path),
                       ),
                   ],

@@ -56,6 +56,7 @@ class SyncStatus {
   int get failures => json['failures'] as int? ?? 0;
   List<String> get skipped => (json['skipped'] as List? ?? const []).cast<String>();
   List<String> get localOnly => (json['localOnly'] as List? ?? const []).cast<String>();
+  List<String> get pendingDelete => (json['pendingDelete'] as List? ?? const []).cast<String>();
   Map<String, int> get imported => ((json['imported'] as Map?) ?? const {}).cast<String, int>();
 }
 
@@ -149,7 +150,7 @@ class AppSettings {
   String get approvalMode => json['approvalMode'] as String? ?? 'ask_risky';
 
   /// GitHub OAuth App Client ID for the device flow, entered in Settings.
-  /// Null means the host falls back to its built-in default.
+  /// Null means GitHub login is not configured (no fallback).
   String? get githubClientId => json['githubClientId'] as String?;
   List<Map<String, dynamic>> get fallbackModels =>
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
@@ -223,8 +224,10 @@ class Integrations extends ChangeNotifier {
   }
 
   /// Syncs now; with [soon], shortly after (the app is going to the background).
-  Future<void> syncNow({bool soon = false}) async {
-    sync = SyncStatus(await client.call<Map<String, dynamic>>('sync_now', {'soon': soon}));
+  Future<void> syncNow({bool soon = false, bool confirmDelete = false}) async {
+    sync = SyncStatus(
+      await client.call<Map<String, dynamic>>('sync_now', {'soon': soon, 'confirmDelete': confirmDelete}),
+    );
     notifyListeners();
   }
 

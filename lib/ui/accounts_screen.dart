@@ -40,7 +40,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
         content: Text(tr('Its token is removed from this device. To reconnect you will need to paste a token again.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Disconnect'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Disconnect')),
+          ),
         ],
       ),
     );
@@ -335,7 +339,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(16)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r16)),
                     alignment: Alignment.center,
                     child: Text(
                       f.userCode,
@@ -477,8 +481,8 @@ class _TokenConnectState extends State<_TokenConnect> {
 /// The GitHub OAuth App Client ID for the device flow. This is how a
 /// distributed build points GitHub login at its own OAuth App without a
 /// rebuild: create an OAuth App with Device Flow enabled, paste its Client
-/// ID here. The ID is public, not a secret. Empty means the host's
-/// built-in default.
+/// ID here. The ID is public, not a secret. Empty means GitHub login is
+/// not configured.
 class _GithubClientIdField extends StatefulWidget {
   const _GithubClientIdField({required this.agent, required this.onSaved});
   final AgentController agent;
@@ -521,7 +525,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(Radii.r18),
         border: Border.all(color: p.border),
       ),
       child: Column(
@@ -530,7 +534,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
           Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
           const SizedBox(height: 4),
           Text(
-            tr('For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty uses the built-in default.'),
+            tr('For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.'),
             style: text.bodySmall,
           ),
           const SizedBox(height: 10),
@@ -541,7 +545,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                   controller: _id,
                   decoration: InputDecoration(
                     hintText: 'Ov23…',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r12)),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
                   onSubmitted: (_) => _save(),
@@ -711,11 +715,11 @@ class _HostTile extends StatelessWidget {
       child: Material(
         color: p.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(Radii.r14),
           side: BorderSide(color: p.border),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(Radii.r14),
           onTap: onEdit,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),

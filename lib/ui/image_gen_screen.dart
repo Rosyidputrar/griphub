@@ -289,7 +289,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.memory(bytes!)),
+              ClipRRect(borderRadius: BorderRadius.circular(Radii.r16), child: Image.memory(bytes!)),
               const SizedBox(height: 12),
               Text(item.prompt, style: Theme.of(context).textTheme.bodyMedium),
               const SizedBox(height: 4),
@@ -379,7 +379,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                   textCapitalization: TextCapitalization.sentences,
                   decoration: InputDecoration(
                     hintText: tr('A blue paper plane, flat icon'),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r16)),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -422,7 +422,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                     decoration: InputDecoration(
                       labelText: tr('Model id'),
                       hintText: 'gpt-image',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r16)),
                     ),
                   ),
                 ],
@@ -471,7 +471,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                         AspectRatio(
                           aspectRatio: _aspect,
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(Radii.r16),
                             child: Image.memory(_result!, fit: BoxFit.cover),
                           ),
                         ),
@@ -527,7 +527,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                       return GestureDetector(
                         onTap: () => _openHistory(item),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(Radii.r14),
                           child: Image.file(
                             File('${dir.path}/${item.file}'),
                             fit: BoxFit.cover,
@@ -555,10 +555,10 @@ class _OptionChip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: selected ? p.accent : p.surface,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(Radii.r22),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(Radii.r22),
         child: Container(
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 16),

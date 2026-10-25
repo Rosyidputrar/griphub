@@ -219,6 +219,7 @@ const _id = <String, String>{
   'What was downloaded so far is deleted. You can start again any time.':
       'Bagian yang sudah terunduh akan dihapus. Kamu bisa mulai lagi kapan saja.',
   'Keep downloading': 'Lanjutkan unduhan',
+  'Keep them': 'Biarkan',
   'Cancel download': 'Batalkan unduhan',
   'Checking for updates…': 'Memeriksa pembaruan…',
   'Update available': 'Pembaruan tersedia',
@@ -569,6 +570,7 @@ const _id = <String, String>{
       'Ketik /nama lalu argumen di chat, dan pi akan mengisi template-nya.',
   'No templates yet. Save a prompt you use often.': 'Belum ada template. Simpan prompt yang sering kamu pakai.',
   'Description': 'Deskripsi',
+  'Review': 'Tinjau',
   'Review a file for bugs': 'Periksa bug di sebuah file',
   'Argument hint': 'Petunjuk argumen',
   'Body': 'Isi',
@@ -702,6 +704,11 @@ const _id = <String, String>{
   'Connect pi to databases, docs, browsers and more through Model Context Protocol servers; their tools show up as mcp_<server>_<tool>.': 'Hubungkan pi ke database, dokumentasi, browser, dan lainnya lewat server Model Context Protocol; tool-nya muncul sebagai mcp_<server>_<tool>.',
   'Sync failed; tap for details': 'Sinkron gagal; ketuk untuk detail',
   'Chats and projects on all your phones': 'Chat dan project di semua HP kamu',
+  'Chats deleted elsewhere': 'Chat dihapus di perangkat lain',
+  'Environment files (.env) are included, so undo restores them too.':
+      'File environment (.env) ikut disimpan, jadi undo juga mengembalikannya.',
+  'These chats were deleted on another phone. Delete them here too, or keep them (they will no longer sync).':
+      'Chat ini dihapus di perangkat lain. Hapus juga di sini, atau biarkan (tidak lagi tersinkron).',
   'A special build powered by GripHub Router \u2014 Claude, GPT, Gemini, DeepSeek and more behind one API key. This app talks to GripHub only: add your key and start building.':
       'Build spesial yang ditenagai GripHub Router \u2014 Claude, GPT, Gemini, DeepSeek, dan lainnya di balik satu API key. Aplikasi ini hanya terhubung ke GripHub: masukkan API key kamu dan mulai berkarya.',
   'Maintains this modified build: custom providers, GitHub releases and in-app updates, GitHub sync.':
@@ -761,8 +768,8 @@ const _id = <String, String>{
   'Confirm deploy': 'Konfirmasi deploy',
   'Custom DoH': 'DoH kustom',
   'DoH URL': 'URL DoH',
-  'For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty uses the built-in default.':
-      'Untuk login device-flow. Buat OAuth App sendiri dengan Device Flow aktif lalu tempel Client ID-nya di sini (publik, bukan rahasia). Kosong berarti pakai default bawaan.',
+  'For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.':
+      'Untuk login device-flow. Buat OAuth App sendiri dengan Device Flow aktif lalu tempel Client ID-nya di sini (publik, bukan rahasia). Kosong berarti login GitHub belum dikonfigurasi.',
   'GitHub OAuth client ID': 'Client ID OAuth GitHub',
   'Headers': 'Header',
   'Linux shell (box)': 'Shell Linux (box)',

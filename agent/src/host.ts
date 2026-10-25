@@ -714,7 +714,7 @@ async function handle(cmd: Command): Promise<unknown> {
 				sync.schedule(2000);
 				return sync.status();
 			}
-			return sync.syncNow();
+			return sync.syncNow({ confirmDelete: !!cmd.confirmDelete });
 
 		// Custom endpoints (providers.ts).
 		case "custom_providers":

@@ -52,10 +52,10 @@ class UserBubble extends StatelessWidget {
       decoration: BoxDecoration(
         color: p.raised,
         borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-          bottomLeft: Radius.circular(20),
-          bottomRight: Radius.circular(6),
+          topLeft: Radius.circular(Radii.r20),
+          topRight: Radius.circular(Radii.r20),
+          bottomLeft: Radius.circular(Radii.r20),
+          bottomRight: Radius.circular(Radii.r6),
         ),
         border: Border.all(color: p.accent.withValues(alpha: 0.18)),
       ),
@@ -319,7 +319,7 @@ class _ThinkingViewState extends State<ThinkingView> {
       children: [
         InkWell(
           onTap: () => setState(() => open = !open),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(Radii.r6),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -461,14 +461,14 @@ class _ToolCallViewState extends State<ToolCallView> {
 
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.r12),
         border: Border.all(color: p.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(Radii.r12),
             onTap: () => setState(() => open = !open),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
@@ -599,7 +599,7 @@ class _ErrorNote extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(Radii.r10),
         border: Border.all(color: p.danger.withValues(alpha: 0.4)),
       ),
       child: SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),

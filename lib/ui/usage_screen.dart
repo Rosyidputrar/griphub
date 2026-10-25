@@ -179,7 +179,7 @@ class _UsageScreenState extends State<UsageScreen> {
           if (limit > 0) ...[
             const SizedBox(height: 8),
             ClipRRect(
-              borderRadius: BorderRadius.circular(99),
+              borderRadius: BorderRadius.circular(Radii.pill),
               child: LinearProgressIndicator(
                 value: usedFraction.clamp(0, 1).toDouble(),
                 minHeight: 8,
@@ -488,7 +488,7 @@ class _UsageScreenState extends State<UsageScreen> {
             ),
             const SizedBox(height: 8),
             ClipRRect(
-              borderRadius: BorderRadius.circular(99),
+              borderRadius: BorderRadius.circular(Radii.pill),
               child: LinearProgressIndicator(
                 value: (percent / 100).clamp(0, 1).toDouble(),
                 minHeight: 8,
@@ -562,7 +562,7 @@ class _BarChart extends StatelessWidget {
                       height: max == 0 ? 3 : (values[i] / max * 116).clamp(3, 116).toDouble(),
                       decoration: BoxDecoration(
                         color: values[i] == 0 ? p.border : p.accent,
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(Radii.r4),
                       ),
                     ),
                   ),

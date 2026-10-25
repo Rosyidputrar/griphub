@@ -149,8 +149,13 @@ export class Tunnels {
 			proc.stderr.on("data", feed);
 			proc.on("error", reject);
 			proc.on("close", (code) => {
-				this.open.delete(port);
-				onUpdate({ port, url: null, closed: true });
+				// Only the current entry may clear the port: start() kills
+				// the previous process first, and its late close event must
+				// not wipe the replacement tunnel's entry.
+				if (this.open.get(port) === entry) {
+					this.open.delete(port);
+					onUpdate({ port, url: null, closed: true });
+				}
 				if (!entry.url) reject(new Error(`Tunnel closed (${code}): ${text.trim().split("\n").slice(-2).join(" ")}`));
 			});
 			setTimeout(() => !entry.url && reject(new Error("Tunnel did not open within 30 seconds")), 30_000);

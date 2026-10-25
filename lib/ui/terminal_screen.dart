@@ -662,7 +662,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     return Material(
       color: p.text,
       elevation: 6,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(Radii.r12),
       clipBehavior: Clip.antiAlias,
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -685,9 +685,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
       padding: const EdgeInsets.only(right: 6),
       child: Material(
         color: on ? p.text : p.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(Radii.r16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(Radii.r16),
           onTap: onTap,
           onLongPress: onLongPress,
           child: SizedBox(height: 32, child: child),
@@ -789,7 +789,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                 child: Container(
                   height: 32,
                   width: 40,
-                  decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(16)),
+                  decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r16)),
                   alignment: Alignment.center,
                   child: starting
                       ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
@@ -885,9 +885,9 @@ class _KeyBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
         color: active ? p.text : p.raised,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(Radii.r8),
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(Radii.r8),
           onTap: () {
             HapticFeedback.selectionClick();
             onTap();

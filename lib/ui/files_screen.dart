@@ -634,7 +634,7 @@ class _FilesScreenState extends State<FilesScreen> {
     }
     final meta = [if (!e.isDir) _formatSize(e.stat.size), _formatTime(e.stat.modified)].join(' · ');
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(Radii.r12),
       onTap: () => _open(e),
       onLongPress: () => _showEntrySheet(e),
       child: Padding(
@@ -644,7 +644,7 @@ class _FilesScreenState extends State<FilesScreen> {
             Container(
               width: 36,
               height: 36,
-              decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(Radii.r10)),
               child: Icon(_iconFor(e.name, e.isDir), size: 18, color: tint),
             ),
             const SizedBox(width: 12),
@@ -729,7 +729,7 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
     return Container(
       height: 40,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r10)),
       child: ListView.separated(
         controller: _scroll,
         scrollDirection: Axis.horizontal,
@@ -739,7 +739,7 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
         itemBuilder: (context, i) {
           final last = i == crumbs.length - 1;
           return InkWell(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Radii.r6),
             onTap: last ? null : () => widget.onTap(crumbs[i].$2),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),

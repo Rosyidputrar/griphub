@@ -145,7 +145,7 @@ class _RepoTile extends StatelessWidget {
       if (repo.pushedAt != null) '${tr('updated')} ${formatAgo(repo.pushedAt!)}',
     ].join('  ·  ');
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(Radii.r10),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -178,7 +178,7 @@ class _RepoTile extends StatelessWidget {
                 margin: const EdgeInsets.only(left: 8, top: 2),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(99),
+                  borderRadius: BorderRadius.circular(Radii.pill),
                   border: Border.all(color: p.border),
                 ),
                 child: Text(tr('On device'), style: text.labelSmall),

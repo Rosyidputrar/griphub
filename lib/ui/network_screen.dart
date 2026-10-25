@@ -388,7 +388,7 @@ class _InsetGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r18)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
@@ -570,7 +570,11 @@ class _KeyListState extends State<_KeyList> {
         content: Text(tr('To use it again you will need to paste it again.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Remove'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Remove')),
+          ),
         ],
       ),
     );

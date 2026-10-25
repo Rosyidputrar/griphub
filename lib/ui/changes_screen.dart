@@ -207,6 +207,12 @@ class _ChangesScreenState extends State<ChangesScreen> {
           textAlign: TextAlign.center,
           style: text.bodySmall,
         ),
+        const SizedBox(height: 6),
+        Text(
+          tr('Environment files (.env) are included, so undo restores them too.'),
+          textAlign: TextAlign.center,
+          style: text.bodySmall,
+        ),
         const SizedBox(height: 24),
         Center(
           child: OutlinedButton.icon(
@@ -318,7 +324,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
     final name = slash >= 0 ? f.path.substring(slash + 1) : f.path;
     final dir = slash >= 0 ? f.path.substring(0, slash) : '';
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r18)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -389,9 +395,9 @@ class _CheckpointChip extends StatelessWidget {
     final sub = selected ? p.inverse.withValues(alpha: 0.7) : p.muted;
     return Material(
       color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(Radii.r18),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(Radii.r18),
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),

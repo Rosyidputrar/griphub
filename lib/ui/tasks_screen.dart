@@ -119,7 +119,11 @@ class _TasksScreenState extends State<TasksScreen> {
         content: Text('"${s.name}" ${tr('will stop running.')}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Delete'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Delete')),
+          ),
         ],
       ),
     );
@@ -411,7 +415,7 @@ class _ScheduleRow extends StatelessWidget {
             itemBuilder: (_) => [
               PopupMenuItem(value: 'run', child: Text(tr('Run now'))),
               PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
-              PopupMenuItem(value: 'delete', child: Text(tr('Delete'))),
+              PopupMenuItem(value: 'delete', child: Text(tr('Delete'), style: TextStyle(color: p.danger))),
             ],
           ),
         ],

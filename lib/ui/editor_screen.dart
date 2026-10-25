@@ -189,7 +189,11 @@ class _EditorScreenState extends State<EditorScreen> {
         content: Text('${tr('Save changes before leaving?')} ($_name)'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: Text(tr('Discard'))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Discard')),
+          ),
           TextButton(onPressed: () => Navigator.pop(ctx, 'save'), child: Text(tr('Save'))),
         ],
       ),
@@ -573,7 +577,7 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
           filled: true,
           fillColor: p.bg,
           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r8), borderSide: BorderSide.none),
         ),
       ),
     );
@@ -583,13 +587,13 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
     final p = context.palette;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(Radii.r6),
       child: Container(
         margin: const EdgeInsets.only(left: 4),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         decoration: BoxDecoration(
           color: on ? p.accent.withValues(alpha: 0.15) : null,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(Radii.r6),
         ),
         child: Text(
           label,

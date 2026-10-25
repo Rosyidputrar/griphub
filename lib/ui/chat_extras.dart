@@ -144,7 +144,7 @@ class AttachmentStrip extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(Radii.r12),
                 child: a.isImage
                     ? Image.file(File(a.path), width: 56, height: 56, fit: BoxFit.cover)
                     : Container(
@@ -254,7 +254,7 @@ class _ApprovalCardsState extends State<ApprovalCards> {
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(Radii.r22),
               border: Border.all(color: p.warning.withValues(alpha: 0.6), width: 1.2),
             ),
             child: Column(
@@ -281,7 +281,7 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                   width: double.infinity,
                   constraints: const BoxConstraints(maxHeight: 110),
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r12)),
                   child: SingleChildScrollView(
                     child: Text(
                       a.summary,
@@ -393,7 +393,7 @@ class PlanBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(18)),
+        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.r18)),
         child: Row(
           children: [
             Icon(LucideIcons.listChecks, size: 18, color: p.accent),
@@ -467,7 +467,7 @@ class _DevServerBannerState extends State<DevServerBanner> {
                   padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
                   decoration: BoxDecoration(
                     color: p.success.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(Radii.r18),
                   ),
                   child: Row(
                     children: [
@@ -539,7 +539,7 @@ class SlashMenu extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 260),
       decoration: BoxDecoration(
         color: p.bg,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(Radii.r20),
         border: Border.all(color: p.border),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
       ),

@@ -97,7 +97,11 @@ class _GripHubScreenState extends State<GripHubScreen> {
         content: Text(tr('The agent cannot use any model until you add a key again.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Remove'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Remove')),
+          ),
         ],
       ),
     );

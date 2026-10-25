@@ -70,6 +70,44 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  Future<void> _syncNow() async {
+    await it.syncNow();
+    await it.refreshSync().catchError((_) {});
+    final pending = it.sync?.pendingDelete ?? const [];
+    if (pending.isNotEmpty && mounted) await _confirmDelete(pending);
+  }
+
+  /// Local chats another phone deleted are only removed here after this
+  /// confirmation: automatic syncs leave them alone and report them here.
+  Future<void> _confirmDelete(List<String> pending) async {
+    final p = context.palette;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Delete local chats?')),
+        content: Text(
+          [
+            '${pending.length} ${tr('chats')}',
+            tr(
+              'These chats were deleted on another phone. Delete them here too, or keep them (they will no longer sync).',
+            ),
+          ].join('\n\n'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Keep them'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(tr('Delete'), style: TextStyle(color: p.danger)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await it.syncNow(confirmDelete: true);
+      await it.refreshSync().catchError((_) {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -132,7 +170,7 @@ class _SyncScreenState extends State<SyncScreen> {
                         subtitle: news.isEmpty ? null : '${tr('Brought in')}: ${news.join(', ')}',
                         trailing: s.running
                             ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                            : TextButton(onPressed: it.syncNow, child: Text(tr('Sync now'))),
+                            : TextButton(onPressed: _syncNow, child: Text(tr('Sync now'))),
                       ),
                       if (s.repo != null)
                         SettingsRow(
@@ -169,6 +207,20 @@ class _SyncScreenState extends State<SyncScreen> {
                       n,
                       style: TextStyle(fontFamily: mono, fontSize: 12, color: p.text),
                     ),
+                ],
+                if (s != null && s.pendingDelete.isNotEmpty) ...[
+                  SectionLabel(tr('Chats deleted elsewhere')),
+                  Text(
+                    tr(
+                      'These chats were deleted on another phone. Delete them here too, or keep them (they will no longer sync).',
+                    ),
+                    style: text.bodySmall?.copyWith(color: p.muted),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    onPressed: () => _confirmDelete(s.pendingDelete),
+                    child: Text(tr('Review')),
+                  ),
                 ],
               ],
               SectionLabel(tr('What is synced')),

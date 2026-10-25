@@ -80,7 +80,11 @@ class _BackupScreenState extends State<BackupScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Restore'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Restore')),
+          ),
         ],
       ),
     );
@@ -144,7 +148,7 @@ class _BackupScreenState extends State<BackupScreen> {
                   const SizedBox(height: 16),
                   Container(
                     padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(14)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r14)),
                     child: Row(
                       children: [
                         Expanded(

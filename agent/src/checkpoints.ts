@@ -2,6 +2,12 @@
  * Checkpoints: snapshots of a project folder in a shadow git repository kept
  * in app storage (never inside the project), so any folder can be undone,
  * git repo or not.
+ *
+ * .env policy: environment files are snapshotted too, even when the
+ * project's .gitignore ignores them — undo must actually undo, so a
+ * deleted .env comes back and a new one is removed on restore. The
+ * shadow repo lives in app-private storage, the same trust boundary as
+ * the project itself. Dependency and build folders stay excluded.
  */
 
 import { spawn } from "node:child_process";
@@ -73,11 +79,22 @@ export class Checkpoints {
 		return env;
 	}
 
+	/** Force-stages .env files the project's .gitignore ignores (see header policy). */
+	private async addEnv(env: Record<string, string>, cwd: string) {
+		const r = await git(["ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", ":(glob)**/.env", ":(glob)**/.env.*"], env, cwd);
+		const files = r.out
+			.split("\0")
+			.filter(Boolean)
+			.filter((f) => !EXCLUDES.some((d) => d.endsWith("/") && f.startsWith(d)) && !f.endsWith(".log"));
+		if (files.length) await git(["add", "-f", "--", ...files], env, cwd);
+	}
+
 	/** Records the folder as it is now. Skips when nothing changed since the last one. */
 	async snapshot(cwd: string, label: string): Promise<Checkpoint | null> {
 		if (!existsSync(cwd)) return null;
 		const env = await this.ensure(cwd);
 		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
 		const head = await git(["rev-parse", "--verify", "-q", "HEAD"], env, cwd);
 		if (head.code === 0) {
 			const same = await git(["diff", "--cached", "--quiet", "HEAD"], env, cwd);
@@ -133,6 +150,7 @@ export class Checkpoints {
 		const known = await git(["rev-parse", "--verify", "-q", id], env, cwd);
 		if (known.code !== 0) throw new Error(`Unknown checkpoint ${id}`);
 		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
 		// Files that did not exist at the checkpoint are removed.
 		const added = await git(["diff", "-z", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
 		for (const f of added.out.split("\0").filter(Boolean)) rmSync(join(cwd, f), { force: true });

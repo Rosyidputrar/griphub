@@ -683,7 +683,7 @@ class _Composer extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(Radii.r24),
               border: Border.all(color: focus.hasFocus ? p.accent.withValues(alpha: 0.55) : p.border),
               boxShadow: [
                 BoxShadow(
@@ -841,10 +841,10 @@ class _Chip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: p.raised,
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         child: Container(
           height: 34,
           padding: EdgeInsets.fromLTRB(leading == null ? 12 : 6, 0, 10, 0),

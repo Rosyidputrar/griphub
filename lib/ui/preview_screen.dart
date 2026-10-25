@@ -115,7 +115,7 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(99),
+                  borderRadius: BorderRadius.circular(Radii.pill),
                   border: Border.all(color: p.success.withValues(alpha: 0.5)),
                 ),
                 child: Row(

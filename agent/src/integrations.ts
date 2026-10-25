@@ -66,17 +66,18 @@ export interface AppSettings {
 	dailyBudget?: number;
 	/**
 	 * GitHub OAuth App Client ID for the device flow, entered in
-	 * Settings (Accounts). Overrides the built-in default without a
-	 * rebuild: create your own OAuth App (Device Flow enabled) and paste
-	 * its Client ID here. The ID is public; there is no secret.
+	 * Settings (Accounts). Sets the Client ID without a rebuild:
+	 * create your own OAuth App (Device Flow enabled) and paste its
+	 * Client ID here. The ID is public; there is no secret. Empty
+	 * means GitHub login is not configured.
 	 */
 	githubClientId?: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
 
-/** Client ID of the GripHub AI Agent GitHub OAuth App (device flow enabled). Public by design; no secret is used. */
-const GITHUB_CLIENT_ID = process.env.GRIPHUB_GITHUB_CLIENT_ID ?? "Ov23lidVAetnaasSTbSU";
+/** Optional build-time override for the GitHub OAuth App Client ID (device flow enabled). Public by design; no secret is used. Empty means not configured. */
+const GITHUB_CLIENT_ID = process.env.GRIPHUB_GITHUB_CLIENT_ID ?? "";
 
 /** Line output, plus an optional channel for structured CI progress. */
 export type Log = ((line: string) => void) & { ci?: (snapshot: CiSnapshot) => void };
@@ -302,9 +303,9 @@ export class Integrations {
 
 	/**
 	 * The OAuth App Client ID for the device flow: the one entered in
-	 * Settings wins, then the build-time env var, then the built-in
-	 * default. The built-in default belongs to the upstream template's
-	 * OAuth App, so a distributed build should set its own ID.
+	 * Settings wins, then the build-time env var. There is deliberately
+	 * no built-in default: the upstream template's OAuth App ID must
+	 * never be used, so an empty result means "not configured".
 	 */
 	private get githubClientId() {
 		return (this.settings.githubClientId ?? "").trim() || GITHUB_CLIENT_ID;
@@ -316,7 +317,7 @@ export class Integrations {
 	 * App with "Enable Device Flow" ticked (the ID is public; there is no secret).
 	 */
 	async githubDeviceStart() {
-		if (!this.githubClientId) throw new Error("GitHub device login is not set up in this build (missing OAuth Client ID). Use a token instead.");
+		if (!this.githubClientId) throw new Error("GitHub login belum dikonfigurasi (missing OAuth Client ID). Isi Client ID di Settings atau pakai token.");
 		const r = await this.githubOAuth("/login/device/code", { client_id: this.githubClientId, scope: "repo workflow read:org" });
 		if (r.error || !r.device_code) {
 			// "device_flow_disabled" means the OAuth App exists but the Device Flow box is not ticked.

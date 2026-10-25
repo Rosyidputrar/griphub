@@ -77,7 +77,9 @@ class MainActivity : FlutterFragmentActivity() {
             }
 
             override fun onExit(code: Int) {
-                AgentService.setActive(this@MainActivity, false)
+                // Only the chat side ends here; schedules keep the service
+                // alive through keepAlive until they are switched off.
+                AgentService.setBusy(this@MainActivity, false)
                 events?.success(mapOf("kind" to "exit", "code" to code))
             }
         }
@@ -111,7 +113,7 @@ class MainActivity : FlutterFragmentActivity() {
                     // The toolchain environment, for terminals the app opens.
                     "environment" -> result.success(AgentRuntime.prepareEnvironment(applicationContext))
                     "setBusy" -> {
-                        AgentService.setActive(this, call.arguments as Boolean, stoppable = true)
+                        AgentService.setBusy(this, call.arguments as Boolean)
                         result.success(null)
                     }
                     // What the agent is doing, for the ongoing notification.
@@ -122,9 +124,9 @@ class MainActivity : FlutterFragmentActivity() {
                     // Keeps the process alive for queued runs and schedules.
                     "keepAlive" -> {
                         val on = call.argument<Boolean>("on") == true
-                        AgentService.setActive(
+                        AgentService.setKeepAlive(
                             this, on,
-                            call.argument<String>("text")
+                            text = call.argument<String>("text")
                                 ?: Notifications.t(this, "Background tasks active", "Background task aktif"),
                         )
                         result.success(null)

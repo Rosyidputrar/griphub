@@ -68,7 +68,7 @@ class _Boot extends StatelessWidget {
           children: [
             const LogoMark(size: 56),
             const SizedBox(height: 20),
-            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(2))),
+            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(Radii.r2))),
             const SizedBox(height: 14),
             Text(tr('Starting agent'), style: Theme.of(context).textTheme.bodySmall),
           ],
@@ -103,7 +103,7 @@ class _BootFailed extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: p.surface,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(Radii.r10),
                     border: Border.all(color: p.border),
                   ),
                   child: SingleChildScrollView(
@@ -130,7 +130,14 @@ class _BootFailed extends StatelessWidget {
                       ),
                       actions: [
                         TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-                        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Reset'))),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: context.palette.danger,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(context, true),
+                          child: Text(tr('Reset')),
+                        ),
                       ],
                     ),
                   );
