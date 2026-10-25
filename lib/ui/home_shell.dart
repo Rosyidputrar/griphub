@@ -822,10 +822,10 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
                 if (!agent.hasModel) ...[const SizedBox(height: 18), _ConnectCard(agent: agent)],
                 const SizedBox(height: 22),
-                SizedBox(
-                  height: 38,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
+                // Sized by its chips (a fixed height clipped them at larger text sizes).
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
                     children: [
                       for (final MapEntry(key: c, value: label) in _categories.entries)
                         Padding(
@@ -841,7 +841,8 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
-                  height: 244,
+                  // Art and padding are fixed; the title and blurb grow with the text size.
+                  height: 132 + MediaQuery.textScalerOf(context).scale(112),
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     clipBehavior: Clip.none,
