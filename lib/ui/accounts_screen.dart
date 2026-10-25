@@ -495,6 +495,22 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
   );
   bool _saving = false;
   bool _open = false;
+  bool _edited = false;
+
+  /// What the agent uses now; the field may hold an unsaved edit.
+  String get _saved => widget.agent.integrations.settings?.githubClientId?.trim() ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    // Opened straight from Home, the settings may not be loaded yet. Fill the field once they
+    // are, so saving an untouched box can't replace a custom client ID with an empty one.
+    if (widget.agent.integrations.settings == null) {
+      widget.agent.integrations.refreshSettings().then((_) {
+        if (mounted && !_edited) setState(() => _id.text = _saved);
+      }, onError: (_) {});
+    }
+  }
 
   @override
   void dispose() {
@@ -537,7 +553,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                         Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
                         const SizedBox(height: 2),
                         Text(
-                          _id.text.trim().isEmpty ? tr('Built-in GripHub app') : _id.text.trim(),
+                          _saved.isEmpty ? tr('Built-in GripHub app') : _saved,
                           style: text.bodySmall,
                         ),
                       ],
@@ -574,6 +590,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                           autocorrect: false,
                           style: const TextStyle(fontFamily: mono, fontSize: 14),
                           decoration: const InputDecoration(hintText: 'Ov23…'),
+                          onChanged: (_) => _edited = true,
                           onSubmitted: (_) => _save(),
                         ),
                       ),
