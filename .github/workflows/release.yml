@@ -1,4 +1,8 @@
-# Builds the GitHub ("full") APKs on every push to main and publishes them as a release. The app's updater
+# Builds the GitHub ("full") APKs on every push to main and publishes them as a release.
+#
+# Hardening (audit stage 2): every action is pinned to a commit SHA (tag in comment),
+# releases refuse to publish from any branch but main (workflow_dispatch included),
+# and the signing key is decoded only after all dependency installs, right before the build. The app's updater
 # (lib/agent/updater.dart) reads the latest release of this repository and installs the APK for the phone's ABI.
 #
 # Versions never collide: the patch number and the build number both grow with the run number, and runs are
@@ -47,7 +51,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - name: Refuse releases off main
+        if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases publish only from main (this run is on $GITHUB_REF). Run workflow_dispatch from main, or open a pull request to main."
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Version
         id: version
@@ -62,6 +72,37 @@ jobs:
           echo "name=$version" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "Releasing $version ($code)"
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Native runtime
+        run: |
+          pip install lief
+          python tool/bundle_runtime.py
+
+      - name: Agent host
+        working-directory: agent
+        run: |
+          npm ci
+          node build.mjs
 
       - name: Signing key
         env:
@@ -88,37 +129,6 @@ jobs:
             echo "keyPassword=$KEY_PASSWORD"
           } > android/key.properties
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: agent/package-lock.json
-
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Native runtime
-        run: |
-          pip install lief
-          python tool/bundle_runtime.py
-
-      - name: Agent host
-        working-directory: agent
-        run: |
-          npm ci
-          node build.mjs
-
       - name: Build APKs
         run: |
           flutter pub get
@@ -136,16 +146,16 @@ jobs:
             # app-<abi>-full-release.apk; matched loosely since the flavor's place in the name varies.
             apks=(build/app/outputs/flutter-apk/*-"$abi"-*release.apk build/app/outputs/flutter-apk/*-"$abi"-release.apk)
             if [ ${#apks[@]} -eq 0 ]; then echo "::error::No APK for $abi"; ls build/app/outputs/flutter-apk; exit 1; fi
-            cp "${apks[0]}" "release/andropi-${{ steps.version.outputs.name }}-$abi.apk"
+            cp "${apks[0]}" "release/griphub-${{ steps.version.outputs.name }}-$abi.apk"
           done
           (cd release && sha256sum *.apk > SHA256SUMS.txt)
           ls -lh release
 
       - name: Upload build
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: andropi-pr-${{ github.event.number }}
+          name: griphub-pr-${{ github.event.number }}
           path: release/
           retention-days: 7
 
@@ -161,7 +171,7 @@ jobs:
           else
             gh release create "$TAG" release/* \
               --target "$GITHUB_SHA" \
-              --title "AndroPI ${{ steps.version.outputs.name }}" \
+              --title "GripHub ${{ steps.version.outputs.name }}" \
               --generate-notes \
               --latest
           fi
