@@ -167,7 +167,7 @@ class _GitScreenState extends State<GitScreen> {
   Future<void> _pullPush({required bool push}) async {
     await runWithLog<void>(
       context,
-      title: push ? 'Push' : 'Pull',
+      title: tr(push ? 'Push' : 'Pull'),
       task: (log, _) => push ? _f.gitPush(onLine: log) : _f.gitPull(onLine: log),
       openUrl: widget.agent.client.openUrl,
     );
@@ -357,17 +357,15 @@ class _GitScreenState extends State<GitScreen> {
 
   Widget _tabs(BuildContext context, GitStatus s) {
     final count = s.files.length;
-    final labels = ['Changes${count > 0 ? ' ($count)' : ''}', 'History', 'Issues & PRs'];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (var i = 0; i < labels.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            _TabChip(label: labels[i], selected: _tab == i, onTap: () => _setTab(i)),
-          ],
-        ],
-      ),
+    // The app's segmented control, like Usage's 7 / 30 days.
+    return PillSegments<int>(
+      value: _tab,
+      options: {
+        0: '${tr('Changes')}${count > 0 ? ' ($count)' : ''}',
+        1: tr('History'),
+        2: tr('Issues & PRs'),
+      },
+      onChanged: _setTab,
     );
   }
 
@@ -406,26 +404,26 @@ class _GitScreenState extends State<GitScreen> {
                 if (staged.isNotEmpty)
                   _section(
                     context,
-                    'Staged',
+                    tr('Staged'),
                     staged,
                     _Section.staged,
-                    action: ('Unstage all', () => _apply(() => _f.gitUnstage(null))),
+                    action: (tr('Unstage all'), () => _apply(() => _f.gitUnstage(null))),
                   ),
                 if (unstaged.isNotEmpty)
                   _section(
                     context,
-                    'Unstaged',
+                    tr('Unstaged'),
                     unstaged,
                     _Section.unstaged,
-                    action: ('Stage all', () => _apply(() => _f.gitStage(null))),
+                    action: (tr('Stage all'), () => _apply(() => _f.gitStage(null))),
                   ),
                 if (untracked.isNotEmpty)
                   _section(
                     context,
-                    'Untracked',
+                    tr('Untracked'),
                     untracked,
                     _Section.untracked,
-                    action: ('Stage all', () => _apply(() => _f.gitStage(untracked.map((f) => f.path).toList()))),
+                    action: (tr('Stage all'), () => _apply(() => _f.gitStage(untracked.map((f) => f.path).toList()))),
                   ),
                 if (s.files.isNotEmpty)
                   Padding(
@@ -685,11 +683,11 @@ class _GitScreenState extends State<GitScreen> {
 
     if (!_github) {
       return message(
-        'No GitHub remote',
-        'Issues and pull requests are shown when this repository has a github.com remote.',
+        tr('No GitHub remote'),
+        tr('Issues and pull requests are shown when this repository has a github.com remote.'),
       );
     }
-    if (_issuesError != null && _issues == null) return message("Couldn't load issues", '$_issuesError');
+    if (_issuesError != null && _issues == null) return message(tr("Couldn't load issues"), '$_issuesError');
     final issues = _issues;
     if (issues == null) return const Center(child: CircularProgressIndicator());
     return RefreshIndicator(
@@ -777,33 +775,6 @@ class _GitScreenState extends State<GitScreen> {
 }
 
 // ---------------------------------------------------------------------------
-
-class _TabChip extends StatelessWidget {
-  const _TabChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return Material(
-      color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(Radii.pill),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.pill),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.text),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _SmallButton extends StatelessWidget {
   const _SmallButton({required this.icon, required this.label, required this.onTap});

@@ -238,7 +238,7 @@ class _FileDiff extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      file.path.isEmpty ? '(unknown file)' : file.path,
+                      file.path.isEmpty ? tr('(unknown file)') : file.path,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.text, fontWeight: FontWeight.w600),
@@ -255,9 +255,9 @@ class _FileDiff extends StatelessWidget {
               child: Text(file.note!, style: text.bodySmall),
             ),
           if (file.binary)
-            message('Binary file changed')
+            message(tr('Binary file changed'))
           else if (lines.isEmpty)
-            message(file.note ?? 'No content changes')
+            message(file.note ?? tr('No content changes'))
           else
             LayoutBuilder(
               builder: (context, box) => SingleChildScrollView(
@@ -276,7 +276,7 @@ class _FileDiff extends StatelessWidget {
                 ),
               ),
             ),
-          if (file.lines.length > maxLines) message('${file.lines.length - maxLines} more lines not shown'),
+          if (file.lines.length > maxLines) message(tr('{n} more lines not shown').replaceAll('{n}', '${file.lines.length - maxLines}')),
         ],
       ),
     );

@@ -289,7 +289,7 @@ class _ServerCard extends StatelessWidget {
               style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
               onPressed: onToggleTools,
               icon: Icon(expanded ? LucideIcons.chevronUp : LucideIcons.chevronDown, size: 14),
-              label: Text(expanded ? 'Hide tools' : 'Show ${tools.length} tools'),
+              label: Text(expanded ? tr('Hide tools') : tr('Show {n} tools').replaceAll('{n}', '${tools.length}')),
             ),
             if (expanded)
               Padding(
@@ -502,7 +502,12 @@ class _McpSheetState extends State<_McpSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'Add MCP server' : 'Edit ${widget.existing!.name}', style: text.titleLarge),
+            Text(
+              widget.existing == null
+                  ? tr('Add MCP server')
+                  : tr('Edit {name}').replaceAll('{name}', widget.existing!.name),
+              style: text.titleLarge,
+            ),
             const SizedBox(height: 16),
             TextField(
               controller: _name,

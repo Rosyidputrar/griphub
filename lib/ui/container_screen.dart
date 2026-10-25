@@ -140,10 +140,10 @@ class _ContainerScreenState extends State<ContainerScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(installed ? d.name : 'Real Linux on your phone', style: text.titleMedium),
+                                    Text(installed ? d.name : tr('Real Linux on your phone'), style: text.titleMedium),
                                     const SizedBox(height: 3),
                                     Text(
-                                      installed ? c.image ?? '' : 'Install packages with apt or apk',
+                                      installed ? c.image ?? '' : tr('Install packages with apt or apk'),
                                       style: TextStyle(
                                         fontFamily: installed ? mono : null,
                                         fontSize: 12.5,
@@ -155,7 +155,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                               ),
                               if (installed)
                                 Pill(
-                                  c.enabled ? 'Agent shell' : 'Installed',
+                                  tr(c.enabled ? 'Agent shell' : 'Installed'),
                                   color: c.enabled ? p.success : p.muted,
                                   dot: true,
                                 ),
@@ -180,7 +180,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                       ],
                       const SizedBox(height: 8),
                       PrimaryButton(
-                        label: 'Install ${_distros.firstWhere((x) => x.id == choice).name}',
+                        label: tr('Install {name}').replaceAll('{name}', _distros.firstWhere((x) => x.id == choice).name),
                         icon: LucideIcons.download,
                         onPressed: _install,
                       ),
@@ -199,7 +199,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                           SettingsRow(
                             icon: LucideIcons.squareTerminal,
                             color: p.accent,
-                            title: 'Use as the agent\'s shell',
+                            title: tr('Use as the agent\'s shell'),
                             subtitle: c.enabled
                                 ? '${tr('Every command the agent runs happens inside')} ${d.name}'
                                 : tr('The agent uses the Android shell; `box` still reaches Linux'),
@@ -298,7 +298,7 @@ class _DistroCard extends StatelessWidget {
               color: selected ? p.accent : null,
               border: selected ? null : Border.all(color: p.border, width: 2),
             ),
-            child: selected ? const Icon(LucideIcons.check, size: 13, color: Colors.white) : null,
+            child: selected ? Icon(LucideIcons.check, size: 13, color: p.onAccent) : null,
           ),
         ],
       ),

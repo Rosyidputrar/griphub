@@ -49,14 +49,22 @@ class Palette extends ThemeExtension<Palette> {
   /// The floating bottom navigation bar.
   final Color nav;
 
+  /// Text and icons on an accent fill: white or near-black, whichever reads better on the chosen
+  /// accent. White only works on the darker light-mode purple and blue; on the others it is 1.9-3:1.
+  Color get onAccent {
+    final l = accent.computeLuminance();
+    const ink = Color(0xFF111113);
+    return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
+  }
+
   static const light = Palette(
     bg: Color(0xFFFFFFFF),
     surface: Color(0xFFF5F5F7),
     raised: Color(0xFFECECF0),
     border: Color(0xFFE9E9ED),
     text: Color(0xFF111113),
-    muted: Color(0xFF6B6B73),
-    faint: Color(0xFF71717A),
+    muted: Color(0xFF5F5F67),
+    faint: Color(0xFF6A6A73),
     inverse: Color(0xFFFFFFFF),
     danger: Color(0xFFE5484D),
     success: Color(0xFF30A46C),

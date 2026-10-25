@@ -359,7 +359,8 @@ class _FilesScreenState extends State<FilesScreen> {
       builder: (ctx) => AlertDialog(
         title: Text(e.isDir ? tr('Delete folder?') : tr('Delete file?')),
         content: Text(
-          e.isDir ? '"${e.name}" and everything inside it will be deleted.' : '"${e.name}" will be deleted.',
+          tr(e.isDir ? '"{name}" and everything inside it will be deleted.' : '"{name}" will be deleted.')
+              .replaceAll('{name}', e.name),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Cancel'))),
@@ -500,7 +501,7 @@ class _FilesScreenState extends State<FilesScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_atRoot ? 'Files' : _baseName(_dir)),
+          title: Text(_atRoot ? tr('Files') : _baseName(_dir)),
           actions: [
             IconButton(
               tooltip: tr('Search'),
@@ -509,7 +510,7 @@ class _FilesScreenState extends State<FilesScreen> {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => SearchScreen(agent: agent))),
             ),
             IconButton(
-              tooltip: _showHidden ? 'Hide hidden files' : 'Show hidden files',
+              tooltip: tr(_showHidden ? 'Hide hidden files' : 'Show hidden files'),
               icon: Icon(_showHidden ? LucideIcons.eye : LucideIcons.eyeOff, size: 20),
               onPressed: () => setState(() => _showHidden = !_showHidden),
             ),
@@ -597,8 +598,8 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 4),
           Text(
             hiddenCount > 0
-                ? '$hiddenCount hidden ${hiddenCount == 1 ? 'item' : 'items'} — tap the eye to show them.'
-                : 'Create a file or folder with the + button.',
+                ? tr('{n} hidden items — tap the eye to show them.').replaceAll('{n}', '$hiddenCount')
+                : tr('Create a file or folder with the + button.'),
             textAlign: TextAlign.center,
             style: t.bodySmall?.copyWith(color: p.muted),
           ),

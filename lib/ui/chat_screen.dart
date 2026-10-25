@@ -816,7 +816,7 @@ class _IconChip extends StatelessWidget {
           child: InkWell(
             customBorder: const CircleBorder(),
             onTap: onTap,
-            child: SizedBox.square(dimension: 34, child: Icon(icon, size: 17, color: active ? Colors.white : p.text)),
+            child: SizedBox.square(dimension: 34, child: Icon(icon, size: 17, color: active ? p.onAccent : p.text)),
           ),
         ),
       ),
@@ -956,7 +956,7 @@ class _RoundButton extends StatelessWidget {
             customBorder: const CircleBorder(),
             onTap: onTap,
             onLongPress: onLongPress,
-            child: Icon(icon, size: 18, color: active ? Colors.white : (filled ? p.faint : p.text)),
+            child: Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
           ),
         ),
       ),

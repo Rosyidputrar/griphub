@@ -574,7 +574,7 @@ class _CreateButtonState extends State<_CreateButton> {
               turns: turns,
               duration: const Duration(milliseconds: 420),
               curve: Curves.easeOutBack,
-              child: const Icon(LucideIcons.plus, size: 28, color: Colors.white),
+              child: Icon(LucideIcons.plus, size: 28, color: p.onAccent),
             ),
           ),
         ),
@@ -857,7 +857,7 @@ class _HomeTabState extends State<_HomeTab> {
                     Expanded(child: Text(tr('Recent'), style: text.titleLarge)),
                     TextButton(
                       onPressed: widget.onSeeAll,
-                      style: TextButton.styleFrom(foregroundColor: context.palette.accentAlt),
+                      style: TextButton.styleFrom(foregroundColor: context.palette.accent),
                       child: Text(tr('See all')),
                     ),
                   ],

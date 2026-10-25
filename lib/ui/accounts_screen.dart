@@ -221,7 +221,7 @@ class _Header extends StatelessWidget {
     child: Row(
       children: [
         Expanded(child: Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall)),
-        ?trailing,
+        if (trailing != null) SectionAction(child: trailing!),
       ],
     ),
   );

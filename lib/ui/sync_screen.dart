@@ -163,14 +163,20 @@ class _SyncScreenState extends State<SyncScreen> {
                       trailing: Switch(value: s?.enabled ?? false, onChanged: s == null ? null : _toggle),
                     ),
                     if (s?.enabled ?? false) ...[
+                      // The action is the row; when it last ran is its subtitle (a "Sync now" button
+                      // beside the time squeezed "Last synced: 5 min ago" onto two broken lines).
                       SettingsRow(
-                        icon: LucideIcons.clock,
+                        icon: LucideIcons.refreshCw,
                         color: p.muted,
-                        title: s!.running ? tr('Syncing…') : '${tr('Last synced')}: ${syncAgo(s.lastSync)}',
-                        subtitle: news.isEmpty ? null : '${tr('Brought in')}: ${news.join(', ')}',
+                        title: s!.running ? tr('Syncing…') : tr('Sync now'),
+                        subtitle: [
+                          '${tr('Last synced')}: ${syncAgo(s.lastSync)}',
+                          if (news.isNotEmpty) '${tr('Brought in')}: ${news.join(', ')}',
+                        ].join(' · '),
+                        onTap: s.running ? null : _syncNow,
                         trailing: s.running
                             ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                            : TextButton(onPressed: _syncNow, child: Text(tr('Sync now'))),
+                            : null,
                       ),
                       if (s.repo != null)
                         SettingsRow(

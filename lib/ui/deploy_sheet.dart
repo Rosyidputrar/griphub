@@ -73,13 +73,13 @@ Future<void> showDeploySheet(BuildContext context, AgentController agent) async 
               Text('${tr('Repository')}: github.com/${plan['repo']}'),
               Text(
                 plan['willCreate'] == true
-                    ? 'A new repository will be created (public).'
-                    : 'Existing repository (${plan['visibility']}).',
+                    ? tr('A new repository will be created (public).')
+                    : tr('Existing repository ({visibility}).').replaceAll('{visibility}', '${plan['visibility']}'),
               ),
               Text(tr('Branch: gh-pages — your working branch is not touched.')),
             ] else ...[
               Text('${tr('Project')}: ${plan['project']}'),
-              Text(plan['preview'] == true ? 'Preview deployment.' : 'Production deployment.'),
+              Text(tr(plan['preview'] == true ? 'Preview deployment.' : 'Production deployment.')),
             ],
             Text('${tr('Folder')}: $folder'),
             Text(tr('Only this folder is uploaded (no .env, dotfiles, node_modules, symlinks).')),

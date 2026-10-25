@@ -171,7 +171,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
         title: Text(tr('Choose a folder')),
         actions: [
           IconButton(
-            tooltip: showHidden ? 'Hide hidden folders' : 'Show hidden folders',
+            tooltip: tr(showHidden ? 'Hide hidden folders' : 'Show hidden folders'),
             icon: Icon(showHidden ? LucideIcons.eye : LucideIcons.eyeOff, size: 18),
             onPressed: () => setState(() => showHidden = !showHidden),
           ),
@@ -280,7 +280,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                           size: 34,
                         ),
                         title: Text(folderName(d.path), style: text.bodyMedium),
-                        subtitle: git ? Text('git repository', style: text.bodySmall) : null,
+                        subtitle: git ? Text(tr('git repository'), style: text.bodySmall) : null,
                         trailing: Icon(LucideIcons.chevronRight, size: 16, color: p.faint),
                         onTap: () => setState(() => path = d.path),
                       );
@@ -294,8 +294,8 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                 child: PrimaryButton(
                   label: crumbs.isEmpty
-                      ? 'Open ${root == _Root.workspace ? 'workspace' : 'phone storage'}'
-                      : 'Open ${crumbs.last}',
+                      ? tr(root == _Root.workspace ? 'Open workspace' : 'Open phone storage')
+                      : tr('Open {name}').replaceAll('{name}', crumbs.last),
                   icon: LucideIcons.folderOpen,
                   onPressed: () => Navigator.pop(context, path),
                 ),

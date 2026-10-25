@@ -273,7 +273,7 @@ class _EditorScreenState extends State<EditorScreen> {
                   ],
                 ),
                 Text(
-                  _relativePath,
+                  _location,
                   overflow: TextOverflow.ellipsis,
                   style: t.labelSmall?.copyWith(fontFamily: mono, color: p.muted),
                 ),
@@ -321,6 +321,16 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
       ),
     );
+  }
+
+  /// Where the file is, under its name: its folder in the project, or the project itself for a
+  /// top-level file (the relative path alone just repeated the name).
+  String get _location {
+    final rel = _relativePath;
+    final slash = rel.lastIndexOf('/');
+    if (slash > 0) return rel.substring(0, slash);
+    final cwd = widget.agent.cwd;
+    return rel == widget.path || cwd.isEmpty ? rel : cwd.split('/').last;
   }
 
   String get _relativePath {
@@ -376,7 +386,7 @@ class _EditorScreenState extends State<EditorScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Large file (${_formatSize(_size)}), opened read-only.',
+                    tr('Large file ({size}), opened read-only.').replaceAll('{size}', _formatSize(_size)),
                     style: t.bodySmall?.copyWith(color: p.muted),
                   ),
                 ),

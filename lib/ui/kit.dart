@@ -249,9 +249,30 @@ class SectionLabel extends StatelessWidget {
     child: Row(
       children: [
         Expanded(child: Text(label.toUpperCase(), style: Theme.of(context).textTheme.labelSmall)),
-        ?trailing,
+        if (trailing != null) SectionAction(child: trailing!),
       ],
     ),
+  );
+}
+
+/// A text button next to a section label ("Stage all", "Add server"): small and in the accent,
+/// like the "See all" link, so it reads as an action on the section instead of a second heading.
+class SectionAction extends StatelessWidget {
+  const SectionAction({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => TextButtonTheme(
+    data: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: context.palette.accent,
+        textStyle: Theme.of(context).textTheme.labelMedium,
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        iconSize: 16,
+      ),
+    ),
+    child: child,
   );
 }
 

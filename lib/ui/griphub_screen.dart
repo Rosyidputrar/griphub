@@ -187,7 +187,7 @@ class _GripHubScreenState extends State<GripHubScreen> {
                   style: const TextStyle(fontFamily: mono, fontSize: 13),
                   decoration: InputDecoration(
                     labelText: tr('API key'),
-                    hintText: existing?.hasKey == true ? 'Saved. Leave empty to keep it' : 'griphub-…',
+                    hintText: existing?.hasKey == true ? tr('Saved. Leave empty to keep it') : 'griphub-…',
                     suffixIcon: IconButton(
                       tooltip: _showKey ? tr('Hide key') : tr('Show key'),
                       onPressed: () => setState(() => _showKey = !_showKey),

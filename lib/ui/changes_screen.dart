@@ -119,8 +119,10 @@ class _ChangesScreenState extends State<ChangesScreen> {
       builder: (context) => AlertDialog(
         title: Text(tr('Undo these changes?')),
         content: Text(
-          'Files will be put back the way they were at "${cp.label}". '
-          'The current state is saved as a checkpoint first, so you can undo this again.',
+          tr(
+            'Files will be put back the way they were at "{label}". '
+            'The current state is saved as a checkpoint first, so you can undo this again.',
+          ).replaceAll('{label}', cp.label),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
