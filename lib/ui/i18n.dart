@@ -4,6 +4,20 @@ import 'theme.dart';
 /// missing translation falls back to English instead of showing a placeholder.
 String tr(String en) => Appearance.instance.language == 'id' ? (_id[en] ?? en) : en;
 
+/// One relative-time helper for the whole app (previously a private copy in
+/// five screens, each with slightly different thresholds and only one of them
+/// localized). Old dates show months/years, like git history did.
+String formatAgo(DateTime t) {
+  final d = DateTime.now().difference(t);
+  final id = Appearance.instance.language == 'id';
+  if (d.inMinutes < 1) return id ? 'baru saja' : 'just now';
+  if (d.inHours < 1) return id ? '${d.inMinutes} mnt lalu' : '${d.inMinutes}m ago';
+  if (d.inDays < 1) return id ? '${d.inHours} jam lalu' : '${d.inHours}h ago';
+  if (d.inDays < 30) return id ? '${d.inDays} hr lalu' : '${d.inDays}d ago';
+  if (d.inDays < 365) return id ? '${d.inDays ~/ 30} bln lalu' : '${d.inDays ~/ 30}mo ago';
+  return id ? '${d.inDays ~/ 365} thn lalu' : '${d.inDays ~/ 365}y ago';
+}
+
 const languages = {'en': 'English', 'id': 'Bahasa Indonesia'};
 
 const _id = <String, String>{
@@ -111,7 +125,8 @@ const _id = <String, String>{
   'Slash commands like /review and /test': 'Perintah slash seperti /review dan /test',
   'Data & security': 'Data & keamanan',
   'Backup & restore': 'Cadangkan & pulihkan',
-  'Chats, settings, skills and keys in one file': 'Chat, pengaturan, skill, dan kunci dalam satu file',
+  // (The old '... and keys in one file' subtitle was removed: backups do
+  // not contain keys, so claiming otherwise contradicted the backup screen.)
   'App lock': 'Kunci aplikasi',
   'Fingerprint or screen lock when opening GripHub AI Agent': 'Sidik jari atau kunci layar saat membuka GripHub AI Agent',
   'Text size': 'Ukuran teks',
@@ -734,4 +749,64 @@ const _id = <String, String>{
   'Share': 'Bagikan',
   'History': 'Riwayat',
   'Make pictures with GripHub image models': 'Buat gambar dengan model gambar GripHub',
+  // Tahap 4: strings that used to bypass tr() or had no Indonesian entry.
+  'Boost your\nproductivity': 'Tingkatkan\nproduktivitasmu',
+  'Chat with a coding agent that runs right on your phone.': 'Chat dengan agen coding yang berjalan langsung di HP-mu.',
+  'Real Linux,\nin your pocket': 'Linux beneran,\ndi sakumu',
+  'Install Python, Node and more with apt. No root needed.': 'Instal Python, Node, dan lainnya lewat apt. Tanpa root.',
+  'Search, build\nand preview': 'Cari, bangun,\ndan pratinjau',
+  'Ship it\nanywhere': 'Rilis ke\nmana saja',
+  'Deploy to Vercel, GitHub Pages or your own server.': 'Deploy ke Vercel, GitHub Pages, atau servermu sendiri.',
+  'Android shell': 'Shell Android',
+  'Confirm deploy': 'Konfirmasi deploy',
+  'Custom DoH': 'DoH kustom',
+  'DoH URL': 'URL DoH',
+  'For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty uses the built-in default.':
+      'Untuk login device-flow. Buat OAuth App sendiri dengan Device Flow aktif lalu tempel Client ID-nya di sini (publik, bukan rahasia). Kosong berarti pakai default bawaan.',
+  'GitHub OAuth client ID': 'Client ID OAuth GitHub',
+  'Headers': 'Header',
+  'Linux shell (box)': 'Shell Linux (box)',
+  'Local': 'Lokal',
+  'Providers': 'Provider',
+  'Repository': 'Repositori',
+  'Reset saved keys': 'Reset key tersimpan',
+  'Reset saved keys?': 'Reset key tersimpan?',
+  'SSH key': 'Kunci SSH',
+  'Slash commands': 'Perintah slash',
+  'Templates': 'Template',
+  'Checkpoints': 'Checkpoint',
+  'friend': 'teman',
+  'updated': 'diperbarui',
+  'Used': 'Terpakai',
+  'of': 'dari',
+  'days': 'hari',
+  'tokens': 'token',
+  'rows': 'baris',
+  'columns': 'kolom',
+  'credit': 'kredit',
+  'Folder': 'Folder',
+  'No upstream': 'Tanpa upstream',
+  "pi stops starting new requests once today's spend reaches this, in GripHub credits. Leave empty for no limit.":
+      'pi berhenti memulai request baru begitu pengeluaran hari ini mencapai batas ini, dalam kredit GripHub. Kosongkan untuk tanpa batas.',
+  'Branch: gh-pages — your working branch is not touched.': 'Branch: gh-pages — branch kerjamu tidak disentuh.',
+  'Only this folder is uploaded (no .env, dotfiles, node_modules, symlinks).':
+      'Hanya folder ini yang diunggah (tanpa .env, dotfile, node_modules, symlink).',
+  'will stop running.': 'akan berhenti berjalan.',
+  'and its tools will be removed from pi.': 'dan tool-nya akan dihapus dari pi.',
+  '••• keeps the saved value unchanged.': '••• membiarkan nilai tersimpan tidak berubah.',
+  "can't be shown as text": 'tidak bisa ditampilkan sebagai teks',
+  'first 200 rows': '200 baris pertama',
+  'is untracked and will be deleted. This cannot be undone.': 'tidak terlacak dan akan dihapus. Ini tidak bisa dibatalkan.',
+  'Your changes to': 'Perubahan Anda pada',
+  'will be lost. This cannot be undone.': 'akan hilang. Ini tidak bisa dibatalkan.',
+  "This folder isn't a git repository. Ask pi to run `git init`, or clone a repo.":
+      'Folder ini bukan repositori git. Minta pi menjalankan `git init`, atau clone repo.',
+  'Chats, settings and skills in one file': 'Chat, pengaturan, dan skill dalam satu file',
+  'Licenses': 'Lisensi',
+  'Open-source licenses': 'Lisensi open-source',
+  'Third-party': 'Pihak ketiga',
+  'App license': 'Lisensi aplikasi',
+  'Show key': 'Tampilkan key',
+  'Hide key': 'Sembunyikan key',
+  'Clear': 'Bersihkan',
 };

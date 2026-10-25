@@ -9,15 +9,6 @@ import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
-String _ago(DateTime t) {
-  final d = DateTime.now().difference(t);
-  if (d.inSeconds < 60) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  if (d.inDays < 30) return '${d.inDays}d ago';
-  return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
-}
-
 /// What the agent changed since a checkpoint, with a one-tap undo. Checkpoints
 /// are shadow snapshots taken before the agent's first edit in each run, so
 /// this works whether or not the folder is a git repository.
@@ -280,7 +271,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
                   spacing: 6,
                   runSpacing: 6,
                   children: [
-                    Pill(_ago(cp.time), icon: LucideIcons.clock),
+                    Pill(formatAgo(cp.time), icon: LucideIcons.clock),
                     if (changes != null) ...[
                       Pill('${changes.files.length} ${changes.files.length == 1 ? 'file' : 'files'}'),
                       Pill('+$adds', color: p.success),
@@ -419,7 +410,7 @@ class _CheckpointChip extends StatelessWidget {
               Text(
                 [
                   if (latest) 'Latest',
-                  _ago(checkpoint.time),
+                  formatAgo(checkpoint.time),
                   '${checkpoint.files} ${checkpoint.files == 1 ? 'file' : 'files'}',
                 ].join(' · '),
                 maxLines: 1,

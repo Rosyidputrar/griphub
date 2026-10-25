@@ -16,10 +16,29 @@ function git(args: string[], env: Record<string, string>, cwd: string): Promise<
 		const child = spawn("git", args, { cwd, env: { ...process.env, ...env } });
 		let out = "";
 		let err = "";
+		let done = false;
+		// Local git is fast; a hung one must not block checkpoint ops forever.
+		const timer = setTimeout(() => {
+			if (done) return;
+			done = true;
+			child.kill("SIGKILL");
+			reject(new Error("git timed out"));
+		}, 60_000);
+		timer.unref?.();
 		child.stdout.on("data", (c) => (out += c));
 		child.stderr.on("data", (c) => (err += c));
-		child.on("error", reject);
-		child.on("close", (code) => resolve({ code: code ?? 1, out, err }));
+		child.on("error", (e) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			reject(e);
+		});
+		child.on("close", (code) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			resolve({ code: code ?? 1, out, err });
+		});
 	});
 }
 
@@ -108,10 +127,15 @@ export class Checkpoints {
 	async restore(cwd: string, id: string) {
 		const env = await this.ensure(cwd);
 		await this.snapshot(cwd, "Before restoring a checkpoint");
+		// Verify the checkpoint exists BEFORE deleting anything: the old
+		// order removed added files first, so a bad id left the folder
+		// half-restored. -z keeps weird filenames (newlines, quotes) intact.
+		const known = await git(["rev-parse", "--verify", "-q", id], env, cwd);
+		if (known.code !== 0) throw new Error(`Unknown checkpoint ${id}`);
 		await git(["add", "-A"], env, cwd);
 		// Files that did not exist at the checkpoint are removed.
-		const added = await git(["diff", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
-		for (const f of added.out.split("\n").filter(Boolean)) rmSync(join(cwd, f), { force: true });
+		const added = await git(["diff", "-z", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
+		for (const f of added.out.split("\0").filter(Boolean)) rmSync(join(cwd, f), { force: true });
 		const r = await git(["checkout", "-f", id, "--", "."], env, cwd);
 		if (r.code !== 0) throw new Error(r.err.trim() || "restore failed");
 		await git(["add", "-A"], env, cwd);

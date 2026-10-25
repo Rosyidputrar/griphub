@@ -74,6 +74,12 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _canRedo = false;
   String? _error;
   String _saved = '';
+
+  /// The file used CRLF line endings. The editor normalizes to LF, so the
+  /// comparison baseline is normalized too — otherwise every CRLF file
+  /// looked modified on open — and saving converts back, so the file's
+  /// endings survive an edit.
+  bool _crlf = false;
   int _size = 0;
 
   String get _name => widget.path.split('/').last;
@@ -110,7 +116,10 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       _readOnly = bytes.length > _maxEditableBytes;
       final text = utf8.decode(bytes, allowMalformed: true);
-      _saved = text;
+      _crlf = text.contains('\r\n');
+      // Match the editor's own normalization (it splits on \n after
+      // collapsing \r\n and \r), or the file is dirty before any edit.
+      _saved = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
       _controller.value = CodeLineEditingValue(codeLines: CodeLines.fromText(text));
       _controller.clearHistory();
       _controller.addListener(_onChanged);
@@ -153,7 +162,7 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => _saving = true);
     try {
       final text = _controller.text;
-      await File(widget.path).writeAsString(text);
+      await File(widget.path).writeAsString(_crlf ? text.replaceAll('\n', '\r\n') : text);
       _saved = text;
       if (!mounted) return true;
       setState(() {
@@ -343,7 +352,7 @@ class _EditorScreenState extends State<EditorScreen> {
               const SizedBox(height: 16),
               Text(tr('Binary file'), style: t.titleMedium),
               const SizedBox(height: 4),
-              Text('${_formatSize(_size)} · can\'t be shown as text', style: t.bodySmall?.copyWith(color: p.muted)),
+              Text('${_formatSize(_size)} · ${tr("can't be shown as text")}', style: t.bodySmall?.copyWith(color: p.muted)),
             ],
           ),
         ),
@@ -593,7 +602,6 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
   Widget _icon(IconData icon, String tooltip, VoidCallback? onTap, Color color) {
     return IconButton(
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
       iconSize: 18,
       color: color,
       onPressed: onTap,

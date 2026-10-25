@@ -1,4 +1,4 @@
-AndroPI menghadirkan agen AI coding sungguhan di HP Android kamu. Cukup ceritakan apa yang mau dibuat, agen akan menulis kodenya, menjalankannya, menampilkan preview langsung, lalu men-deploy-nya. Tanpa laptop.
+GripHub menghadirkan agen AI coding sungguhan di HP Android kamu. Cukup ceritakan apa yang mau dibuat, agen akan menulis kodenya, menjalankannya, menampilkan preview langsung, lalu men-deploy-nya. Tanpa laptop.
 
 LIHAT KODENYA DITULIS LANGSUNG
 • Balasan dan kode muncul real-time saat agen menulisnya
@@ -11,7 +11,7 @@ LINUX ASLI DI HP KAMU
 • Terminal multi-tab dengan SSH ke server kamu
 
 PROJECT, GIT, DAN GITHUB
-• Setiap chat bisa punya folder project sendiri di workspace AndroPI
+• Setiap chat bisa punya folder project sendiri di workspace GripHub
 • Impor file dari HP, lalu simpan atau bagikan hasilnya (Download, share)
 • File explorer, editor kode, pencarian seluruh project, dan tampilan diff
 • Checkpoint untuk membatalkan semua perubahan agen dalam satu kali jalan
@@ -32,7 +32,7 @@ FITUR LANJUTAN
 • Server MCP, skill, dan katalog skill yang bisa dicari
 • Template prompt dan perintah slash
 • Tugas latar belakang, agen paralel, dan jadwal
-• Lampiran gambar dan file, input suara, share ke AndroPI dari app lain
+• Lampiran gambar dan file, input suara, share ke GripHub dari app lain
 • Widget layar utama dan tile Quick Settings
 • Pencarian web yang tetap jalan di jaringan yang memblokir DNS
 
@@ -40,4 +40,4 @@ PAKAI MODEL PILIHAN KAMU
 Mendukung Anthropic Claude, OpenAI, Google Gemini, OpenRouter, dan provider lain yang didukung agen pi. Login dengan akun atau API key kamu sendiri.
 
 OPEN SOURCE
-AndroPI berlisensi MIT: https://github.com/imtaqin/andropi
+GripHub berlisensi MIT: https://github.com/seseegy/griphub

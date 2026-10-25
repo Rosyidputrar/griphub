@@ -657,8 +657,7 @@ class _KeyListState extends State<_KeyList> {
                   ),
                   IconButton(
                     tooltip: tr('Remove key'),
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(LucideIcons.trash2, size: 16),
+                                  icon: const Icon(LucideIcons.trash2, size: 16),
                     onPressed: busy ? null : () => _remove(i, saved[i]),
                   ),
                 ],

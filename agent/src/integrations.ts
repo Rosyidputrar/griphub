@@ -8,10 +8,11 @@
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, relative } from "node:path";
 import { Cloudflare, type CloudflareAccount } from "./cloudflare.js";
-import { configureDns, type DnsMode } from "./dns.js";
+import { configureDns, validateCustomDohUrl, type DnsMode } from "./dns.js";
 import { maskKey, parseKeys } from "./keyring.js";
 import { readSecureJson, writeSecureJson } from "./secure.js";
 
@@ -61,8 +62,15 @@ export interface AppSettings {
 	approvalMode?: "ask_all" | "ask_risky" | "auto";
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
-	/** Daily spend cap in USD; prompts are refused once reached. 0 or unset = none. */
+	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
+	/**
+	 * GitHub OAuth App Client ID for the device flow, entered in
+	 * Settings (Accounts). Overrides the built-in default without a
+	 * rebuild: create your own OAuth App (Device Flow enabled) and paste
+	 * its Client ID here. The ID is public; there is no secret.
+	 */
+	githubClientId?: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
@@ -151,6 +159,15 @@ export class Integrations {
 		for (const [k, v] of Object.entries(patch)) {
 			if (v === undefined) continue;
 			(next as any)[k] = v === "" || v === null ? undefined : v;
+		}
+		// Validate a custom DoH URL before it is saved: a malformed URL must
+		// be rejected with an error here, not stored and then silently
+		// ignored (or worse, crash the host) on the next boot.
+		if (patch.dns !== undefined || patch.dnsUrl !== undefined) {
+			if (next.dns === "custom") {
+				const err = validateCustomDohUrl(next.dnsUrl ?? "");
+				if (err) throw new Error(`Invalid custom DoH URL: ${err}`);
+			}
 		}
 		this.store.settings = next;
 		this.save();
@@ -244,6 +261,7 @@ export class Integrations {
 		if (!token) throw new Error("Not signed in to GitHub");
 		const res = await fetch(`https://api.github.com${path}`, {
 			...init,
+			signal: init.signal ?? AbortSignal.timeout(30_000),
 			headers: {
 				Accept: "application/vnd.github+json",
 				Authorization: `Bearer ${token}`,
@@ -283,13 +301,23 @@ export class Integrations {
 	}
 
 	/**
+	 * The OAuth App Client ID for the device flow: the one entered in
+	 * Settings wins, then the build-time env var, then the built-in
+	 * default. The built-in default belongs to the upstream template's
+	 * OAuth App, so a distributed build should set its own ID.
+	 */
+	private get githubClientId() {
+		return (this.settings.githubClientId ?? "").trim() || GITHUB_CLIENT_ID;
+	}
+
+	/**
 	 * GitHub device flow: the user types a short code at github.com/login/device
 	 * instead of creating and pasting a token. Needs the Client ID of an OAuth
 	 * App with "Enable Device Flow" ticked (the ID is public; there is no secret).
 	 */
 	async githubDeviceStart() {
-		if (!GITHUB_CLIENT_ID) throw new Error("GitHub device login is not set up in this build (missing OAuth Client ID). Use a token instead.");
-		const r = await this.githubOAuth("/login/device/code", { client_id: GITHUB_CLIENT_ID, scope: "repo workflow read:org" });
+		if (!this.githubClientId) throw new Error("GitHub device login is not set up in this build (missing OAuth Client ID). Use a token instead.");
+		const r = await this.githubOAuth("/login/device/code", { client_id: this.githubClientId, scope: "repo workflow read:org" });
 		if (r.error || !r.device_code) {
 			// "device_flow_disabled" means the OAuth App exists but the Device Flow box is not ticked.
 			throw new Error((r.error_description as string) ?? (r.error as string) ?? "GitHub did not return a device code");
@@ -306,7 +334,7 @@ export class Integrations {
 	/** One poll of the device flow. The app calls this every `interval` seconds until it is not pending. */
 	async githubDevicePoll(deviceCode: string) {
 		const r = await this.githubOAuth("/login/oauth/access_token", {
-			client_id: GITHUB_CLIENT_ID,
+			client_id: this.githubClientId,
 			device_code: deviceCode,
 			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 		});
@@ -328,6 +356,7 @@ export class Integrations {
 	private async githubOAuth(path: string, body: Record<string, string>) {
 		const res = await fetch(`https://github.com${path}`, {
 			method: "POST",
+			signal: AbortSignal.timeout(30_000),
 			headers: { Accept: "application/json", "Content-Type": "application/json", "User-Agent": "GripHub AI Agent" },
 			body: JSON.stringify(body),
 		});
@@ -503,6 +532,7 @@ export class Integrations {
 		if (!token) throw new Error("Not connected to Vercel");
 		const res = await fetch(`https://api.vercel.com${path}`, {
 			...init,
+			signal: init.signal ?? AbortSignal.timeout(30_000),
 			headers: { Authorization: `Bearer ${token}`, ...init.headers },
 		});
 		const body = await res.json().catch(() => null);
@@ -610,6 +640,11 @@ export class Integrations {
 			const root = typeof options.root === "string" ? options.root : null;
 			const shown = root ? relative(root, dir) || "." : basename(dir);
 			throw new Error(`No such folder: ${shown}${target.startsWith("cloudflare") ? ". Build the project first, or turn on Build first." : ""}`);
+		}
+		// Pages and Vercel deploys publish to the public internet: the UI must
+		// have shown the resolved target and the user must have confirmed it.
+		if ((target === "github_pages" || target === "vercel") && options.confirmed !== true) {
+			throw new Error("Confirm the deploy target before deploying.");
 		}
 		switch (target) {
 			case "vercel":
@@ -812,6 +847,7 @@ export class Integrations {
 	private async jobLogTail(slug: string, jobId: number, lines = 30) {
 		try {
 			const res = await fetch(`https://api.github.com/repos/${slug}/actions/jobs/${jobId}/logs`, {
+				signal: AbortSignal.timeout(60_000),
 				headers: { Authorization: `Bearer ${this.store.github?.token}`, Accept: "application/vnd.github+json" },
 			});
 			if (!res.ok) return [`(logs unavailable: ${res.status})`];
@@ -827,22 +863,68 @@ export class Integrations {
 		}
 	}
 
+	/**
+	 * Resolves a deploy target without side effects, so the UI can confirm
+	 * the exact destination (repository + visibility) before anything is
+	 * pushed. Only read-only calls happen here.
+	 */
+	async deployPlan(target: string, dir: string, options: Record<string, any>) {
+		if (target === "github_pages") {
+			const gh = this.store.github;
+			if (!gh) throw new Error("Sign in to GitHub first");
+			const origin = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+			const slug = parseGithubSlug(origin);
+			if (slug) {
+				const repo = await this.github(`/repos/${slug}`).catch(() => null);
+				return {
+					target,
+					dir,
+					repo: slug,
+					willCreate: false,
+					visibility: repo == null ? "unknown" : repo.private === true ? "private" : "public",
+					branch: "gh-pages",
+				};
+			}
+			const name = sanitizeRepo(options.repo || basename(dir));
+			return {
+				target,
+				dir,
+				repo: `${gh.login}/${name}`,
+				willCreate: true,
+				visibility: "public",
+				branch: "gh-pages",
+				note: "New repositories are created public so Pages serves on free accounts.",
+			};
+		}
+		if (target === "vercel") {
+			return {
+				target,
+				dir,
+				project: sanitizeProject(options.project || basename(dir)),
+				preview: options.preview === true,
+			};
+		}
+		return { target, dir };
+	}
+
+	/**
+	 * GitHub Pages deploy that never touches the user's own repository: only
+	 * the selected folder's filtered content is copied to a temp dir and
+	 * pushed to a dedicated gh-pages branch. The old code ran `git add -A`
+	 * in the project (staging the whole tree, .env included), committed to
+	 * the current branch, deleted a non-GitHub origin, and created public
+	 * repos silently; Pages then served the branch root (or /docs), not the
+	 * selected folder.
+	 */
 	private async deployPages(dir: string, options: Record<string, any>, log: Log) {
 		const gh = this.store.github;
 		if (!gh) throw new Error("Sign in to GitHub first");
-		const git = (args: string[]) => run("git", args, { cwd: dir, log });
-		const quiet = (args: string[]) => run("git", args, { cwd: dir });
-
-		let root = (await quiet(["rev-parse", "--show-toplevel"]).catch(() => "")).trim();
-		if (!root) {
-			log("Initialising a git repository…");
-			await git(["init", "-b", "main"]);
-			root = dir;
-		}
-		let remote = (await quiet(["remote", "get-url", "origin"]).catch(() => "")).trim();
-		let slug = parseGithubSlug(remote);
+		if (options.confirmed !== true) throw new Error("Confirm the deploy target (repository + visibility) before deploying.");
+		// Resolve the target repo read-only: the user's local repo is never modified.
+		const origin = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+		let slug = parseGithubSlug(origin);
 		if (!slug) {
-			const name = sanitizeRepo(options.repo || basename(root));
+			const name = sanitizeRepo(options.repo || basename(dir));
 			log(`Creating GitHub repository ${gh.login}/${name}…`);
 			const repo = await this.github("/user/repos", {
 				method: "POST",
@@ -852,46 +934,54 @@ export class Integrations {
 				throw e;
 			});
 			slug = repo.full_name as string;
-			remote = `https://github.com/${slug}.git`;
-			await quiet(["remote", "remove", "origin"]).catch(() => {});
-			await git(["remote", "add", "origin", remote]);
 		}
-
-		if (options.commit !== false) {
-			await git(["add", "-A"]);
-			const staged = (await quiet(["diff", "--cached", "--name-only"])).trim();
-			const hasHead = await quiet(["rev-parse", "--verify", "HEAD"]).then(() => true, () => false);
-			if (staged || !hasHead) {
-				await git(["commit", "--allow-empty", "-m", options.message || "Deploy from GripHub AI Agent"]);
-			} else {
-				log("No changes to commit");
-			}
+		if (options.planRepo && options.planRepo !== slug) {
+			throw new Error("Deploy target changed since confirmation; confirm again.");
 		}
-		const branch = (await quiet(["branch", "--show-current"])).trim() || "main";
-		log(`Pushing ${branch} to ${slug}…`);
-		await git(["push", "-u", "origin", `HEAD:${branch}`]);
-
-		const path = options.path === "/docs" ? "/docs" : "/";
-		log("Enabling GitHub Pages…");
+		const branch = "gh-pages";
+		const files = walk(dir);
+		if (files.length === 0) throw new Error("Nothing to deploy: the folder is empty");
+		log(`Deploying ${files.length} files from ${basename(dir)} to ${slug} (${branch})…`);
+		const tmp = mkdtempSync(join(tmpdir(), "griphub-deploy-"));
 		try {
-			await this.github(`/repos/${slug}/pages`, {
-				method: "POST",
-				body: JSON.stringify({ source: { branch, path } }),
-			});
-		} catch (e) {
-			if ((e as any).status !== 409) throw e;
-			await this.github(`/repos/${slug}/pages`, {
-				method: "PUT",
-				body: JSON.stringify({ source: { branch, path } }),
-			}).catch(() => {});
+			for (const rel of files) {
+				const target = join(tmp, rel);
+				mkdirSync(dirname(target), { recursive: true });
+				copyFileSync(join(dir, rel), target);
+			}
+			const git = (args: string[]) => run("git", args, { cwd: tmp, log });
+			const quiet = (args: string[]) => run("git", args, { cwd: tmp });
+			await git(["init", "-b", branch]);
+			await git(["add", "-A"]);
+			await git(["commit", "-m", options.message || "Deploy from GripHub AI Agent"]);
+			await quiet(["remote", "add", "origin", `https://github.com/${slug}.git`]);
+			// Push with a lease when the branch already exists, so a
+			// concurrent change to the deploy branch is refused, not clobbered.
+			const lease = (await quiet(["fetch", "origin", branch]).then(() => quiet(["rev-parse", "FETCH_HEAD"])).catch(() => "")).trim();
+			await git(lease ? ["push", `--force-with-lease=${branch}:${lease}`, "origin", `HEAD:${branch}`] : ["push", "origin", `HEAD:${branch}`]);
+			log("Enabling GitHub Pages…");
+			try {
+				await this.github(`/repos/${slug}/pages`, {
+					method: "POST",
+					body: JSON.stringify({ source: { branch, path: "/" } }),
+				});
+			} catch (e) {
+				if ((e as any).status !== 409) throw e;
+				await this.github(`/repos/${slug}/pages`, {
+					method: "PUT",
+					body: JSON.stringify({ source: { branch, path: "/" } }),
+				}).catch(() => {});
+			}
+			const pages = await this.github(`/repos/${slug}/pages`);
+			const url = pages.html_url as string;
+			const sha = (await quiet(["rev-parse", "HEAD"])).trim();
+			log(`Waiting for CI on ${sha.slice(0, 7)}…`);
+			await this.watchActions(slug, sha, log);
+			log(`Live at ${url}`);
+			return { url, repo: `https://github.com/${slug}` };
+		} finally {
+			rmSync(tmp, { recursive: true, force: true });
 		}
-		const pages = await this.github(`/repos/${slug}/pages`);
-		const url = pages.html_url as string;
-		const sha = (await quiet(["rev-parse", "HEAD"])).trim();
-		log(`Waiting for CI on ${sha.slice(0, 7)}…`);
-		await this.watchActions(slug, sha, log);
-		log(`Live at ${url}`);
-		return { url, repo: `https://github.com/${slug}` };
 	}
 
 	private async deploySsh(dir: string, options: Record<string, any>, log: Log) {
@@ -925,11 +1015,30 @@ export class Integrations {
 // Helpers
 
 /** Runs a command, streaming lines to `log`. Resolves with stdout. */
-export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log }): Promise<string> {
+/**
+ * Runs a child process and returns its stdout. A hung git/ssh/rsync used to
+ * block forever (no timeout anywhere); every call now dies after
+ * `timeoutMs` (default 10 minutes) with a clear error instead.
+ */
+export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log; timeoutMs?: number }): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const child = spawn(cmd, args, { cwd: opts.cwd, env: process.env });
 		let stdout = "";
 		const tail: string[] = [];
+		let done = false;
+		const timer = setTimeout(() => {
+			if (done) return;
+			done = true;
+			child.kill("SIGKILL");
+			reject(new Error(`${cmd} timed out after ${opts.timeoutMs ?? 600_000}ms`));
+		}, opts.timeoutMs ?? 600_000);
+		timer.unref?.();
+		const finish = (fn: () => void) => {
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			fn();
+		};
 		const feed = (chunk: Buffer, keep: boolean) => {
 			const text = chunk.toString("utf8");
 			if (keep) stdout += text;
@@ -943,21 +1052,30 @@ export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log 
 		};
 		child.stdout.on("data", (c) => feed(c, true));
 		child.stderr.on("data", (c) => feed(c, false));
-		child.on("error", reject);
+		child.on("error", (e) => finish(() => reject(e)));
 		child.on("close", (code) => {
-			if (code === 0) resolve(stdout);
-			else reject(new Error(`${cmd} exited with ${code}\n${tail.slice(-6).join("\n")}`));
+			finish(() => {
+				if (code === 0) resolve(stdout);
+				else reject(new Error(`${cmd} exited with ${code}\n${tail.slice(-6).join("\n")}`));
+			});
 		});
 	});
 }
 
 const SKIP_DIRS = new Set([".git", "node_modules", ".vercel", ".next", ".DS_Store"]);
 
+/**
+ * Files under a folder, for deploys. Dotfiles (.env included) and symlinks
+ * are never uploaded: a symlink could point outside the folder (or at
+ * /etc), and dotfiles are where secrets live. statSync follows symlinks,
+ * so lstatSync is what makes the symlink check real.
+ */
 function walk(root: string, dir = root, out: string[] = []): string[] {
 	for (const name of readdirSync(dir)) {
-		if (SKIP_DIRS.has(name)) continue;
+		if (SKIP_DIRS.has(name) || name.startsWith(".")) continue;
 		const path = join(dir, name);
-		const st = statSync(path);
+		const st = lstatSync(path);
+		if (st.isSymbolicLink()) continue;
 		if (st.isDirectory()) walk(root, path, out);
 		else if (st.isFile()) out.push(relative(root, path));
 		if (out.length > 5000) throw new Error("Too many files to deploy (over 5000)");

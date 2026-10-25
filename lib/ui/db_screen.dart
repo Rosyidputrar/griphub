@@ -300,7 +300,7 @@ class _TableBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 2, 16, 2),
       child: Row(
         children: [
-          IconButton(icon: const Icon(LucideIcons.chevronLeft, size: 20), onPressed: onBack),
+          IconButton(tooltip: tr('Back'), icon: const Icon(LucideIcons.chevronLeft, size: 20), onPressed: onBack),
           Icon(LucideIcons.table, size: 16, color: p.accent),
           const SizedBox(width: 8),
           Expanded(
@@ -310,7 +310,7 @@ class _TableBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text('first 200 rows', style: TextStyle(fontSize: 12, color: p.muted)),
+          Text(tr('first 200 rows'), style: TextStyle(fontSize: 12, color: p.muted)),
         ],
       ),
     );
@@ -367,7 +367,7 @@ class _Grid extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Text('${rows.length} rows · ${cols.length} columns', style: TextStyle(fontSize: 12, color: p.muted)),
+          child: Text('${rows.length} ${tr('rows')} · ${cols.length} ${tr('columns')}', style: TextStyle(fontSize: 12, color: p.muted)),
         ),
         Expanded(
           child: SingleChildScrollView(

@@ -4,6 +4,8 @@
  * command output, and a checkpoint before the agent starts changing files.
  */
 
+import { homedir } from "node:os";
+import { resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export type ApprovalMode = "ask_all" | "ask_risky" | "auto";
@@ -18,10 +20,15 @@ export interface GuardHooks {
 /** Tools that change nothing; never need approval and stay on in plan mode. */
 const READ_ONLY = new Set(["read", "grep", "find", "ls", "web_search", "web_fetch", "web_screenshot", "todo_write"]);
 
-/** Commands worth a second look before they run. */
+/**
+ * Commands worth a second look before they run. The flag patterns allow any
+ * flags before the dangerous one: `rm -v -rf` and `git -C x push --force`
+ * used to slip through because only the first flag was examined.
+ */
 const RISKY_BASH = [
-	/\brm\s+(-[a-z]*r|-[a-z]*f|--recursive|--force)/i,
-	/\bgit\s+(push|reset\s+--hard|clean\s+-[a-z]*f|checkout\s+--\s|branch\s+-D|rebase)/i,
+	/\brm\b[^;&|]*(-[a-z]*r|-[a-z]*f|--recursive|--force)/i,
+	/\bgit\b[^;&|]*\b(push|reset\s+--hard|clean\s+-[a-z]*f|checkout\s+--\s|branch\s+-D|rebase)\b/i,
+	/\bfind\b[^;&|]*\b(-delete|-exec\b|-execdir\b|-ok\b)/i,
 	/\b(vercel|netlify|wrangler|firebase)\b.*\b(deploy|--prod)\b/i,
 	/\bnpm\s+publish\b|\bpip\s+upload\b|\btwine\s+upload\b/i,
 	/\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/i,
@@ -40,8 +47,12 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string): 
 		return hit ? "This command can delete data, publish or reach other machines" : null;
 	}
 	if (toolName === "write" || toolName === "edit") {
-		const path = String(input.path ?? "");
-		if (path.startsWith("/") && !path.startsWith(cwd)) return "Writes outside the project folder";
+		const raw = String(input.path ?? "");
+		// Resolve ~, relative paths and .. segments before comparing, and
+		// compare against cwd + separator: /a/bc is not inside /a/b.
+		const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
+		const resolved = resolve(cwd, expanded);
+		if (resolved !== cwd && !resolved.startsWith(cwd + sep)) return "Writes outside the project folder";
 		return null;
 	}
 	// Unknown/custom tools (MCP and friends) are treated as risky.
@@ -59,9 +70,11 @@ export class Guard {
 	mode: ApprovalMode = "ask_risky";
 	/** Plan mode: only read-only tools until the user approves the plan. */
 	planMode = false;
-	/** "Always allow" choices for this app run, keyed by tool + command head. */
+	/** "Always allow" choices for this app run, keyed by the full command/pattern. */
 	private allowed = new Set<string>();
 	private pending = new Map<string, (allow: boolean) => void>();
+	/** Random per-process token: approval ids must never repeat across host restarts. */
+	private readonly epoch = Math.random().toString(36).slice(2, 8);
 	private next = 1;
 	private changedThisRun = false;
 
@@ -74,6 +87,13 @@ export class Guard {
 		resolve?.(allow);
 	}
 
+	/** Approval for something outside a tool call (e.g. an issue-triggered run). Reuses the same card and reply path; the empty key can never be "always"-allowed. */
+	askApproval(toolName: string, summary: string, reason: string): Promise<boolean> {
+		const id = `a${this.epoch}-${this.next++}`;
+		this.hooks.send({ type: "approval", approvalId: id, toolName, summary, reason, key: "" });
+		return new Promise<boolean>((resolve) => this.pending.set(id, resolve));
+	}
+
 	/** Deny everything still waiting (e.g. when the run is aborted). */
 	cancelAll() {
 		for (const [id, resolve] of this.pending) {
@@ -84,7 +104,7 @@ export class Guard {
 	}
 
 	private ask(toolName: string, input: Record<string, unknown>, reason: string, key: string) {
-		const id = `a${this.next++}`;
+		const id = `a${this.epoch}-${this.next++}`;
 		this.hooks.send({ type: "approval", approvalId: id, toolName, summary: describe(toolName, input), reason, key });
 		return new Promise<boolean>((resolve) => this.pending.set(id, resolve));
 	}
@@ -118,8 +138,16 @@ export class Guard {
 
 			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : null;
 			if (risk) {
-				const head = event.toolName === "bash" ? String(input.command ?? "").trim().split(/\s+/).slice(0, 2).join(" ") : event.toolName;
-				const key = `${event.toolName}:${head}`;
+				// "Always allow" stores the FULL pattern. Storing only the
+				// first two words let `cd app && git push` also allow
+				// `cd app && rm -rf ~`; storing only the tool name let one
+				// write allow every write.
+				const key =
+					event.toolName === "bash"
+						? `bash:${String(input.command ?? "").trim().replace(/\s+/g, " ")}`
+						: event.toolName === "write" || event.toolName === "edit"
+							? `${event.toolName}:${String(input.path ?? "")}`
+							: `${event.toolName}:${JSON.stringify(input).slice(0, 400)}`;
 				if (!this.allowed.has(key)) {
 					const ok = await this.ask(event.toolName, input, risk, key);
 					if (!ok) return { block: true, reason: "The user declined this action. Ask what they would like instead." };

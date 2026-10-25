@@ -114,7 +114,7 @@ const stamp = `${piVersion} ${Date.now()}`;
 rmSync(join(assets, "agent"), { recursive: true, force: true });
 mkdirSync(assets, { recursive: true });
 execSync(
-	`python -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', sys.argv[2])" "${join(assets, "agent")}" "${out}"`,
+	`python3 -c "import shutil,sys; shutil.make_archive(sys.argv[1], 'zip', sys.argv[2])" "${join(assets, "agent")}" "${out}"`,
 	{ stdio: "inherit" },
 );
 writeFileSync(join(assets, "agent.stamp"), stamp);

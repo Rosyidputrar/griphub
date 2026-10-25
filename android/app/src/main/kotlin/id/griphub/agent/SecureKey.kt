@@ -25,8 +25,25 @@ object SecureKey {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val wrapped = prefs.getString("store_key", null)
         if (wrapped != null) {
-            runCatching { return unwrap(wrapped).toHex() }
+            // Fail loudly on unwrap failure (Keystore key invalidated, prefs
+            // restored onto another device, …). The old code fell through
+            // here and generated a NEW key, silently making every stored
+            // token undecryptable. Recovery is explicit via resetHex().
+            return runCatching { unwrap(wrapped).toHex() }.getOrElse {
+                throw IllegalStateException(
+                    "Saved store key could not be unlocked. Use Reset saved keys to start over; saved tokens will need to be entered again."
+                )
+            }
         }
+        val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        prefs.edit().putString("store_key", wrap(key)).apply()
+        return key.toHex()
+    }
+
+    /** Explicit recovery only: drops the stored key and starts a fresh one. */
+    @Synchronized
+    fun resetHex(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val key = ByteArray(32).also { SecureRandom().nextBytes(it) }
         prefs.edit().putString("store_key", wrap(key)).apply()
         return key.toHex()

@@ -190,6 +190,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
               suffixIcon: query.text.isEmpty
                   ? null
                   : IconButton(
+                      tooltip: tr('Clear'),
                       icon: const Icon(LucideIcons.x, size: 16),
                       onPressed: () {
                         query.clear();

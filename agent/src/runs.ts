@@ -53,12 +53,20 @@ export class Runner {
 	private store: Store = { runs: [], schedules: [], concurrency: 1 };
 	private active = new Map<string, RunSession>();
 	private timer?: NodeJS.Timeout;
+	/** Issue approvals waiting for an answer, so polls never stack duplicate cards. */
+	private pendingIssueApprovals = new Set<string>();
 
 	constructor(
 		private readonly file: string,
 		private readonly makeSession: (cwd: string) => Promise<RunSession>,
 		private readonly notify: (record: object) => void,
 		private readonly github: (path: string) => Promise<any>,
+		/**
+		 * Asks the user before an issue-triggered run starts. Issue text is
+		 * untrusted input from GitHub; without this callback the run never
+		 * starts (fail closed).
+		 */
+		private readonly requestApproval?: (summary: string, reason: string) => Promise<boolean>,
 	) {
 		if (existsSync(file)) {
 			try {
@@ -132,7 +140,12 @@ export class Runner {
 	}
 
 	private pump() {
-		while (this.active.size < this.store.concurrency) {
+		// Count by status, not by the active map: start() is async and only
+		// registers in `active` after makeSession resolves, so counting the
+		// map let this synchronous loop drain the whole queue at once and
+		// the concurrency limit never applied. start() flips the status
+		// synchronously, so this count is exact.
+		while (this.store.runs.filter((r) => r.status === "running").length < this.store.concurrency) {
 			const next = [...this.store.runs].reverse().find((r) => r.status === "queued");
 			if (!next) return;
 			void this.start(next);
@@ -175,6 +188,10 @@ export class Runner {
 	saveSchedule(s: Partial<Schedule>) {
 		if (!s.name?.trim() || !s.prompt?.trim()) throw new Error("A schedule needs a name and a prompt");
 		if (!s.trigger && !s.everyMinutes && !s.dailyAt) throw new Error("Choose how often it runs");
+		const i = s.id ? this.store.schedules.findIndex((x) => x.id === s.id) : -1;
+		// lastRun is server-managed (the edit form never sends it): an edit
+		// used to overwrite it with undefined, which re-armed every-minute
+		// and daily schedules to fire immediately after any edit.
 		const entry: Schedule = {
 			id: s.id ?? `s${Date.now().toString(36)}`,
 			name: s.name.trim(),
@@ -184,9 +201,8 @@ export class Runner {
 			everyMinutes: s.everyMinutes ? Math.max(15, Math.round(s.everyMinutes)) : undefined,
 			dailyAt: s.dailyAt || undefined,
 			trigger: s.trigger,
-			lastRun: s.lastRun,
+			lastRun: s.lastRun ?? (i >= 0 ? this.store.schedules[i].lastRun : undefined),
 		};
-		const i = this.store.schedules.findIndex((x) => x.id === entry.id);
 		if (i >= 0) this.store.schedules[i] = { ...this.store.schedules[i], ...entry };
 		else this.store.schedules.push(entry);
 		this.changed();
@@ -244,9 +260,35 @@ export class Runner {
 		const first = t.seen === undefined;
 		for (const issue of issues.filter((i) => !i.pull_request)) {
 			if (seen.has(issue.number)) continue;
-			seen.add(issue.number);
 			// The first poll only records what already exists.
-			if (first) continue;
+			if (first) {
+				seen.add(issue.number);
+				continue;
+			}
+			// Issue text is untrusted input: it only reaches a run (with the
+			// user's tokens) after an explicit approval. Denied issues are
+			// marked seen so they are not re-prompted; undecided ones are
+			// not, so a host restart re-prompts instead of dropping them.
+			const approvalKey = `${s.id}:${t.repo}#${issue.number}`;
+			if (this.pendingIssueApprovals.has(approvalKey)) continue;
+			this.pendingIssueApprovals.add(approvalKey);
+			let ok = false;
+			try {
+				ok = this.requestApproval
+					? await this.requestApproval(
+							`${s.name}: #${issue.number} ${issue.title}`,
+							"Approve only if you trust this issue: its title and body come from GitHub and may contain instructions for the agent. The run uses your saved tokens.",
+						)
+					: false;
+			} catch {
+				ok = false;
+			}
+			this.pendingIssueApprovals.delete(approvalKey);
+			seen.add(issue.number);
+			if (!ok) {
+				this.notify({ type: "notice", message: `Trigger ${s.name}: issue #${issue.number} was not approved, skipping` });
+				continue;
+			}
 			this.enqueue(
 				`${s.prompt}\n\nGitHub issue ${t.repo}#${issue.number}: ${issue.title}\n\n${issue.body ?? ""}\n\n${issue.html_url}`,
 				s.cwd,

@@ -49,6 +49,54 @@ Future<void> showDeploySheet(BuildContext context, AgentController agent) async 
     builder: (_) => _DeploySheet(agent: agent),
   );
   if (request == null || !context.mounted) return;
+  var options = request.options;
+  // Pages and Vercel publish to the public internet: show the resolved
+  // destination and require an explicit confirmation before pushing.
+  if (request.target == 'github_pages' || request.target == 'vercel') {
+    final plan = await agent.integrations.deployPlan(
+      target: request.target,
+      dir: request.dir,
+      options: request.options,
+    );
+    if (!context.mounted) return;
+    final folder = request.dir == agent.cwd ? '.' : request.dir.replaceFirst('${agent.cwd}/', '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Confirm deploy')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (request.target == 'github_pages') ...[
+              Text('${tr('Repository')}: github.com/${plan['repo']}'),
+              Text(
+                plan['willCreate'] == true
+                    ? 'A new repository will be created (public).'
+                    : 'Existing repository (${plan['visibility']}).',
+              ),
+              Text(tr('Branch: gh-pages — your working branch is not touched.')),
+            ] else ...[
+              Text('${tr('Project')}: ${plan['project']}'),
+              Text(plan['preview'] == true ? 'Preview deployment.' : 'Production deployment.'),
+            ],
+            Text('${tr('Folder')}: $folder'),
+            Text(tr('Only this folder is uploaded (no .env, dotfiles, node_modules, symlinks).')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Deploy'))),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    options = {
+      ...request.options,
+      'confirmed': true,
+      if (request.target == 'github_pages' && plan['repo'] is String) 'planRepo': plan['repo'],
+    };
+  }
   await runWithLog<String?>(
     context,
     title: '${tr('Deploying to')} ${request.label}',
@@ -56,7 +104,7 @@ Future<void> showDeploySheet(BuildContext context, AgentController agent) async 
     task: (log, ci) => agent.integrations.deploy(
       target: request.target,
       dir: request.dir,
-      options: request.options,
+      options: options,
       onLine: log,
       onCi: ci,
     ),
@@ -115,7 +163,6 @@ class _DeploySheetState extends State<_DeploySheet> {
   final message = TextEditingController(text: 'Deploy from GripHub AI Agent');
   late final remotePath = TextEditingController(text: it.hosts.firstOrNull?.path ?? '');
   late String? hostId = it.hosts.firstOrNull?.id;
-  bool commit = true;
   bool production = true;
   bool buildFirst = false;
   bool spa = false;
@@ -198,6 +245,7 @@ class _DeploySheetState extends State<_DeploySheet> {
       : target.label;
 
   void _submit() {
+    final slug = project?.githubSlug;
     final options = switch (target) {
       DeployTarget.vercel => {'project': name.text.trim(), 'preview': !production},
       DeployTarget.cloudflare => {
@@ -207,7 +255,10 @@ class _DeploySheetState extends State<_DeploySheet> {
         'build': buildFirst,
         if (mode == CloudflareMode.workers) 'spa': spa else 'preview': !production,
       },
-      DeployTarget.githubPages => {'repo': name.text.trim(), 'message': message.text.trim(), 'commit': commit},
+      DeployTarget.githubPages => {
+        if (slug == null) 'repo': name.text.trim(),
+        'message': message.text.trim(),
+      },
       DeployTarget.ssh => {'hostId': hostId, 'remotePath': remotePath.text.trim()},
     };
     final request = _DeployRequest(_targetId, _label, dir, options);
@@ -229,7 +280,7 @@ class _DeploySheetState extends State<_DeploySheet> {
       child: TextField(
         controller: c,
         autocorrect: false,
-        style: const TextStyle(fontFamily: 'GeistMono', fontSize: 14),
+        style: const TextStyle(fontFamily: mono, fontSize: 14),
         decoration: InputDecoration(
           labelText: tr(label),
           hintText: hint == null ? null : tr(hint),
@@ -381,13 +432,9 @@ class _DeploySheetState extends State<_DeploySheet> {
                       )
                     else
                       field(name, 'New repository name', helper: 'Created under your account, public'),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(tr('Commit changes first')),
-                      value: commit,
-                      onChanged: (v) => setState(() => commit = v),
-                    ),
-                    if (commit) field(message, 'Commit message'),
+                    // The deploy always commits the selected folder's content
+                    // to a dedicated branch; there is no working-tree commit.
+                    field(message, 'Commit message'),
                   ],
                   DeployTarget.ssh => [
                     DropdownButtonFormField<String>(

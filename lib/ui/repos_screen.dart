@@ -142,7 +142,7 @@ class _RepoTile extends StatelessWidget {
     final meta = [
       ?repo.language,
       if (repo.stars > 0) '★ ${repo.stars}',
-      if (repo.pushedAt != null) _ago(repo.pushedAt!),
+      if (repo.pushedAt != null) '${tr('updated')} ${formatAgo(repo.pushedAt!)}',
     ].join('  ·  ');
     return InkWell(
       borderRadius: BorderRadius.circular(10),
@@ -189,11 +189,4 @@ class _RepoTile extends StatelessWidget {
     );
   }
 
-  static String _ago(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inHours < 1) return 'updated just now';
-    if (d.inDays < 1) return 'updated ${d.inHours}h ago';
-    if (d.inDays < 30) return 'updated ${d.inDays}d ago';
-    return 'updated ${t.year}-${t.month.toString().padLeft(2, '0')}';
-  }
 }

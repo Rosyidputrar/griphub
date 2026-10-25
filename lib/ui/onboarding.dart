@@ -75,10 +75,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           children: [
                             _Hero(illustration: art),
                             const SizedBox(height: 40),
-                            Text(title, textAlign: TextAlign.center, style: text.displayMedium),
+                            Text(tr(title), textAlign: TextAlign.center, style: text.displayMedium),
                             const SizedBox(height: 14),
                             Text(
-                              body,
+                              tr(body),
                               textAlign: TextAlign.center,
                               style: text.bodyLarge?.copyWith(color: p.muted),
                             ),
@@ -99,8 +99,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         height: 9,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: i == page ? const Color(0xFF3E63DD) : Colors.transparent,
-                          border: Border.all(color: i == page ? const Color(0xFF3E63DD) : p.faint, width: 1.5),
+                          color: i == page ? p.accentAlt : Colors.transparent,
+                          border: Border.all(color: i == page ? p.accentAlt : p.faint, width: 1.5),
                         ),
                       ),
                   ],
@@ -150,7 +150,7 @@ class _Hero extends StatelessWidget {
             ),
           ),
           Illustration(illustration, height: 270),
-          const Positioned(left: 4, top: 60, child: _Dot(color: Color(0xFF3E63DD), size: 14)),
+          Positioned(left: 4, top: 60, child: _Dot(color: context.palette.accentAlt, size: 14)),
           const Positioned(right: 2, top: 30, child: _Dot(color: Color(0xFFFF8C42), size: 8)),
           const Positioned(right: 10, bottom: 80, child: _Dot(color: Color(0xFF30A46C), size: 12)),
         ],

@@ -139,6 +139,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     : query.text.isEmpty
                     ? null
                     : IconButton(
+                        tooltip: tr('Clear'),
                         icon: const Icon(LucideIcons.x, size: 18),
                         onPressed: () {
                           query.clear();

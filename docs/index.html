@@ -3,11 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AndroPI</title>
+<title>GripHub</title>
 <meta name="description" content="An AI coding agent that runs on your Android phone. Write, run, preview and deploy code without a laptop. Free and open source.">
-<meta property="og:title" content="AndroPI: ship code from your phone">
+<meta property="og:title" content="GripHub: ship code from your phone">
 <meta property="og:description" content="An AI coding agent that runs on your Android phone. Free and open source.">
-<meta property="og:image" content="https://andropi.imtaqin.id/assets/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0B0B0D">
 <link rel="icon" href="assets/favicon.png">
@@ -187,13 +186,13 @@ footer a { color: var(--muted); }
 
 <header class="nav" id="nav">
   <div class="wrap">
-    <a class="brand" href="./"><img src="assets/logo.png" alt="">AndroPI</a>
+    <a class="brand" href="./"><img src="assets/logo.png" alt="">GripHub</a>
     <nav class="links" aria-label="Main">
       <a href="#how">How it works</a>
       <a href="#features">Features</a>
       <a href="#download">Download</a>
-      <a href="https://github.com/imtaqin/andropi">GitHub</a>
-      <a class="btn small" href="https://play.google.com/store/apps/details?id=com.imtaqin.andropi">Get the app</a>
+      <a href="https://github.com/seseegy/griphub">GitHub</a>
+      <a class="btn small" href="https://github.com/seseegy/griphub/releases/latest">Get the app</a>
     </nav>
   </div>
 </header>
@@ -211,18 +210,18 @@ footer a { color: var(--muted); }
           <span class="line"><span>from your</span></span>
           <span class="line"><span><span class="hl">phone.</span></span></span>
         </h1>
-        <p class="lede">AndroPI is an AI coding agent that lives on Android. Describe what you want. It writes the code, runs it in a real Linux, shows you a live preview and deploys it.</p>
+        <p class="lede">GripHub is an AI coding agent that lives on Android. Describe what you want. It writes the code, runs it in a real Linux, shows you a live preview and deploys it.</p>
         <div class="cta">
-          <a class="btn big light" href="https://play.google.com/store/apps/details?id=com.imtaqin.andropi">
+          <a class="btn big light" href="https://github.com/seseegy/griphub/releases/latest">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 3.5v17a1 1 0 0 0 1.5.86l14.2-8.5a1 1 0 0 0 0-1.72L6.5 2.64A1 1 0 0 0 5 3.5Z"/></svg>
-            Get it on Google Play
+            Download the APK
           </a>
           <a class="btn big dark" href="#download">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
             Download APK
           </a>
         </div>
-        <p class="meta"><b>MIT licensed</b> · <a href="https://github.com/imtaqin/andropi">source on GitHub</a> · no servers, no trackers</p>
+        <p class="meta"><b>MIT licensed</b> · <a href="https://github.com/seseegy/griphub">source on GitHub</a> · no trackers</p>
       </div>
 
       <div class="stage" id="stage">
@@ -231,7 +230,7 @@ footer a { color: var(--muted); }
         <div class="phone">
           <span class="punch" aria-hidden="true"></span>
           <div class="screen">
-            <video src="assets/hero.mp4" poster="assets/hero-poster.jpg" autoplay muted loop playsinline aria-label="AndroPI writing a website and showing its live preview"></video>
+            <video src="assets/hero.mp4" poster="assets/hero-poster.jpg" autoplay muted loop playsinline aria-label="GripHub writing a website and showing its live preview"></video>
           </div>
         </div>
       </div>
@@ -255,7 +254,7 @@ footer a { color: var(--muted); }
       <div class="how">
         <div class="sticky">
           <div class="phone"><span class="punch" aria-hidden="true"></span><div class="screen">
-            <img class="on" data-step="0" src="assets/step-describe.jpg" alt="Starting a new chat in AndroPI">
+            <img class="on" data-step="0" src="assets/step-describe.jpg" alt="Starting a new chat in GripHub">
             <img data-step="1" src="assets/step-write.jpg" alt="The agent writing index.html live">
             <img data-step="2" src="assets/step-preview.jpg" alt="Live preview of the finished site">
             <img data-step="3" src="assets/step-ship.jpg" alt="Deploy sheet with GitHub Pages, Vercel and SSH">
@@ -303,15 +302,15 @@ footer a { color: var(--muted); }
           <h3>A real Debian, not a sandbox</h3>
           <p>apt, pip and npm work. The agent installs whatever your project needs, and you get a multi-tab terminal with SSH.</p>
           <div class="term" id="term" aria-label="Terminal output">
-            <div><span class="p">root@andropi:~#</span> uname -m</div>
+            <div><span class="p">root@griphub:~#</span> uname -m</div>
             <div>aarch64</div>
-            <div><span class="p">root@andropi:~#</span> apt install -y python3 nodejs git</div>
+            <div><span class="p">root@griphub:~#</span> apt install -y python3 nodejs git</div>
             <div class="ok">✓ python3 nodejs git installed</div>
-            <div><span class="p">root@andropi:~#</span> python3 --version</div>
+            <div><span class="p">root@griphub:~#</span> python3 --version</div>
             <div>Python 3.13.5</div>
-            <div><span class="p">root@andropi:~#</span> node -v</div>
+            <div><span class="p">root@griphub:~#</span> node -v</div>
             <div>v20.19.2</div>
-            <div><span class="p">root@andropi:~#</span> <span class="cur"></span></div>
+            <div><span class="p">root@griphub:~#</span> <span class="cur"></span></div>
           </div>
         </article>
         <article class="card span-2 violet reveal">
@@ -339,13 +338,13 @@ footer a { color: var(--muted); }
           <span class="tag">skills · mcp</span>
           <h3>Skills and MCP servers</h3>
           <p>Give the agent new abilities. Install skills from a searchable catalogue or connect any MCP server.</p>
-          <img class="shot" src="assets/skills.jpg" alt="Skills catalogue in AndroPI" loading="lazy">
+          <img class="shot" src="assets/skills.jpg" alt="Skills catalogue in GripHub" loading="lazy">
         </article>
         <article class="card span-3 reveal">
           <span class="tag">background</span>
           <h3>Keeps working when you leave</h3>
           <p>Queue tasks, run agents in parallel and schedule jobs. A notification tells you when pi is done or needs you.</p>
-          <img class="shot" src="assets/terminal.jpg" alt="AndroPI terminal" loading="lazy">
+          <img class="shot" src="assets/terminal.jpg" alt="GripHub terminal" loading="lazy">
         </article>
       </div>
     </div>
@@ -354,31 +353,31 @@ footer a { color: var(--muted); }
   <section class="block" id="download" style="padding-top: 0">
     <div class="wrap">
       <div class="head">
-        <span class="eyebrow">Download · v0.1.2</span>
+        <span class="eyebrow">Download</span>
         <h2>Two ways to install</h2>
-        <p>The easy way is <a href="https://play.google.com/store/apps/details?id=com.imtaqin.andropi">Google Play</a>: it picks the right build and keeps it updated. Or download an APK below. The APK builds can also open project folders anywhere on your phone.</p>
+        <p>Download an APK below and install it once: the app checks the releases page for updates and installs them itself. The APK builds can also open project folders anywhere on your phone.</p>
       </div>
       <div class="dl">
-        <a class="arch main reveal" href="https://github.com/imtaqin/andropi/releases/download/v0.1.2/AndroPI-v0.1.2-arm64-v8a.apk">
+        <a class="arch main reveal" href="https://github.com/seseegy/griphub/releases/latest">
           <span class="abi">arm64-v8a</span>
           <strong>Most phones</strong>
           <span class="desc">Recommended. Modern Android phones and tablets.</span>
           <span class="size"><b>APK</b><b>63 MB</b></span>
         </a>
-        <a class="arch reveal" href="https://github.com/imtaqin/andropi/releases/download/v0.1.2/AndroPI-v0.1.2-armeabi-v7a.apk">
+        <a class="arch reveal" href="https://github.com/seseegy/griphub/releases/latest">
           <span class="abi">armeabi-v7a</span>
           <strong>Older phones</strong>
           <span class="desc">32-bit ARM devices and budget models.</span>
           <span class="size"><b>APK</b><b>58 MB</b></span>
         </a>
-        <a class="arch reveal" href="https://github.com/imtaqin/andropi/releases/download/v0.1.2/AndroPI-v0.1.2-x86_64.apk">
+        <a class="arch reveal" href="https://github.com/seseegy/griphub/releases/latest">
           <span class="abi">x86_64</span>
           <strong>Emulators</strong>
           <span class="desc">Android emulators, Chromebooks, Intel and AMD tablets.</span>
           <span class="size"><b>APK</b><b>63 MB</b></span>
         </a>
       </div>
-      <p class="note">Not sure which APK? Almost every phone from the last six years is arm64. Check with <code>uname -m</code> in any terminal app: <code>aarch64</code>, <code>armv7l</code> or <code>x86_64</code>. Every build is on the <a href="https://github.com/imtaqin/andropi/releases">releases page</a>.</p>
+      <p class="note">Not sure which APK? Almost every phone from the last six years is arm64. Check with <code>uname -m</code> in any terminal app: <code>aarch64</code>, <code>armv7l</code> or <code>x86_64</code>. Every build is on the <a href="https://github.com/seseegy/griphub/releases">releases page</a>.</p>
     </div>
   </section>
 
@@ -390,8 +389,8 @@ footer a { color: var(--muted); }
         <p class="stack">Built with Flutter, the pi agent, Node.js, Termux packages, proot and MCP.</p>
       </div>
       <div class="cta" style="justify-content: flex-end">
-        <a class="btn big light" href="https://github.com/imtaqin/andropi">View the source</a>
-        <a class="btn big dark" href="https://github.com/imtaqin/andropi/issues">Report an issue</a>
+        <a class="btn big light" href="https://github.com/seseegy/griphub">View the source</a>
+        <a class="btn big dark" href="https://github.com/seseegy/griphub/issues">Report an issue</a>
       </div>
     </div>
   </section>
@@ -399,8 +398,8 @@ footer a { color: var(--muted); }
 
 <footer>
   <div class="wrap">
-    <span>© 2026 imtaqin · <a href="https://github.com/fdciabdul">@fdciabdul</a></span>
-    <span><a href="privacy.html">Privacy Policy</a> · <a href="https://github.com/imtaqin/andropi/blob/main/LICENSE">MIT License</a></span>
+    <span>© 2026 seseegy · <a href="https://github.com/seseegy">@seseegy</a></span>
+    <span><a href="privacy.html">Privacy Policy</a> · <a href="https://github.com/seseegy/griphub/blob/main/LICENSE">MIT License</a></span>
   </div>
 </footer>
 

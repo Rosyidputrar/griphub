@@ -127,10 +127,12 @@ export class Container {
 		if (!this.token) {
 			const res = await fetch(
 				`https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repo}:pull`,
+				{ signal: AbortSignal.timeout(30_000) },
 			);
 			this.token = ((await res.json()) as any).token;
 		}
 		const res = await fetch(`https://registry-1.docker.io/v2/${repo}/${path}`, {
+			signal: AbortSignal.timeout(30_000),
 			headers: { Authorization: `Bearer ${this.token}`, ...(accept ? { Accept: accept } : {}) },
 		});
 		if (!res.ok) throw new Error(`Registry ${path}: ${res.status} ${res.statusText}`);

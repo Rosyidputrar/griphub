@@ -26,11 +26,44 @@ export const NAMESERVERS: Record<DnsMode, string[]> = {
 
 const systemLookup = dns.lookup;
 let endpoint: string | null = null;
+/** Hostname of a custom DoH endpoint: always resolved via system DNS (below). */
+let endpointHost: string | null = null;
 const cache = new Map<string, { addresses: { address: string; family: number }[]; expires: number }>();
+
+/** Error message for a custom DoH URL, or null when it is usable. Empty means "off". */
+export function validateCustomDohUrl(url: string): string | null {
+	const trimmed = url.trim();
+	if (!trimmed) return null;
+	let parsed: URL;
+	try {
+		parsed = new URL(trimmed);
+	} catch {
+		return "Not a valid URL";
+	}
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "DoH URL must use http(s)";
+	if (!parsed.hostname) return "DoH URL needs a hostname";
+	return null;
+}
 
 export function configureDns(mode: DnsMode, customUrl?: string) {
 	cache.clear();
-	endpoint = mode === "system" ? null : mode === "custom" ? (customUrl?.trim() || null) : ENDPOINTS[mode];
+	endpoint = null;
+	endpointHost = null;
+	if (mode === "system") return;
+	if (mode === "custom") {
+		const url = customUrl?.trim() || "";
+		const err = validateCustomDohUrl(url);
+		if (!url || err) {
+			// Never throw here: this runs on boot with the saved setting, and
+			// a bad saved URL must fall back to system DNS, not kill the host.
+			if (url) console.error(`[dns] ignoring invalid custom DoH URL (${err}), using system DNS`);
+			return;
+		}
+		endpoint = url;
+		endpointHost = new URL(url).hostname;
+		return;
+	}
+	endpoint = ENDPOINTS[mode];
 }
 
 async function query(name: string, type: "A" | "AAAA") {
@@ -67,7 +100,10 @@ export function installDohLookup() {
 			options = {};
 		}
 		const opts = typeof options === "number" ? { family: options } : (options ?? {});
-		if (!endpoint || !hostname || isIP(hostname) || hostname === "localhost" || hostname.endsWith(".local")) {
+		// The resolver's own hostname must never go through DoH itself: the
+		// fetch for the DoH query would resolve it again, unboundedly, until
+		// the process runs out of memory. System DNS breaks the cycle.
+		if (!endpoint || !hostname || isIP(hostname) || hostname === "localhost" || hostname.endsWith(".local") || hostname === endpointHost) {
 			return (systemLookup as any).call(dns, hostname, options, callback);
 		}
 		resolve(hostname, Number(opts.family) || 0).then(

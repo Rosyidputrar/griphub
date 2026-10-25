@@ -116,6 +116,31 @@ class _BootFailed extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               FilledButton(onPressed: agent.boot, child: Text(tr('Try again'))),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(tr('Reset saved keys?')),
+                      content: Text(
+                        tr(
+                          'The saved store key could not be unlocked. Resetting it makes all saved tokens unreadable; you will need to sign in again.',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+                        FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Reset'))),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    await agent.client.resetStoreKey();
+                    await agent.boot();
+                  }
+                },
+                child: Text(tr('Reset saved keys')),
+              ),
             ],
           ),
         ),

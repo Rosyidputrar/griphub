@@ -78,6 +78,8 @@ interface State {
 	/** Item keys present after the last sync, to tell "deleted here" from "new elsewhere". */
 	synced: string[];
 	localOnly: string[];
+	/** Repository the synced keys belong to; a repo change resets them (below). */
+	repo: string | null;
 }
 
 const exists = (p: string) => existsSync(p);
@@ -168,6 +170,7 @@ export class GitHubSync {
 			imported: { chats: 0, projects: 0, config: 0, removed: 0 },
 			synced: [],
 			localOnly: [],
+			repo: null,
 		};
 		try {
 			this.state = { ...empty, ...JSON.parse(readFileSync(this.file, "utf8")) };
@@ -301,6 +304,15 @@ export class GitHubSync {
 
 	private async sync() {
 		const { fullName, branch } = await this.ensureRepo();
+		// The synced keys belong to one repository: switching GitHub
+		// accounts (or a deleted + recreated repo) must never delete local
+		// chats just because the new repo lacks the old repo's keys. A repo
+		// change is a first sync: import what is there, delete nothing.
+		if (this.state.repo && this.state.repo !== fullName) {
+			this.state.synced = [];
+			this.state.localOnly = [];
+		}
+		this.state.repo = fullName;
 		await this.checkout(fullName, branch);
 		const synced = new Set(this.state.synced);
 		const imported = await this.pull(synced);

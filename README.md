@@ -1,28 +1,36 @@
 <p align="center">
-  <img src="assets/brand/logo.png" width="120" alt="AndroPI logo">
+  <img src="assets/brand/logo.png" width="120" alt="GripHub logo">
 </p>
 
-<h1 align="center">AndroPI</h1>
+<h1 align="center">GripHub AI Agent</h1>
 
 <p align="center">An AI coding agent that runs on your Android phone.<br>
 Write, run, preview and deploy code without a laptop.</p>
 
 <p align="center">
-  <a href="https://play.google.com/store/apps/details?id=com.imtaqin.andropi"><b>Google Play</b></a> ·
-  <a href="https://github.com/imtaqin/andropi/releases/latest"><b>APK downloads</b></a> ·
-  <a href="https://andropi.imtaqin.id"><b>Website</b></a>
+  <a href="https://github.com/seseegy/griphub/releases/latest"><b>APK downloads</b></a> ·
+  <a href="https://github.com/seseegy/griphub"><b>Source</b></a>
 </p>
 
 <p align="center">
-  <img src="store/en/screenshots-panorama.png" alt="AndroPI screenshots">
+  <img src="store/en/screenshot-1-home.png" alt="GripHub screenshots">
 </p>
 
-AndroPI puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs locally in a
-bundled Node.js runtime. It reads and writes files, runs shell commands in a real Debian or Alpine container,
-searches the web, and ships your project to GitHub Pages, Vercel or your own server. You bring the model:
-Anthropic, OpenAI, Gemini, OpenRouter and the other providers pi supports. Any other OpenAI-, Anthropic- or
-Gemini-compatible endpoint (a proxy, Ollama, LM Studio, vLLM) can be added with its base URL and API key, and the
-app fetches the list of models it serves.
+GripHub AI Agent puts the [pi coding agent](https://github.com/earendil-works/pi) on Android. The agent runs
+locally in a bundled Node.js runtime. It reads and writes files, runs shell commands in a real Debian or Alpine
+container, searches the web, and ships your project to GitHub Pages, Vercel or your own server.
+
+Chat runs through [GripHub Router](https://griphubrouter.web.id) (`griphubrouter.web.id/v1`, OpenAI-compatible):
+one API key unlocks 50+ models — Claude, GPT, Gemini, DeepSeek, GLM, Kimi, Qwen and more. Usage is billed in
+GripHub credits (1 credit = Rp 300); the Usage screen shows live balance, credit cost estimates per model, and
+the nearest credit expiry. Other OpenAI-compatible endpoints can be added as custom providers.
+
+## Privacy in one paragraph
+
+The app developer collects nothing and runs no server. Every chat you send goes to GripHub Router, which
+processes it as a service (see the [Privacy Policy](docs/privacy.html) for the full table of where data goes).
+Your GripHub API key, GitHub/Vercel tokens and SSH keys are encrypted on the device with a key held by the
+Android Keystore. Backups are created only when you ask for them.
 
 ## Features
 
@@ -32,9 +40,13 @@ app fetches the list of models it serves.
   the agent's shell.
 - **Projects.** Each chat can use its own folder, or you can open any folder on the phone. The app includes a file
   explorer, a code editor, project search, a diff view and a checkpoint/undo for every agent run.
-- **Git and GitHub.** Sign in with GitHub's device code, then clone repositories, commit, push, pick branches,
-  turn issues into pull requests and follow GitHub Actions runs.
+- **Git and GitHub.** Sign in with GitHub's device code (or a token), then clone repositories, commit, push, pick
+  branches, turn issues into pull requests and follow GitHub Actions runs. Distributed builds point device login
+  at their own OAuth App: create one with Device Flow enabled and paste its Client ID in Accounts → GitHub
+  OAuth client ID — no rebuild needed.
 - **Deploy.** GitHub Pages, Vercel, or SSH/rsync to your own servers. Dev servers can be shared with a public tunnel.
+  Pages and Vercel deploys always show the destination (repository + visibility) for confirmation first, and
+  upload only the folder you chose.
 - **Terminal.** Multi-tab terminal with SSH to saved servers.
 - **Agent controls.**
   - Approval modes: ask for everything, ask for risky actions only, or bypass all approvals.
@@ -43,9 +55,9 @@ app fetches the list of models it serves.
   - MCP servers, skills (with a searchable skills catalogue), prompt templates and slash commands.
 - **Everyday use.**
   - Image and file attachments, and voice input.
-  - Share to AndroPI from other apps; home screen widget and Quick Settings tile.
+  - Share to GripHub from other apps; home screen widget and Quick Settings tile.
   - Notifications.
-  - Usage and cost tracking with a daily budget, and automatic fallback to another model.
+  - Usage and cost estimates in GripHub credits and rupiah, and automatic fallback to another model.
   - App lock, encrypted tokens, and backup and restore.
   - Themes and accents, English and Bahasa Indonesia.
 - **Web search that survives DNS blocking.** DNS-over-HTTPS for the agent's network access.
@@ -82,9 +94,9 @@ APKs (one per ABI), signs them with the release key from the repository secrets 
 `pubspec.yaml` with the patch and build numbers raised by the workflow run number, so every release is newer than
 the last and installs over it.
 
-The GitHub build checks this repository's latest release (Settings → About → App updates, and on its own every few
+A GitHub build checks this repository's latest release (Settings → About → App updates, and on its own every few
 hours). The APK is downloaded by Android's download manager, so it keeps going when the app is closed and can be
-cancelled at any time; its SHA-256 is checked before the installer opens. The Play build leaves updates to Play.
+cancelled at any time; its SHA-256 is checked before the installer opens.
 
 ## Layout
 
@@ -95,7 +107,7 @@ cancelled at any time; its SHA-256 is checked before the installer opens. The Pl
 | `agent/skills/` | Skills bundled with the app |
 | `android/` | Kotlin side: runtime extraction, foreground service, share targets, widget, tile |
 | `tool/` | Runtime bundler and the `box` container launcher |
-| `store/` | Play Store assets (English and Indonesian) |
+| `store/` | Store assets (English and Indonesian) |
 
 ## Credits
 
@@ -108,4 +120,4 @@ cancelled at any time; its SHA-256 is checked before the installer opens. The Pl
 
 ## License
 
-[MIT](LICENSE) © imtaqin ([@fdciabdul](https://github.com/fdciabdul))
+[MIT](LICENSE)

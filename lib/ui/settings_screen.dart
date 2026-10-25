@@ -88,8 +88,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _Header(tr('Environment')),
               _InfoRow('pi', agent.info['version']?.toString() ?? '—'),
               _InfoRow('Node.js', agent.info['node']?.toString() ?? '—'),
-              _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—', mono: true),
-              _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—', mono: true),
+              _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—', monospace: true),
+              _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—', monospace: true),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                 child: OutlinedButton(onPressed: agent.busy ? null : agent.restart, child: Text(tr('Restart agent'))),
@@ -114,10 +114,10 @@ class _Header extends StatelessWidget {
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow(this.label, this.value, {this.mono = false});
+  const _InfoRow(this.label, this.value, {this.monospace = false});
   final String label;
   final String value;
-  final bool mono;
+  final bool monospace;
 
   @override
   Widget build(BuildContext context) {
@@ -132,8 +132,8 @@ class _InfoRow extends StatelessWidget {
           const SizedBox(height: 2),
           SelectableText(
             value,
-            style: mono
-                ? TextStyle(fontFamily: 'GeistMono', fontSize: 12.5, color: p.text, height: 1.5)
+            style: monospace
+                ? TextStyle(fontFamily: mono, fontSize: 12.5, color: p.text, height: 1.5)
                 : text.bodyMedium,
           ),
         ],

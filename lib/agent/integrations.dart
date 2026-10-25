@@ -147,6 +147,10 @@ class AppSettings {
   bool get braveSearch => json['braveSearch'] != false;
   bool get tavilySearch => json['tavilySearch'] != false;
   String get approvalMode => json['approvalMode'] as String? ?? 'ask_risky';
+
+  /// GitHub OAuth App Client ID for the device flow, entered in Settings.
+  /// Null means the host falls back to its built-in default.
+  String? get githubClientId => json['githubClientId'] as String?;
   List<Map<String, dynamic>> get fallbackModels =>
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;
@@ -335,6 +339,15 @@ class Integrations extends ChangeNotifier {
     final result = await _task<Map>('deploy', {'target': target, 'dir': dir, 'options': options}, onLine, onCi: onCi);
     return result['url'] as String?;
   }
+
+  /// Resolves a deploy target without side effects, for the confirmation dialog.
+  Future<Map<String, dynamic>> deployPlan({
+    required String target,
+    required String dir,
+    Map<String, dynamic> options = const {},
+  }) async =>
+      (await client.call<Map>('deploy_plan', {'target': target, 'dir': dir, 'options': options}))
+          .cast<String, dynamic>();
 
   /// Follows GitHub Actions for the latest commit in [dir].
   Future<void> watchCi(String dir, {void Function(String)? onLine, void Function(Map<String, dynamic>)? onCi}) =>

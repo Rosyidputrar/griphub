@@ -70,16 +70,7 @@ String _formatSize(int bytes) {
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
 }
 
-String _formatTime(DateTime t) {
-  final now = DateTime.now();
-  final diff = now.difference(t);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-  if (diff.inDays < 1 && now.day == t.day) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays == 0 ? 1 : diff.inDays}d ago';
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${t.year}-${two(t.month)}-${two(t.day)}';
-}
+String _formatTime(DateTime t) => formatAgo(t);
 
 IconData _iconFor(String name, bool isDir) {
   if (isDir) return LucideIcons.folder;

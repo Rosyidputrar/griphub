@@ -189,6 +189,7 @@ class _GripHubScreenState extends State<GripHubScreen> {
                     labelText: tr('API key'),
                     hintText: existing?.hasKey == true ? 'Saved. Leave empty to keep it' : 'griphub-…',
                     suffixIcon: IconButton(
+                      tooltip: _showKey ? tr('Hide key') : tr('Show key'),
                       onPressed: () => setState(() => _showKey = !_showKey),
                       icon: Icon(_showKey ? LucideIcons.eyeOff : LucideIcons.eye, size: 18),
                     ),

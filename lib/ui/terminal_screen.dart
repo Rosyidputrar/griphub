@@ -41,6 +41,9 @@ class ShellSession {
   bool exited = false;
   String _line = '';
 
+  /// Tail of what the shell actually printed, for the two guards below.
+  String _outputTail = '';
+
   static Future<ShellSession> start(AgentController agent, String cwd, {String? title, bool linux = false}) async {
     final env = await agent.client.environment();
     final home = env['HOME']!;
@@ -66,7 +69,11 @@ alias gs='git status'
   }
 
   void _wire() {
-    pty.output.cast<List<int>>().transform(const Utf8Decoder(allowMalformed: true)).listen(terminal.write);
+    pty.output.cast<List<int>>().transform(const Utf8Decoder(allowMalformed: true)).listen((text) {
+      terminal.write(text);
+      _outputTail = (_outputTail + text);
+      if (_outputTail.length > 2000) _outputTail = _outputTail.substring(_outputTail.length - 2000);
+    });
     pty.exitCode.then((code) {
       exited = true;
       terminal.write('\r\n[process exited with code $code]\r\n');
@@ -93,6 +100,19 @@ alias gs='git status'
 
   void kill() => pty.kill();
 
+  /// True when the screen's last non-empty line looks like this app's shell
+  /// prompt (`<dir> $`, no user@host): a local shell waiting for input, not
+  /// ssh (remote prompts carry @), vim, or a REPL.
+  bool get atShellPrompt {
+    final buf = terminal.buffer;
+    for (var i = buf.height - 1; i >= 0 && i >= buf.height - 50; i--) {
+      final line = buf.lines[i].getText().trimRight();
+      if (line.isEmpty) continue;
+      return RegExp(r'^[^@]+ \$ *$').hasMatch(line);
+    }
+    return false;
+  }
+
   void _track(String data) {
     data = data.replaceAll('\x1b[200~', '').replaceAll('\x1b[201~', '');
     // Arrow keys and other escape sequences: the shell may edit or recall a
@@ -103,7 +123,10 @@ alias gs='git status'
     }
     for (final ch in data.runes) {
       if (ch == 0x0d || ch == 0x0a) {
-        _remember(_line);
+        // Only remember lines the shell echoed back. A password prompt
+        // (sudo, ssh, read -s) turns echo off, so the secret never lands
+        // in history; a normal command is echoed before Enter is processed.
+        if (_line.isNotEmpty && _outputTail.endsWith(_line)) _remember(_line);
         _line = '';
       } else if (ch == 0x7f || ch == 0x08) {
         if (_line.isNotEmpty) _line = String.fromCharCodes(_line.runes.toList()..removeLast());
@@ -239,9 +262,14 @@ class _TerminalScreenState extends State<TerminalScreen> {
     final s = sessions[i];
     ShellSession.selected = i;
     _bind(s);
-    // Follow the chat into its project.
+    // Follow the chat into its project — but only when the tab is sitting
+    // at a local shell prompt. Typing cd into ssh, vim or a REPL sends the
+    // text to that program instead (remote dir change, vim commands, or a
+    // syntax error). The prompt check is a heuristic: our shells print
+    // "<dir> $" (see ShellSession.start); anything else means "don't type".
+    // When skipped, the tab keeps its old cwd and retries on the next switch.
     final cwd = _cwd;
-    if (!s.linux && !s.exited && s.cwd != cwd) {
+    if (!s.linux && !s.exited && s.cwd != cwd && s.atShellPrompt) {
       s.type("cd '${cwd.replaceAll("'", r"'\''")}'\r");
       s.cwd = cwd;
     }
@@ -644,8 +672,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           action(tr('Paste'), LucideIcons.clipboardPaste, () => _paste(s)),
           IconButton(
             tooltip: tr('Close'),
-            visualDensity: VisualDensity.compact,
-            onPressed: controller.clearSelection,
+                  onPressed: controller.clearSelection,
             icon: Icon(LucideIcons.x, size: 16, color: p.inverse),
           ),
         ],

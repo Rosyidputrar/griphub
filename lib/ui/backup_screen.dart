@@ -87,8 +87,10 @@ class _BackupScreenState extends State<BackupScreen> {
     if (ok != true) return;
     setState(() => _restoring = true);
     try {
-      final n = await agent.features.restoreBackup(path);
-      _snack('Restored $n ${n == 1 ? 'file' : 'files'}');
+      final r = await agent.features.restoreBackup(path);
+      _snack(
+        'Restored ${r.restored} ${r.restored == 1 ? 'file' : 'files'}${r.skipped > 0 ? ' · ${r.skipped} blocked ${r.skipped == 1 ? 'entry' : 'entries'} skipped' : ''}',
+      );
     } catch (e) {
       _snack('$e');
     } finally {

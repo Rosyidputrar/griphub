@@ -50,8 +50,10 @@ import {
 	Templates,
 	Tunnels,
 	usageSummary,
+	wibDay,
 	writeZip,
 } from "./workbench.js";
+import { estimatedCredits } from "./pricing.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
 
@@ -254,15 +256,22 @@ async function tryFallback(error: string) {
 	}
 }
 
-/** Refuses new work once today's spend reaches the configured cap. */
+/**
+ * Refuses new work once today's spend reaches the configured cap, in
+ * GripHub credits. Spend is estimated from token counts with the same
+ * rate table as the Usage screen (agent/src/pricing.ts), because pi's
+ * own cost field is always 0 for GripHub (the router reports no prices).
+ * The day is the user's day (Asia/Jakarta), not UTC. Models with no known
+ * rate are not counted — the same rule as the Usage screen's "—".
+ */
 function checkBudget() {
 	const cap = integrations.settings.dailyBudget ?? 0;
 	if (!cap) return;
-	const today = new Date().toISOString().slice(0, 10);
+	const today = wibDay(Date.now());
 	const spent = usageSummary(join(agentDir, "sessions"), 1)
 		.filter((r) => r.day === today)
-		.reduce((sum, r) => sum + r.cost, 0);
-	if (spent >= cap) throw new Error(`Daily budget of $${cap.toFixed(2)} reached ($${spent.toFixed(2)} spent). Raise it in Settings → Usage.`);
+		.reduce((sum, r) => sum + (estimatedCredits(r.model, r.input, r.output) ?? 0), 0);
+	if (spent >= cap) throw new Error(`Daily budget of ${cap} credits reached (${spent.toFixed(2)} credits spent today). Raise it in Settings → Usage.`);
 }
 
 /** Mirrors pi's interactive warning: subscription OAuth outside Claude's own apps bills extra usage. */
@@ -507,7 +516,9 @@ function backupTarget() {
 }
 
 function createBackup(includeWorkspace: boolean) {
-	// Secrets (provider keys, tokens) are left out on purpose.
+	// Secrets (provider keys, tokens) are left out on purpose: the agent side
+	// only ever lists sessions/skills/prompts/settings/runs, and key material
+	// lives in the encrypted griphub/ store, which is not listed here.
 	const entries = [
 		...collectFiles(join(agentDir, "sessions"), agentDir),
 		...collectFiles(join(agentDir, "skills"), agentDir),
@@ -518,6 +529,10 @@ function createBackup(includeWorkspace: boolean) {
 	].map((e) => ({ name: `agent/${e.name}`, data: e.data }));
 	if (includeWorkspace) {
 		for (const e of collectFiles(workspace, workspace, new Set(["node_modules", ".git", "backups", ".venv", "venv"]))) {
+			// Dotfiles and dot-dirs never enter a backup: a project .env (or
+			// .npmrc, .aws/, ...) would otherwise leak secrets into the zip
+			// and break the "keys are not included" promise above.
+			if (e.name.split("/").some((s) => s.startsWith("."))) continue;
 			entries.push({ name: `workspace/${e.name}`, data: e.data });
 		}
 	}
@@ -526,21 +541,48 @@ function createBackup(includeWorkspace: boolean) {
 	return { path, files: entries.length };
 }
 
+/**
+ * Agent-side paths a backup may restore. Everything else under agent/ is
+ * refused: extensions are code, settings.json can redirect the agent, and
+ * state files (mcp.json, custom-providers.json, models.json) would hand an
+ * attacker servers, providers or models. The workspace side keeps its old
+ * rule (any path without .. segments); project extensions there no longer
+ * execute since project trust is off.
+ */
+const RESTORE_AGENT_ALLOW = [
+	(rel: string) => rel === "AGENTS.md",
+	(rel: string) => rel === "griphub/runs.json",
+	(rel: string) => rel.startsWith("sessions/"),
+	(rel: string) => rel.startsWith("skills/"),
+	(rel: string) => rel.startsWith("prompts/"),
+];
+
 function restoreBackup(path: string) {
 	const entries = readZip(readFileSync(path));
 	let restored = 0;
+	let skipped = 0;
 	for (const e of entries) {
 		const [root, ...rest] = e.name.split("/");
 		const rel = rest.join("/");
-		if (!rel || rel.split("/").includes("..")) continue;
+		if (!rel || rel.split("/").includes("..")) {
+			skipped++;
+			continue;
+		}
 		const base = root === "agent" ? agentDir : root === "workspace" ? workspace : null;
-		if (!base) continue;
+		if (!base) {
+			skipped++;
+			continue;
+		}
+		if (root === "agent" && !RESTORE_AGENT_ALLOW.some((f) => f(rel))) {
+			skipped++;
+			continue;
+		}
 		const target = join(base, rel);
 		mkdirSync(dirname(target), { recursive: true });
 		writeFileSync(target, e.data);
 		restored++;
 	}
-	return { restored };
+	return { restored, skipped };
 }
 
 // ---------------------------------------------------------------------------
@@ -783,6 +825,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			return integrations.watchProject(cwd, taskLog(cmd));
 		case "deploy":
 			return integrations.deploy(cmd.target, cwd, cmd.options ?? {}, taskLog(cmd));
+		case "deploy_plan":
+			return integrations.deployPlan(cmd.target, cwd, cmd.options ?? {});
 
 		// Git for the project folder (gitops.ts).
 		case "git_status":
@@ -1070,6 +1114,23 @@ async function dispatch(line: string) {
 // Startup
 
 async function main() {
+	// A rejected promise must never kill the host (and, with it, the chat):
+	// log it and keep running. Features still handle their own errors.
+	process.on("unhandledRejection", (reason) => {
+		console.error("[host] unhandled rejection (kept alive):", reason);
+	});
+	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
+	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
+	// reaped by the app — the OS or user must kill that ssh.)
+	process.on("SIGTERM", () => {
+		tunnels.stopAll();
+		process.exit(0);
+	});
+	process.on("SIGINT", () => {
+		tunnels.stopAll();
+		process.exit(0);
+	});
+	process.on("exit", () => tunnels.stopAll());
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(workspace, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
@@ -1089,7 +1150,12 @@ async function main() {
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
 	modelRuntime = await ModelRuntime.create();
-	settingsManager = SettingsManager.create(workspace, agentDir);
+	// Never auto-trust project code: a cloned repo's .pi/extensions/*.ts
+	// would otherwise run inside the host with the user's tokens on merely
+	// opening the project. Project settings are not loaded while untrusted
+	// either (see SettingsManager); the app's own inline extension is
+	// unaffected, it is not a project extension.
+	settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
 	// Linux container is the agent's shell by default once installed.
 	if (
 		container.status(undefined).installed &&
@@ -1115,7 +1181,9 @@ async function main() {
 	});
 	// Pick up what other phones synced while this one was off.
 	sync.schedule(20_000);
-	runner = new Runner(join(stateDir, "runs.json"), backgroundSession, send, (p) => integrations.githubApi(p));
+	runner = new Runner(join(stateDir, "runs.json"), backgroundSession, send, (p) => integrations.githubApi(p), (summary, reason) =>
+		guard.askApproval("issue_run", summary, reason),
+	);
 
 	// Starter skills and MCP connections come up in the background; the chat
 	// session is rebuilt afterwards (when idle) so it sees them.

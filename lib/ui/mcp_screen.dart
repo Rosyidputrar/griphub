@@ -73,7 +73,7 @@ class _McpScreenState extends State<McpScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Remove server?')),
-        content: Text('"${s.name}" and its tools will be removed from pi.'),
+        content: Text('"${s.name}" ${tr('and its tools will be removed from pi.')}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Remove'))),
@@ -470,6 +470,7 @@ class _McpSheetState extends State<_McpSheet> {
                   ),
                 ),
                 IconButton(
+                  tooltip: tr('Remove'),
                   onPressed: () => setState(() {
                     pairs.remove(pair);
                     pair.dispose();
@@ -480,7 +481,7 @@ class _McpSheetState extends State<_McpSheet> {
             ),
           ),
         if (pairs.any((x) => x.value.text == '•••'))
-          Text('••• keeps the saved value unchanged.', style: text.bodySmall?.copyWith(color: p.muted)),
+          Text(tr('••• keeps the saved value unchanged.'), style: text.bodySmall?.copyWith(color: p.muted)),
       ],
     );
   }

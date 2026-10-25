@@ -105,14 +105,14 @@ class _UsageScreenState extends State<UsageScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('pi stops starting new requests once today\'s spend reaches this. Leave empty for no limit.'),
+            Text(tr('pi stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.')),
             const SizedBox(height: 14),
             TextField(
               controller: ctrl,
               autofocus: true,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-              decoration: InputDecoration(prefixText: r'$ ', hintText: tr('No limit')),
+              decoration: InputDecoration(suffixText: 'credits', hintText: tr('No limit')),
             ),
           ],
         ),
@@ -167,7 +167,7 @@ class _UsageScreenState extends State<UsageScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${_creditsFmt(remaining)} credit', style: text.titleMedium),
+                    Text('${_creditsFmt(remaining)} ${tr('credit')}', style: text.titleMedium),
                     Text('≈ ${_rp(remaining * kRupiahPerCredit)}', style: text.bodySmall?.copyWith(fontFamily: mono)),
                   ],
                 ),
@@ -175,7 +175,7 @@ class _UsageScreenState extends State<UsageScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Text('Terpakai ${_creditsFmt(used)} dari ${_creditsFmt(limit)} credit', style: text.bodySmall),
+          Text('${tr('Used')} ${_creditsFmt(used)} ${tr('of')} ${_creditsFmt(limit)} ${tr('credit')}', style: text.bodySmall),
           if (limit > 0) ...[
             const SizedBox(height: 8),
             ClipRRect(
@@ -247,7 +247,7 @@ class _UsageScreenState extends State<UsageScreen> {
               children: [
                 for (final d in const [7, 30])
                   ChoiceChip(
-                    label: Text('$d days'),
+                    label: Text('$d ${tr('days')}'),
                     selected: _days == d,
                     onSelected: (_) {
                       setState(() => _days = d);
@@ -280,7 +280,7 @@ class _UsageScreenState extends State<UsageScreen> {
                   icon: LucideIcons.wallet,
                   color: p.warning,
                   title: tr('Daily budget'),
-                  subtitle: _budget == 0 ? 'No limit' : '${_money(_budget)} per day',
+                  subtitle: _budget == 0 ? 'No limit' : '${formatCredits(_budget)} credits per day',
                   onTap: _editBudget,
                 ),
               ],
@@ -465,7 +465,7 @@ class _UsageScreenState extends State<UsageScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${_compact(total)} tokens', style: text.titleMedium),
+                    Text('${_compact(total)} ${tr('tokens')}', style: text.titleMedium),
                     if (cost > 0) Text(_money(cost), style: text.bodySmall?.copyWith(fontFamily: mono)),
                   ],
                 ),

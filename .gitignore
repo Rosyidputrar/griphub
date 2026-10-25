@@ -47,7 +47,7 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# AndroPI generated artifacts (rebuild with the steps in README.md)
+# GripHub generated artifacts (rebuild with the steps in README.md)
 /android/app/src/main/jniLibs/
 /android/app/src/main/assets/agent.zip
 /android/app/src/main/assets/agent.stamp

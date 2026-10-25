@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -29,6 +32,14 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // FLAG_SECURE follows the setting from the first frame: the leak is
+    // the Recents snapshot, taken while backgrounded, not the lock screen.
+    // (The toggle in Settings sends the same call when it flips.)
+    unawaited(
+      const MethodChannel('griphub/agent')
+          .invokeMethod('setSecure', Appearance.instance.appLock)
+          .catchError((_) {}),
+    );
     if (locked) WidgetsBinding.instance.addPostFrameCallback((_) => _unlock());
   }
 
@@ -76,35 +87,42 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    if (!locked) return widget.child;
+    // The child stays mounted under the lock screen: swapping it out used
+    // to destroy the Navigator (and any unsaved editor) on every lock.
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const LogoMark(size: 56),
-                const SizedBox(height: 22),
-                Text(tr('GripHub AI Agent is locked'), style: text.titleLarge),
-                if (error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    error!,
-                    textAlign: TextAlign.center,
-                    style: text.bodySmall?.copyWith(color: p.danger),
+    return Stack(
+      children: [
+        widget.child,
+        if (locked)
+          Scaffold(
+            body: SafeArea(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const LogoMark(size: 56),
+                      const SizedBox(height: 22),
+                      Text(tr('GripHub AI Agent is locked'), style: text.titleLarge),
+                      if (error != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          error!,
+                          textAlign: TextAlign.center,
+                          style: text.bodySmall?.copyWith(color: p.danger),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      PrimaryButton(label: tr('Unlock'), icon: LucideIcons.fingerprint, busy: asking, onPressed: _unlock),
+                    ],
                   ),
-                ],
-                const SizedBox(height: 24),
-                PrimaryButton(label: tr('Unlock'), icon: LucideIcons.fingerprint, busy: asking, onPressed: _unlock),
-              ],
+                ),
+              ),
             ),
           ),
-        ),
-      ),
+      ],
     );
   }
 }
