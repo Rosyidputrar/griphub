@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -79,7 +80,7 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
           children: [
             SettingsRow(
               icon: LucideIcons.images,
-              color: const Color(0xFF3E63DD),
+              color: context.palette.accentAlt,
               title: tr('Photos'),
               subtitle: tr('Screenshots, sketches, error photos'),
               onTap: () => Navigator.pop(context, 'gallery'),
@@ -143,7 +144,7 @@ class AttachmentStrip extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(Radii.r12),
                 child: a.isImage
                     ? Image.file(File(a.path), width: 56, height: 56, fit: BoxFit.cover)
                     : Container(
@@ -207,26 +208,53 @@ Future<bool> confirmBypass(BuildContext context) async =>
     ) ??
     false;
 
-class ApprovalCards extends StatelessWidget {
+/// The first approval in the queue. After an answer, the answered card stays
+/// on screen (disabled) for a moment before the next one slides in: without
+/// this, the second half of a double-tap lands on the NEXT card's Allow
+/// button and approves an action the user never saw.
+class ApprovalCards extends StatefulWidget {
   const ApprovalCards({super.key, required this.features});
   final Features features;
+
+  @override
+  State<ApprovalCards> createState() => _ApprovalCardsState();
+}
+
+class _ApprovalCardsState extends State<ApprovalCards> {
+  Approval? _justAnswered;
+  Timer? _timer;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onAnswered(Approval a) {
+    _timer?.cancel();
+    setState(() => _justAnswered = a);
+    _timer = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _justAnswered = null);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
-      listenable: features,
+      listenable: widget.features,
       builder: (context, _) {
-        if (features.approvals.isEmpty) return const SizedBox.shrink();
-        final a = features.approvals.first;
+        final approvals = widget.features.approvals;
+        final a = _justAnswered ?? (approvals.isEmpty ? null : approvals.first);
+        if (a == null) return const SizedBox.shrink();
         return Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(Radii.r22),
               border: Border.all(color: p.warning.withValues(alpha: 0.6), width: 1.2),
             ),
             child: Column(
@@ -245,7 +273,7 @@ class ApprovalCards extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (features.approvals.length > 1) Pill('+${features.approvals.length - 1}', color: p.muted),
+                    if (approvals.length > 1) Pill('+${approvals.length - 1}', color: p.muted),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -253,7 +281,7 @@ class ApprovalCards extends StatelessWidget {
                   width: double.infinity,
                   constraints: const BoxConstraints(maxHeight: 110),
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r12)),
                   child: SingleChildScrollView(
                     child: Text(
                       a.summary,
@@ -262,41 +290,20 @@ class ApprovalCards extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => features.answer(a, allow: false),
-                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
-                        child: Text(tr('Deny')),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => features.answer(a, allow: true, always: true),
-                        style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
-                        child: Text(tr('Always')),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => features.answer(a, allow: true),
-                        style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
-                        child: Text(tr('Allow')),
-                      ),
-                    ),
-                  ],
+                _ApprovalActions(
+                  key: ValueKey(a.id),
+                  features: widget.features,
+                  approval: a,
+                  onAnswered: () => _onAnswered(a),
                 ),
                 TextButton.icon(
                   onPressed: () async {
                     if (!await confirmBypass(context)) return;
-                    await features.client.call('settings_set', {
+                    await widget.features.client.call('settings_set', {
                       'settings': {'approvalMode': 'auto'},
                     });
-                    for (final pending in [...features.approvals]) {
-                      await features.answer(pending, allow: true);
+                    for (final pending in [...widget.features.approvals]) {
+                      await widget.features.answer(pending, allow: true);
                     }
                   },
                   style: TextButton.styleFrom(foregroundColor: p.muted),
@@ -308,6 +315,64 @@ class ApprovalCards extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Deny / Always / Allow for one approval card. The buttons disable on the
+/// first tap, and the parent keeps the answered card on screen briefly, so
+/// a double-tap cannot approve the next card in the queue unseen.
+class _ApprovalActions extends StatefulWidget {
+  const _ApprovalActions({super.key, required this.features, required this.approval, this.onAnswered});
+  final Features features;
+  final Approval approval;
+
+  /// Called synchronously on the first tap, before the answer round-trip.
+  final void Function()? onAnswered;
+
+  @override
+  State<_ApprovalActions> createState() => _ApprovalActionsState();
+}
+
+class _ApprovalActionsState extends State<_ApprovalActions> {
+  bool _responded = false;
+
+  Future<void> _answer({required bool allow, bool always = false}) async {
+    if (_responded) return;
+    setState(() => _responded = true);
+    widget.onAnswered?.call();
+    await widget.features.answer(widget.approval, allow: allow, always: always);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _responded ? null : () => _answer(allow: false),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
+            child: Text(tr('Deny')),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton(
+            onPressed: _responded ? null : () => _answer(allow: true, always: true),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+            child: Text(tr('Always')),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: FilledButton(
+            onPressed: _responded ? null : () => _answer(allow: true),
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
+            child: Text(tr('Allow')),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -328,7 +393,7 @@ class PlanBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(18)),
+        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.r18)),
         child: Row(
           children: [
             Icon(LucideIcons.listChecks, size: 18, color: p.accent),
@@ -402,7 +467,7 @@ class _DevServerBannerState extends State<DevServerBanner> {
                   padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
                   decoration: BoxDecoration(
                     color: p.success.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.circular(Radii.r18),
                   ),
                   child: Row(
                     children: [
@@ -474,7 +539,7 @@ class SlashMenu extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 260),
       decoration: BoxDecoration(
         color: p.bg,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(Radii.r20),
         border: Border.all(color: p.border),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
       ),
@@ -537,7 +602,7 @@ Future<void> showProjectTools(
                   ),
                   SettingsRow(
                     icon: LucideIcons.search,
-                    color: const Color(0xFF3E63DD),
+                    color: context.palette.accentAlt,
                     title: tr('Search'),
                     subtitle: tr('Find text across every file'),
                     onTap: () => go(SearchScreen(agent: agent)),

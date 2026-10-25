@@ -139,7 +139,7 @@ _ParsedFile _parse(String path, String patch) {
 
 /// Renders a unified diff with per-file headers, line numbers and tinted
 /// added/removed lines; long lines scroll sideways rather than wrap.
-class DiffView extends StatelessWidget {
+class DiffView extends StatefulWidget {
   const DiffView({super.key, required this.patch, this.maxHeight, this.showHeaders = true});
   final String patch;
   final double? maxHeight;
@@ -150,30 +150,47 @@ class DiffView extends StatelessWidget {
   static const _maxLines = 4000;
 
   @override
+  State<DiffView> createState() => _DiffViewState();
+}
+
+class _DiffViewState extends State<DiffView> {
+  /// Parsed once per patch, not on every build: large diffs used to be
+  /// re-parsed on each frame.
+  late List<_ParsedFile> _files = _parseAll(widget.patch);
+
+  static List<_ParsedFile> _parseAll(String patch) =>
+      [for (final f in splitPatch(patch)) _parse(f.path, f.patch)];
+
+  @override
+  void didUpdateWidget(DiffView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.patch != widget.patch) _files = _parseAll(widget.patch);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    if (patch.trim().isEmpty) {
+    if (widget.patch.trim().isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
-        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r16)),
         alignment: Alignment.center,
         child: Text(tr('No changes'), style: Theme.of(context).textTheme.bodySmall),
       );
     }
-    final files = [for (final f in splitPatch(patch)) _parse(f.path, f.patch)];
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (var i = 0; i < files.length; i++) ...[
+        for (var i = 0; i < _files.length; i++) ...[
           if (i > 0) const SizedBox(height: 12),
-          _FileDiff(file: files[i], showHeader: showHeaders, maxLines: _maxLines),
+          _FileDiff(file: _files[i], showHeader: widget.showHeaders, maxLines: DiffView._maxLines),
         ],
       ],
     );
-    if (maxHeight == null) return body;
+    if (widget.maxHeight == null) return body;
     return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight!),
+      constraints: BoxConstraints(maxHeight: widget.maxHeight!),
       child: SingleChildScrollView(child: body),
     );
   }
@@ -203,7 +220,7 @@ class _FileDiff extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: p.raised,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(Radii.r16),
         border: Border.all(color: p.border),
       ),
       clipBehavior: Clip.antiAlias,

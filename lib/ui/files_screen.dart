@@ -70,16 +70,7 @@ String _formatSize(int bytes) {
   return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
 }
 
-String _formatTime(DateTime t) {
-  final now = DateTime.now();
-  final diff = now.difference(t);
-  if (diff.inMinutes < 1) return 'just now';
-  if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-  if (diff.inDays < 1 && now.day == t.day) return '${diff.inHours}h ago';
-  if (diff.inDays < 7) return '${diff.inDays == 0 ? 1 : diff.inDays}d ago';
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${t.year}-${two(t.month)}-${two(t.day)}';
-}
+String _formatTime(DateTime t) => formatAgo(t);
 
 IconData _iconFor(String name, bool isDir) {
   if (isDir) return LucideIcons.folder;
@@ -643,7 +634,7 @@ class _FilesScreenState extends State<FilesScreen> {
     }
     final meta = [if (!e.isDir) _formatSize(e.stat.size), _formatTime(e.stat.modified)].join(' · ');
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(Radii.r12),
       onTap: () => _open(e),
       onLongPress: () => _showEntrySheet(e),
       child: Padding(
@@ -653,7 +644,7 @@ class _FilesScreenState extends State<FilesScreen> {
             Container(
               width: 36,
               height: 36,
-              decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: tint.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(Radii.r10)),
               child: Icon(_iconFor(e.name, e.isDir), size: 18, color: tint),
             ),
             const SizedBox(width: 12),
@@ -738,7 +729,7 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
     return Container(
       height: 40,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r10)),
       child: ListView.separated(
         controller: _scroll,
         scrollDirection: Axis.horizontal,
@@ -748,7 +739,7 @@ class _BreadcrumbsState extends State<_Breadcrumbs> {
         itemBuilder: (context, i) {
           final last = i == crumbs.length - 1;
           return InkWell(
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Radii.r6),
             onTap: last ? null : () => widget.onTap(crumbs[i].$2),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),

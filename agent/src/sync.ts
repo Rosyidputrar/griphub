@@ -66,6 +66,8 @@ export interface SyncStatus {
 	localOnly: string[];
 	/** What the last sync brought in from other phones. */
 	imported: { chats: number; projects: number; config: number; removed: number };
+	/** Local chats deleted on another phone, waiting for the user to confirm their deletion here. */
+	pendingDelete: string[];
 }
 
 interface State {
@@ -78,6 +80,10 @@ interface State {
 	/** Item keys present after the last sync, to tell "deleted here" from "new elsewhere". */
 	synced: string[];
 	localOnly: string[];
+	/** Repository the synced keys belong to; a repo change resets them (below). */
+	repo: string | null;
+	/** Local chats another phone deleted, not yet confirmed for deletion here. */
+	pendingDelete: string[];
 }
 
 const exists = (p: string) => existsSync(p);
@@ -150,6 +156,7 @@ export class GitHubSync {
 	private readonly dir: string;
 	private running = false;
 	private again = false;
+	private againCount = 0;
 	private timer: NodeJS.Timeout | undefined;
 	private due = 0;
 	private repo: string | null = null;
@@ -168,6 +175,8 @@ export class GitHubSync {
 			imported: { chats: 0, projects: 0, config: 0, removed: 0 },
 			synced: [],
 			localOnly: [],
+			repo: null,
+			pendingDelete: [],
 		};
 		try {
 			this.state = { ...empty, ...JSON.parse(readFileSync(this.file, "utf8")) };
@@ -177,8 +186,8 @@ export class GitHubSync {
 	}
 
 	status(): SyncStatus {
-		const { enabled, lastSync, lastError, failures, skipped, imported, localOnly } = this.state;
-		return { enabled, running: this.running, repo: this.repo, lastSync, lastError, failures, skipped, localOnly, imported };
+		const { enabled, lastSync, lastError, failures, skipped, imported, localOnly, pendingDelete } = this.state;
+		return { enabled, running: this.running, repo: this.repo, lastSync, lastError, failures, skipped, localOnly, imported, pendingDelete };
 	}
 
 	private save() {
@@ -211,7 +220,7 @@ export class GitHubSync {
 		}, delayMs);
 	}
 
-	async syncNow(): Promise<SyncStatus> {
+	async syncNow(opts: { confirmDelete?: boolean } = {}): Promise<SyncStatus> {
 		if (!this.state.enabled) throw new Error("GitHub sync is off");
 		if (this.running) {
 			this.again = true;
@@ -224,20 +233,38 @@ export class GitHubSync {
 		}
 		this.running = true;
 		this.deps.notify(this.status());
+		// Watchdog: a hung network or git call must not stall sync forever.
+		let timer: NodeJS.Timeout | undefined;
 		try {
-			await this.sync();
+			await Promise.race([
+				this.sync(!!opts.confirmDelete),
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error("Sync timed out after 10 minutes")), 10 * 60_000);
+					timer.unref?.();
+				}),
+			]);
 			this.state.lastError = null;
 			this.state.failures = 0;
 		} catch (e) {
 			this.state.lastError = String((e as Error)?.message ?? e).slice(0, 500);
 			this.state.failures++;
 		} finally {
+			clearTimeout(timer);
 			this.running = false;
 			this.save();
 		}
 		if (this.again) {
 			this.again = false;
-			this.schedule(1000);
+			// Bound the retry chain: a persistent conflict must surface as
+			// an error, not reschedule forever.
+			if (this.againCount < 3) {
+				this.againCount++;
+				this.schedule(1000);
+			} else {
+				this.againCount = 0;
+			}
+		} else {
+			this.againCount = 0;
 		}
 		return this.status();
 	}
@@ -245,7 +272,8 @@ export class GitHubSync {
 	// -------------------------------------------------------------------------
 
 	private git(args: string[]) {
-		return run("git", args, { cwd: this.dir });
+		// Network git calls (fetch/push) must fail fast, not hang past the sync watchdog.
+		return run("git", args, { cwd: this.dir, timeoutMs: 120_000 });
 	}
 
 	/** Finds or creates the private repository and returns its owner/name. */
@@ -299,11 +327,20 @@ export class GitHubSync {
 		}
 	}
 
-	private async sync() {
+	private async sync(confirmDelete = false) {
 		const { fullName, branch } = await this.ensureRepo();
+		// The synced keys belong to one repository: switching GitHub
+		// accounts (or a deleted + recreated repo) must never delete local
+		// chats just because the new repo lacks the old repo's keys. A repo
+		// change is a first sync: import what is there, delete nothing.
+		if (this.state.repo && this.state.repo !== fullName) {
+			this.state.synced = [];
+			this.state.localOnly = [];
+		}
+		this.state.repo = fullName;
 		await this.checkout(fullName, branch);
 		const synced = new Set(this.state.synced);
-		const imported = await this.pull(synced);
+		const { imported, pendingDelete } = await this.pull(synced, confirmDelete);
 		const { items, skipped } = await this.mirror();
 		await this.git(["add", "-A"]);
 		const changed = (await this.git(["status", "--porcelain"])).trim().length > 0;
@@ -325,15 +362,22 @@ export class GitHubSync {
 		}
 		this.state.synced = items;
 		this.state.skipped = skipped;
+		this.state.pendingDelete = pendingDelete;
 		this.state.imported = imported;
 		this.state.lastSync = Date.now();
 		if (imported.config) await this.deps.providersChanged();
 	}
 
-	/** Copies in what other phones added. */
-	private async pull(synced: Set<string>) {
+	/**
+	 * Copies in what other phones added. Local chats deleted on another
+	 * phone are only removed here with an explicit confirmation: without
+	 * it they are reported in pendingDelete and left alone, so an
+	 * automatic sync can never delete local chats.
+	 */
+	private async pull(synced: Set<string>, confirmDelete: boolean) {
 		const { agentDir, workspace } = this.deps;
 		const imported = { chats: 0, projects: 0, config: 0, removed: 0 };
+		const pendingDelete: string[] = [];
 		const isNew = (key: string, local: string) => !exists(local) && !synced.has(key);
 		const active = this.deps.activeSession();
 		this.keepRemote.clear();
@@ -346,6 +390,10 @@ export class GitHubSync {
 				const local = join(agentDir, key);
 				if (active && resolve(local) === resolve(active)) continue;
 				if (exists(local)) {
+					if (!confirmDelete) {
+						pendingDelete.push(key);
+						continue;
+					}
 					rmSync(local);
 					imported.removed++;
 				}
@@ -430,7 +478,7 @@ export class GitHubSync {
 				imported.config++;
 			}
 		}
-		return imported;
+		return { imported, pendingDelete };
 	}
 
 	/** Makes the clone's working tree a copy of this phone; returns the item keys and skipped files. */

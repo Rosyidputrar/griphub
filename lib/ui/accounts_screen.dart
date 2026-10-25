@@ -40,7 +40,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
         content: Text(tr('Its token is removed from this device. To reconnect you will need to paste a token again.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Disconnect'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Disconnect')),
+          ),
         ],
       ),
     );
@@ -75,6 +79,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
                   _Header(tr('GitHub')),
+                  _GithubClientIdField(agent: widget.agent, onSaved: _snack),
                   it.github == null
                       ? _GithubConnect(
                           agent: widget.agent,
@@ -334,7 +339,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(16)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r16)),
                     alignment: Alignment.center,
                     child: Text(
                       f.userCode,
@@ -466,6 +471,92 @@ class _TokenConnectState extends State<_TokenConnect> {
             child: busy
                 ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : Text(tr('Connect')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The GitHub OAuth App Client ID for the device flow. This is how a
+/// distributed build points GitHub login at its own OAuth App without a
+/// rebuild: create an OAuth App with Device Flow enabled, paste its Client
+/// ID here. The ID is public, not a secret. Empty means GitHub login is
+/// not configured.
+class _GithubClientIdField extends StatefulWidget {
+  const _GithubClientIdField({required this.agent, required this.onSaved});
+  final AgentController agent;
+  final void Function(String message) onSaved;
+
+  @override
+  State<_GithubClientIdField> createState() => _GithubClientIdFieldState();
+}
+
+class _GithubClientIdFieldState extends State<_GithubClientIdField> {
+  late final TextEditingController _id = TextEditingController(
+    text: widget.agent.integrations.settings?.githubClientId ?? '',
+  );
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _id.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await widget.agent.integrations.updateSettings({'githubClientId': _id.text.trim()});
+      if (mounted) widget.onSaved('OAuth client ID saved');
+    } catch (e) {
+      if (mounted) widget.onSaved(e.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(Radii.r18),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            tr('For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.'),
+            style: text.bodySmall,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _id,
+                  decoration: InputDecoration(
+                    hintText: 'Ov23…',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                  onSubmitted: (_) => _save(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _saving ? null : _save,
+                child: Text(tr('Save')),
+              ),
+            ],
           ),
         ],
       ),
@@ -624,11 +715,11 @@ class _HostTile extends StatelessWidget {
       child: Material(
         color: p.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(Radii.r14),
           side: BorderSide(color: p.border),
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(Radii.r14),
           onTap: onEdit,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
@@ -686,14 +777,14 @@ class _HostSheetState extends State<_HostSheet> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    Widget field(TextEditingController c, String label, {String? hint, TextInputType? type, bool mono = false}) =>
+    Widget field(TextEditingController c, String label, {String? hint, TextInputType? type, bool monospace = false}) =>
         Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: TextField(
             controller: c,
             keyboardType: type,
             autocorrect: false,
-            style: mono ? const TextStyle(fontFamily: 'GeistMono', fontSize: 14) : null,
+            style: monospace ? const TextStyle(fontFamily: mono, fontSize: 14) : null,
             decoration: InputDecoration(labelText: label, hintText: hint),
           ),
         );
@@ -710,13 +801,13 @@ class _HostSheetState extends State<_HostSheet> {
               field(name, 'Name', hint: 'my-vps'),
               Row(
                 children: [
-                  Expanded(flex: 3, child: field(host, 'Host', hint: '203.0.113.10', mono: true)),
+                  Expanded(flex: 3, child: field(host, 'Host', hint: '203.0.113.10', monospace: true)),
                   const SizedBox(width: 10),
-                  Expanded(child: field(port, 'Port', type: TextInputType.number, mono: true)),
+                  Expanded(child: field(port, 'Port', type: TextInputType.number, monospace: true)),
                 ],
               ),
-              field(user, 'User', hint: 'root', mono: true),
-              field(path, 'Deploy folder (optional)', hint: '/var/www/html', mono: true),
+              field(user, 'User', hint: 'root', monospace: true),
+              field(path, 'Deploy folder (optional)', hint: '/var/www/html', monospace: true),
               const SizedBox(height: 6),
               FilledButton(
                 onPressed: () => Navigator.of(context).pop({

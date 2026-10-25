@@ -56,7 +56,7 @@ class Palette extends ThemeExtension<Palette> {
     border: Color(0xFFE9E9ED),
     text: Color(0xFF111113),
     muted: Color(0xFF6B6B73),
-    faint: Color(0xFFA3A3AB),
+    faint: Color(0xFF71717A),
     inverse: Color(0xFFFFFFFF),
     danger: Color(0xFFE5484D),
     success: Color(0xFF30A46C),
@@ -74,7 +74,7 @@ class Palette extends ThemeExtension<Palette> {
     border: Color(0xFF26262B),
     text: Color(0xFFF5F5F7),
     muted: Color(0xFF9E9EA6),
-    faint: Color(0xFF5A5A63),
+    faint: Color(0xFF8E8E98),
     inverse: Color(0xFF0B0B0D),
     danger: Color(0xFFFF6369),
     success: Color(0xFF3DD68C),
@@ -229,6 +229,31 @@ class Appearance extends ValueNotifier<ThemeMode> {
   }
 }
 
+/// Corner-radius tokens. Each constant is one radius value already used
+/// across the UI; the migration from literals was mechanical, so no pixel
+/// value changed. `pill` is the fully-rounded (99) case, not a corner size.
+class Radii {
+  const Radii._();
+
+  static const double r2 = 2;
+  static const double r3 = 3;
+  static const double r4 = 4;
+  static const double r6 = 6;
+  static const double r8 = 8;
+  static const double r10 = 10;
+  static const double r12 = 12;
+  static const double r14 = 14;
+  static const double r16 = 16;
+  static const double r18 = 18;
+  static const double r20 = 20;
+  static const double r22 = 22;
+  static const double r24 = 24;
+  static const double r28 = 28;
+  static const double r32 = 32;
+  static const double r34 = 34;
+  static const double pill = 99;
+}
+
 ThemeData buildTheme(Brightness brightness) {
   final look = Appearance.instance;
   final light = brightness == Brightness.light;
@@ -286,7 +311,7 @@ ThemeData buildTheme(Brightness brightness) {
   );
 
   final overlay = brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light;
-  final radius = BorderRadius.circular(16);
+  final radius = BorderRadius.circular(Radii.r16);
 
   OutlineInputBorder field(Color c, [double w = 1]) => OutlineInputBorder(
     borderRadius: radius,
@@ -320,7 +345,7 @@ ThemeData buildTheme(Brightness brightness) {
     drawerTheme: DrawerThemeData(
       backgroundColor: p.bg,
       width: 320,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(right: Radius.circular(28))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(right: Radius.circular(Radii.r28))),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: p.bg,
@@ -330,12 +355,12 @@ ThemeData buildTheme(Brightness brightness) {
       dragHandleColor: p.raised,
       dragHandleSize: const Size(40, 5),
       modalBarrierColor: Colors.black.withValues(alpha: 0.35),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(Radii.r32))),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: p.bg,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.r28)),
       titleTextStyle: text.titleLarge,
       contentTextStyle: text.bodyMedium,
     ),
@@ -343,7 +368,7 @@ ThemeData buildTheme(Brightness brightness) {
       backgroundColor: p.nav,
       contentTextStyle: text.bodyMedium!.copyWith(color: Colors.white),
       behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.r18)),
       elevation: 0,
       insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
     ),
@@ -389,7 +414,7 @@ ThemeData buildTheme(Brightness brightness) {
       style: TextButton.styleFrom(
         foregroundColor: p.text,
         textStyle: text.labelLarge,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.r12)),
       ),
     ),
     chipTheme: ChipThemeData(
@@ -423,17 +448,17 @@ ThemeData buildTheme(Brightness brightness) {
       subtitleTextStyle: text.bodySmall,
       contentPadding: const EdgeInsets.symmetric(horizontal: 20),
       minVerticalPadding: 10,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.r16)),
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: p.bg,
       surfaceTintColor: Colors.transparent,
       elevation: 8,
       shadowColor: Colors.black.withValues(alpha: 0.15),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.r18)),
     ),
     tooltipTheme: TooltipThemeData(
-      decoration: BoxDecoration(color: p.nav, borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(color: p.nav, borderRadius: BorderRadius.circular(Radii.r10)),
       textStyle: text.labelMedium!.copyWith(color: Colors.white),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: p.text, linearTrackColor: p.raised),

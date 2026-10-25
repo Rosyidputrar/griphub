@@ -50,6 +50,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkAccess();
+    _loadChildren();
   }
 
   @override
@@ -76,24 +77,54 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
       }
       phoneRoot = a.root;
     });
+    _loadChildren();
   }
 
-  void _switch(_Root r) => setState(() {
-    root = r;
-    path = base;
-  });
+  void _switch(_Root r) {
+    setState(() {
+      root = r;
+      path = base;
+    });
+    _loadChildren();
+  }
 
-  List<Directory> _children() {
+  /// Folder listing, loaded off the UI thread: listing a large phone
+  /// directory synchronously inside build() froze the UI. Stale results
+  /// (path changed mid-load) are discarded.
+  List<Directory> _dirs = [];
+  Map<String, bool> _git = {};
+
+  Future<void> _loadChildren() async {
+    final dir = path;
+    final show = showHidden;
     try {
-      final dirs = Directory(path).listSync(followLinks: false).whereType<Directory>().where((d) {
+      final entries = await Directory(dir).list(followLinks: false).toList();
+      final dirs = entries.whereType<Directory>().where((d) {
         final name = folderName(d.path);
-        return showHidden || !name.startsWith('.');
-      }).toList();
-      dirs.sort((a, b) => folderName(a.path).toLowerCase().compareTo(folderName(b.path).toLowerCase()));
-      return dirs;
+        return show || !name.startsWith('.');
+      }).toList()
+        ..sort((a, b) => folderName(a.path).toLowerCase().compareTo(folderName(b.path).toLowerCase()));
+      final flags = <String, bool>{};
+      await Future.wait(dirs.map((d) async {
+        flags[d.path] = await Directory('${d.path}/.git').exists().catchError((_) => false);
+      }));
+      if (!mounted || path != dir || showHidden != show) return;
+      setState(() {
+        _dirs = dirs;
+        _git = flags;
+      });
     } catch (_) {
-      return const [];
+      if (!mounted || path != dir) return;
+      setState(() {
+        _dirs = [];
+        _git = {};
+      });
     }
+  }
+
+  void _go(String p) {
+    setState(() => path = p);
+    _loadChildren();
   }
 
   Future<void> _newFolder() async {
@@ -119,7 +150,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
     if (clean == null || clean.isEmpty) return;
     try {
       final dir = Directory('$path/$clean')..createSync(recursive: true);
-      setState(() => path = dir.path);
+      _go(dir.path);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: $e')));
@@ -133,7 +164,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
     final text = Theme.of(context).textTheme;
     final locked = root == _Root.phone && !phoneGranted;
     final crumbs = path.substring(base.length).split('/').where((s) => s.isNotEmpty).toList();
-    final children = locked ? const <Directory>[] : _children();
+    final children = locked ? const <Directory>[] : _dirs;
 
     return Scaffold(
       appBar: AppBar(
@@ -198,14 +229,14 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                   label: root == _Root.workspace ? 'workspace' : 'phone',
                   icon: root == _Root.workspace ? LucideIcons.boxes : LucideIcons.smartphone,
                   active: crumbs.isEmpty,
-                  onTap: () => setState(() => path = base),
+                  onTap: () => _go(base),
                 ),
                 for (var i = 0; i < crumbs.length; i++) ...[
                   Icon(LucideIcons.chevronRight, size: 14, color: p.faint),
                   _Crumb(
                     label: crumbs[i],
                     active: i == crumbs.length - 1,
-                    onTap: () => setState(() => path = '$base/${crumbs.take(i + 1).join('/')}'),
+                    onTap: () => _go('$base/${crumbs.take(i + 1).join('/')}'),
                   ),
                 ],
               ],
@@ -251,7 +282,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                     itemCount: children.length,
                     itemBuilder: (context, i) {
                       final d = children[i];
-                      final git = Directory('${d.path}/.git').existsSync();
+                      final git = _git[d.path] ?? false;
                       return ListTile(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12),
                         leading: IconTile(
@@ -298,7 +329,7 @@ class _Crumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(Radii.r8),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

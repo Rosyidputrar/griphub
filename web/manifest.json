@@ -1,6 +1,6 @@
 {
-    "name": "andropi",
-    "short_name": "andropi",
+    "name": "griphub",
+    "short_name": "griphub",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

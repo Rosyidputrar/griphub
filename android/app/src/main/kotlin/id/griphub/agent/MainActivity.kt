@@ -14,6 +14,7 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import android.provider.Settings
 import android.speech.RecognizerIntent
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -76,7 +77,9 @@ class MainActivity : FlutterFragmentActivity() {
             }
 
             override fun onExit(code: Int) {
-                AgentService.setActive(this@MainActivity, false)
+                // Only the chat side ends here; schedules keep the service
+                // alive through keepAlive until they are switched off.
+                AgentService.setBusy(this@MainActivity, false)
                 events?.success(mapOf("kind" to "exit", "code" to code))
             }
         }
@@ -110,7 +113,7 @@ class MainActivity : FlutterFragmentActivity() {
                     // The toolchain environment, for terminals the app opens.
                     "environment" -> result.success(AgentRuntime.prepareEnvironment(applicationContext))
                     "setBusy" -> {
-                        AgentService.setActive(this, call.arguments as Boolean, stoppable = true)
+                        AgentService.setBusy(this, call.arguments as Boolean)
                         result.success(null)
                     }
                     // What the agent is doing, for the ongoing notification.
@@ -121,9 +124,9 @@ class MainActivity : FlutterFragmentActivity() {
                     // Keeps the process alive for queued runs and schedules.
                     "keepAlive" -> {
                         val on = call.argument<Boolean>("on") == true
-                        AgentService.setActive(
+                        AgentService.setKeepAlive(
                             this, on,
-                            call.argument<String>("text")
+                            text = call.argument<String>("text")
                                 ?: Notifications.t(this, "Background tasks active", "Background task aktif"),
                         )
                         result.success(null)
@@ -147,14 +150,35 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
                     "shareFile" -> {
-                        val file = File(call.argument<String>("path")!!)
-                        val uri = FileProvider.getUriForFile(this, "id.griphub.agent.files", file)
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = mimeOf(file.name)
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        try {
+                            val file = shareableFile(File(call.argument<String>("path")!!))
+                            val uri = FileProvider.getUriForFile(this, "id.griphub.agent.files", file)
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = mimeOf(file.name)
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(Intent.createChooser(send, file.name))
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("share_failed", e.message, null)
                         }
-                        startActivity(Intent.createChooser(send, file.name))
+                    }
+                    // Explicit recovery after SecureKey.hex() refuses an
+                    // un-unwrappable key: rotate it; saved tokens must be
+                    // entered again, but nothing is lost silently.
+                    "resetStoreKey" -> {
+                        SecureKey.resetHex(applicationContext)
+                        result.success(null)
+                    }
+                    // FLAG_SECURE while app lock is on: the system must not
+                    // snapshot chats into Recents thumbnails or screenshots.
+                    "setSecure" -> {
+                        if (call.arguments as? Boolean == true) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
                         result.success(null)
                     }
                     "saveToDownloads" -> {
@@ -266,8 +290,27 @@ class MainActivity : FlutterFragmentActivity() {
         events?.success(mapOf("kind" to "launch"))
     }
 
+    /**
+     * A file safe to hand to FileProvider: inside app storage as-is, anything
+     * else copied into app cache first (so shared-storage project files keep
+     * working without widening the provider's roots).
+     */
+    private fun shareableFile(file: File): File {
+        val canonical = file.canonicalFile
+        val roots = listOfNotNull(filesDir?.canonicalFile, cacheDir?.canonicalFile, getExternalFilesDir(null)?.canonicalFile)
+        if (roots.any { canonical == it || canonical.path.startsWith(it.path + File.separator) }) return canonical
+        val dir = File(requireNotNull(cacheDir), "shared/${System.currentTimeMillis()}").apply { mkdirs() }
+        val target = File(dir, canonical.name.replace('/', '_'))
+        file.inputStream().use { input -> target.outputStream().use { input.copyTo(it) } }
+        return target
+    }
+
     /** Copies a shared content:// file into app cache so Flutter and the agent can read it. */
     private fun copyShared(uri: Uri): Map<String, Any?>? = try {
+        // Only content:// URIs are mediated by the sender's grant. A file://
+        // URI would make this app read its own private files on another
+        // app's behalf (e.g. its own .ssh key) using its own privileges.
+        if (uri.scheme != "content") return null
         var name = "shared"
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) name = c.getString(0) ?: name

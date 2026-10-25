@@ -35,6 +35,7 @@ flutter:
   assets:
     - assets/illustrations/
     - assets/brand/
+    - LICENSE
   fonts:
     - family: Geist
       fonts:

@@ -68,7 +68,7 @@ class _Boot extends StatelessWidget {
           children: [
             const LogoMark(size: 56),
             const SizedBox(height: 20),
-            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(2))),
+            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(Radii.r2))),
             const SizedBox(height: 14),
             Text(tr('Starting agent'), style: Theme.of(context).textTheme.bodySmall),
           ],
@@ -103,7 +103,7 @@ class _BootFailed extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: p.surface,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(Radii.r10),
                     border: Border.all(color: p.border),
                   ),
                   child: SingleChildScrollView(
@@ -116,6 +116,38 @@ class _BootFailed extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               FilledButton(onPressed: agent.boot, child: Text(tr('Try again'))),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(tr('Reset saved keys?')),
+                      content: Text(
+                        tr(
+                          'The saved store key could not be unlocked. Resetting it makes all saved tokens unreadable; you will need to sign in again.',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: context.palette.danger,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(context, true),
+                          child: Text(tr('Reset')),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    await agent.client.resetStoreKey();
+                    await agent.boot();
+                  }
+                },
+                child: Text(tr('Reset saved keys')),
+              ),
             ],
           ),
         ),

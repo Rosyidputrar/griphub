@@ -149,8 +149,13 @@ export class Tunnels {
 			proc.stderr.on("data", feed);
 			proc.on("error", reject);
 			proc.on("close", (code) => {
-				this.open.delete(port);
-				onUpdate({ port, url: null, closed: true });
+				// Only the current entry may clear the port: start() kills
+				// the previous process first, and its late close event must
+				// not wipe the replacement tunnel's entry.
+				if (this.open.get(port) === entry) {
+					this.open.delete(port);
+					onUpdate({ port, url: null, closed: true });
+				}
 				if (!entry.url) reject(new Error(`Tunnel closed (${code}): ${text.trim().split("\n").slice(-2).join(" ")}`));
 			});
 			setTimeout(() => !entry.url && reject(new Error("Tunnel did not open within 30 seconds")), 30_000);
@@ -181,6 +186,16 @@ export interface UsageRow {
 	requests: number;
 }
 
+/** Calendar day (YYYY-MM-DD) in Asia/Jakarta: the user's day, not UTC. */
+export function wibDay(ts: number): string {
+	return new Intl.DateTimeFormat("en-CA", {
+		timeZone: "Asia/Jakarta",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+	}).format(new Date(ts));
+}
+
 export function usageSummary(sessionsDir: string, days = 30) {
 	const since = Date.now() - days * 86400_000;
 	const rows = new Map<string, UsageRow>();
@@ -199,7 +214,7 @@ export function usageSummary(sessionsDir: string, days = 30) {
 						if (m?.role !== "assistant" || !m.usage) continue;
 						const ts = typeof m.timestamp === "number" ? m.timestamp : Date.parse(e.timestamp);
 						if (ts < since) continue;
-						const day = new Date(ts).toISOString().slice(0, 10);
+						const day = wibDay(ts);
 						const key = `${day}|${m.provider}|${m.model}`;
 						const r = rows.get(key) ?? { day, provider: m.provider, model: m.model, input: 0, output: 0, cacheRead: 0, cost: 0, requests: 0 };
 						r.input += m.usage.input ?? 0;

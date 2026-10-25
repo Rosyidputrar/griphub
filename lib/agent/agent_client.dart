@@ -101,6 +101,13 @@ class AgentClient {
   /// Opens the Android share sheet for a file.
   Future<void> shareFile(String path) => _method.invokeMethod('shareFile', {'path': path});
 
+  /// Rotates the Keystore-wrapped store key after an unwrap failure. Saved tokens become unreadable and must be entered again.
+  Future<void> resetStoreKey() => _method.invokeMethod('resetStoreKey');
+
+  /// Toggles FLAG_SECURE (no Recents thumbnails or screenshots) while app
+  /// lock is on. Fire-and-forget safe: the native side ignores unknown calls.
+  Future<void> setSecure(bool secure) => _method.invokeMethod('setSecure', secure);
+
   /// Copies a file into the phone's Download/GripHub folder; returns where it landed.
   Future<String> saveToDownloads(String path) async =>
       (await _method.invokeMethod<String>('saveToDownloads', {'path': path}))!;

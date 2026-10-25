@@ -14,6 +14,7 @@
 
     <application
         android:label="GripHub AI Agent"
+        android:allowBackup="false"
         android:extractNativeLibs="true"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">

@@ -77,7 +77,11 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
         content: Text(tr('The slash command will no longer be available in chat.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Delete'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Delete')),
+          ),
         ],
       ),
     );
@@ -185,7 +189,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                   background: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 24),
-                    decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(24)),
+                    decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(Radii.r24)),
                     child: const Icon(LucideIcons.trash2, color: Colors.white),
                   ),
                   child: SurfaceCard(
@@ -220,7 +224,10 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                           onSelected: (v) => v == 'edit' ? _edit(t) : _delete(t),
                           itemBuilder: (_) => [
                             PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
-                            PopupMenuItem(value: 'delete', child: Text(tr('Delete'))),
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Text(tr('Delete'), style: TextStyle(color: p.danger)),
+                            ),
                           ],
                         ),
                       ],

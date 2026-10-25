@@ -492,15 +492,69 @@ export async function webSearch(q: string, n: number, keys: SearchKeys, signal?:
 // ---------------------------------------------------------------------------
 // Fetch
 
+/** Reads at most `budget` bytes of a response body, so a huge page cannot OOM the host. */
+async function readCapped(res: Response, budget: number): Promise<string> {
+	if (!res.body) return "";
+	const reader = res.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			const take = Math.min(value.length, budget - total);
+			if (take > 0) {
+				chunks.push(value.subarray(0, take));
+				total += take;
+			}
+			if (total >= budget) {
+				await reader.cancel().catch(() => {});
+				break;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+	const out = new Uint8Array(total);
+	let off = 0;
+	for (const c of chunks) {
+		out.set(c, off);
+		off += c.length;
+	}
+	return new TextDecoder().decode(out);
+}
+
 export async function webFetch(url: string, signal?: AbortSignal) {
 	if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
-	const res = await fetch(url, {
-		headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
-		redirect: "follow",
-		signal,
-	});
-	const type = res.headers.get("content-type") ?? "";
-	const raw = await res.text();
+	// The caller may never abort, so cap the wait at 60s (combined with the
+	// caller's signal) and the body at 5 MB: the tool pages the text
+	// afterwards anyway (max 60k chars per call), so nothing is lost.
+	const ctrl = new AbortController();
+	const timer = setTimeout(() => ctrl.abort(new Error("web_fetch timed out after 60 seconds")), 60_000);
+	const onCallerAbort = () => ctrl.abort(signal?.reason);
+	if (signal) {
+		if (signal.aborted) ctrl.abort(signal.reason);
+		else signal.addEventListener("abort", onCallerAbort, { once: true });
+	}
+	let res: Response;
+	let raw: string;
+	try {
+		res = await fetch(url, {
+			headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
+			redirect: "follow",
+			signal: ctrl.signal,
+		});
+		const type = res.headers.get("content-type") ?? "";
+		raw = await readCapped(res, 5_000_000);
+		return finishFetch(res, type, raw);
+	} finally {
+		clearTimeout(timer);
+		signal?.removeEventListener("abort", onCallerAbort);
+	}
+}
+
+function finishFetch(res: Response, type: string, raw: string) {
 	let text: string;
 	let title = "";
 	if (/html|xml/.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {

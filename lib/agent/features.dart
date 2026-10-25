@@ -229,6 +229,13 @@ class Features extends ChangeNotifier {
   List<ScheduleInfo> schedules = const [];
   int concurrency = 1;
   bool keepAlive = false;
+
+  /// Whether an interactive chat turn is streaming. Together with the
+  /// runs/schedules signal below, this keeps the foreground service alive
+  /// while the agent works — previously only runs/schedules did, so
+  /// Android could kill the host mid-chat when the app was backgrounded.
+  bool chatBusy = false;
+  bool _runsKeepAlive = false;
   List<McpServer> mcpServers = const [];
 
   /// Fired when the chat's run ends (for notifications): preview text.
@@ -246,6 +253,13 @@ class Features extends ChangeNotifier {
         notifyListeners();
       case 'approval_dismiss':
         approvals.removeWhere((a) => a.id == r['approvalId']);
+        notifyListeners();
+      case 'exit':
+      case 'fatal':
+        // The host process is gone: any card left on screen belongs to a
+        // dead process, and its id must never answer a new process's approval.
+        approvals.clear();
+        _answered.clear();
         notifyListeners();
       case 'dev_server':
         final port = r['port'] as int;
@@ -274,12 +288,25 @@ class Features extends ChangeNotifier {
     }
   }
 
+  void setChatBusy(bool value) {
+    if (chatBusy == value) return;
+    chatBusy = value;
+    _updateKeepAlive();
+  }
+
+  void _updateKeepAlive() {
+    final next = _runsKeepAlive || chatBusy;
+    if (keepAlive == next) return;
+    keepAlive = next;
+    unawaited(client.keepAlive(keepAlive, text: _keepAliveText()));
+  }
+
   void _applyRuns(Map<String, dynamic> s) {
     runs = _l(s['runs']).map(RunInfo.new).toList();
     schedules = _l(s['schedules']).map(ScheduleInfo.new).toList();
     concurrency = s['concurrency'] as int? ?? 1;
-    keepAlive = s['keepAlive'] == true;
-    unawaited(client.keepAlive(keepAlive, text: _keepAliveText()));
+    _runsKeepAlive = s['keepAlive'] == true;
+    _updateKeepAlive();
     notifyListeners();
   }
 
@@ -287,6 +314,7 @@ class Features extends ChangeNotifier {
     final running = runs.where((r) => r.status == 'running').length;
     final queued = runs.where((r) => r.status == 'queued').length;
     if (running + queued > 0) return '$running running, $queued queued';
+    if (chatBusy) return 'Agent is working';
     return '${schedules.where((s) => s.enabled).length} scheduled tasks';
   }
 
@@ -303,7 +331,11 @@ class Features extends ChangeNotifier {
   }
 
   // Approvals & plan mode -----------------------------------------------------
+  /// Ids already answered: a double-tap on a card must never answer twice.
+  final _answered = <String>{};
+
   Future<void> answer(Approval a, {required bool allow, bool always = false}) async {
+    if (!_answered.add(a.id)) return;
     approvals.remove(a);
     notifyListeners();
     await client.call('approval_reply', {'approvalId': a.id, 'allow': allow, 'always': always, 'key': a.key});
@@ -461,8 +493,10 @@ class Features extends ChangeNotifier {
     return (path: r['path'] as String, files: r['files'] as int);
   }
 
-  Future<int> restoreBackup(String path) async =>
-      _m(await client.call('backup_restore', {'path': path}))['restored'] as int;
+  Future<({int restored, int skipped})> restoreBackup(String path) async {
+    final m = _m(await client.call('backup_restore', {'path': path}));
+    return (restored: m['restored'] as int, skipped: m['skipped'] as int? ?? 0);
+  }
 
   @override
   void dispose() {

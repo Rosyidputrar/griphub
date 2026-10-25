@@ -15,15 +15,6 @@ String _basename(String path) {
   return parts.isEmpty ? path : parts.last;
 }
 
-String _ago(DateTime t) {
-  final d = DateTime.now().difference(t);
-  if (d.inSeconds < 60) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  if (d.inDays < 7) return '${d.inDays}d ago';
-  return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
-}
-
 String _describeSchedule(ScheduleInfo s) {
   final t = s.trigger;
   if (t != null && t['type'] == 'github_issues') {
@@ -106,13 +97,18 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   Future<void> _editSchedule([ScheduleInfo? existing]) async {
-    final result = await showModalBottomSheet<Map<String, dynamic>>(
+    // The sheet saves itself and only closes on success: the old flow
+    // popped with the edits first and saved afterwards, so a failed save
+    // lost the user's work behind a snackbar.
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _ScheduleSheet(existing: existing, defaultCwd: agent.cwd),
+      builder: (_) => _ScheduleSheet(
+        existing: existing,
+        defaultCwd: agent.cwd,
+        onSave: (m) => f.saveSchedule(m),
+      ),
     );
-    if (result == null) return;
-    await _guard(() => f.saveSchedule(result));
   }
 
   Future<void> _deleteSchedule(ScheduleInfo s) async {
@@ -120,10 +116,14 @@ class _TasksScreenState extends State<TasksScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Delete schedule?')),
-        content: Text('"${s.name}" will stop running.'),
+        content: Text('"${s.name}" ${tr('will stop running.')}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Delete'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Delete')),
+          ),
         ],
       ),
     );
@@ -342,7 +342,7 @@ class _RunCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 30),
             child: Text(
-              [run.status, _ago(when), if (run.cwd.isNotEmpty) _basename(run.cwd)].join(' · '),
+              [run.status, formatAgo(when), if (run.cwd.isNotEmpty) _basename(run.cwd)].join(' · '),
               style: text.bodySmall?.copyWith(color: p.muted),
             ),
           ),
@@ -399,7 +399,7 @@ class _ScheduleRow extends StatelessWidget {
           ? IconTile(icon: SimpleIcons.github, color: p.text)
           : IconTile(icon: LucideIcons.calendarClock, color: s.enabled ? p.accentAlt : p.faint),
       title: s.name,
-      subtitle: '${_describeSchedule(s)}${last != null ? ' · last run ${_ago(last)}' : ''}',
+      subtitle: '${_describeSchedule(s)}${last != null ? ' · last run ${formatAgo(last)}' : ''}',
       onTap: onTap,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -415,7 +415,7 @@ class _ScheduleRow extends StatelessWidget {
             itemBuilder: (_) => [
               PopupMenuItem(value: 'run', child: Text(tr('Run now'))),
               PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
-              PopupMenuItem(value: 'delete', child: Text(tr('Delete'))),
+              PopupMenuItem(value: 'delete', child: Text(tr('Delete'), style: TextStyle(color: p.danger))),
             ],
           ),
         ],
@@ -428,9 +428,12 @@ enum _Kind { interval, daily, github }
 
 /// Create/edit form for a schedule; pops the json map to save.
 class _ScheduleSheet extends StatefulWidget {
-  const _ScheduleSheet({this.existing, required this.defaultCwd});
+  const _ScheduleSheet({this.existing, required this.defaultCwd, required this.onSave});
   final ScheduleInfo? existing;
   final String defaultCwd;
+
+  /// Saves the schedule; the sheet stays open with the error when it throws.
+  final Future<void> Function(Map<String, dynamic> schedule) onSave;
 
   @override
   State<_ScheduleSheet> createState() => _ScheduleSheetState();
@@ -447,6 +450,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
   late _Kind _kind;
   late TimeOfDay _time;
   String? _problem;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -476,7 +480,8 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
 
   String _presetLabel(int m) => m < 60 ? '${m}m' : (m < 1440 ? '${m ~/ 60}h' : '${m ~/ 1440}d');
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     final name = _name.text.trim();
     final prompt = _prompt.text.trim();
     if (name.isEmpty || prompt.isEmpty) {
@@ -513,7 +518,22 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
         }
         out['trigger'] = {'type': 'github_issues', 'repo': repo, 'label': label};
     }
-    Navigator.pop(context, out);
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    try {
+      await widget.onSave(out);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _problem = '$e';
+        });
+      }
+      return;
+    }
+    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -636,7 +656,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
               Text(_problem!, style: text.bodySmall?.copyWith(color: p.danger)),
             ],
             const SizedBox(height: 18),
-            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, onPressed: _save),
+            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, busy: _saving, onPressed: _save),
           ],
         ),
       ),

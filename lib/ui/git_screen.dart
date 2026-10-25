@@ -12,16 +12,6 @@ import 'task_log.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
-String _ago(DateTime t) {
-  final d = DateTime.now().difference(t);
-  if (d.inSeconds < 60) return 'just now';
-  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
-  if (d.inHours < 24) return '${d.inHours}h ago';
-  if (d.inDays < 30) return '${d.inDays}d ago';
-  if (d.inDays < 365) return '${d.inDays ~/ 30}mo ago';
-  return '${d.inDays ~/ 365}y ago';
-}
-
 enum _Section { staged, unstaged, untracked }
 
 /// Source control for the current project: stage and commit, branches,
@@ -142,8 +132,8 @@ class _GitScreenState extends State<GitScreen> {
         title: Text(tr('Discard changes?')),
         content: Text(
           file.untracked
-              ? '${file.path} is untracked and will be deleted. This cannot be undone.'
-              : 'Your changes to ${file.path} will be lost. This cannot be undone.',
+              ? '${file.path} ${tr('is untracked and will be deleted. This cannot be undone.')}'
+              : '${tr('Your changes to')} ${file.path} ${tr('will be lost. This cannot be undone.')}',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
@@ -301,7 +291,7 @@ class _GitScreenState extends State<GitScreen> {
           Text(tr('Not a git repository'), textAlign: TextAlign.center, style: text.titleMedium),
           const SizedBox(height: 6),
           Text(
-            "This folder isn't a git repository. Ask pi to run `git init`, or clone a repo.",
+            tr("This folder isn't a git repository. Ask pi to run `git init`, or clone a repo."),
             textAlign: TextAlign.center,
             style: text.bodySmall,
           ),
@@ -319,7 +309,7 @@ class _GitScreenState extends State<GitScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(Radii.r12),
             onTap: _branches,
             child: Row(
               children: [
@@ -336,7 +326,7 @@ class _GitScreenState extends State<GitScreen> {
                         style: text.titleMedium?.copyWith(fontFamily: mono),
                       ),
                       Text(
-                        s.upstream ?? 'No upstream',
+                        s.upstream ?? tr('No upstream'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: text.bodySmall?.copyWith(fontFamily: mono),
@@ -469,7 +459,7 @@ class _GitScreenState extends State<GitScreen> {
                 Row(
                   children: [
                     InkWell(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(Radii.r10),
                       onTap: () => setState(() => _commitAll = !_commitAll),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
@@ -600,7 +590,7 @@ class _GitScreenState extends State<GitScreen> {
               width: 22,
               height: 22,
               alignment: Alignment.center,
-              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(6)),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(Radii.r6)),
               child: Text(
                 letter,
                 style: TextStyle(fontFamily: mono, fontSize: 11.5, fontWeight: FontWeight.w700, color: color),
@@ -641,7 +631,7 @@ class _GitScreenState extends State<GitScreen> {
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(8)),
+                          decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r8)),
                           child: Text(
                             c.hash.length > 7 ? c.hash.substring(0, 7) : c.hash,
                             style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.accent),
@@ -655,7 +645,7 @@ class _GitScreenState extends State<GitScreen> {
                               Text(c.subject, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleSmall),
                               const SizedBox(height: 2),
                               Text(
-                                '${c.author} · ${_ago(c.time)}',
+                                '${c.author} · ${formatAgo(c.time)}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: text.bodySmall,
@@ -751,7 +741,7 @@ class _GitScreenState extends State<GitScreen> {
                                 Text(i.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleSmall),
                                 const SizedBox(height: 4),
                                 Text(
-                                  ['#${i.number}', if (i.author != null) i.author!, _ago(i.updatedAt)].join(' · '),
+                                  ['#${i.number}', if (i.author != null) i.author!, formatAgo(i.updatedAt)].join(' · '),
                                   style: text.bodySmall,
                                 ),
                                 if (i.labels.isNotEmpty || i.isPr) ...[
@@ -799,9 +789,9 @@ class _TabChip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: selected ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
@@ -826,9 +816,9 @@ class _SmallButton extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: p.raised,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(Radii.r12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(Radii.r12),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1167,7 +1157,7 @@ class _IssueSheet extends StatelessWidget {
                 runSpacing: 4,
                 children: [
                   if (issue.author != null) Pill(issue.author!, icon: LucideIcons.user),
-                  Pill(_ago(issue.updatedAt), icon: LucideIcons.clock),
+                  Pill(formatAgo(issue.updatedAt), icon: LucideIcons.clock),
                   if (issue.comments > 0) Pill('${issue.comments}', icon: LucideIcons.messageSquare),
                   for (final l in issue.labels) Pill(l, color: p.accentAlt),
                 ],

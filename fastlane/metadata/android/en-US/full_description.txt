@@ -1,4 +1,4 @@
-AndroPI puts a real AI coding agent on your Android phone. Describe what you want, and the agent writes the code, runs it, shows you a live preview and deploys it. No laptop needed.
+GripHub puts a real AI coding agent on your Android phone. Describe what you want, and the agent writes the code, runs it, shows you a live preview and deploys it. No laptop needed.
 
 WATCH IT CODE IN REAL TIME
 • Replies and code stream in as the agent writes them
@@ -11,7 +11,7 @@ A REAL LINUX ON YOUR PHONE
 • Multi-tab terminal with SSH to your servers
 
 PROJECTS, GIT AND GITHUB
-• Give each chat its own project folder in the AndroPI workspace
+• Give each chat its own project folder in the GripHub workspace
 • Import files from your phone, and save or share results (Downloads, share sheet)
 • File explorer, code editor, project-wide search and a diff view
 • Checkpoints let you undo everything the agent changed in a run
@@ -32,7 +32,7 @@ POWER FEATURES
 • MCP servers, skills and a searchable skills catalogue
 • Prompt templates and slash commands
 • Background tasks, parallel agents and schedules
-• Image and file attachments, voice input, share to AndroPI from other apps
+• Image and file attachments, voice input, share to GripHub from other apps
 • Home screen widget and Quick Settings tile
 • Web search that works on networks with DNS blocking
 
@@ -40,4 +40,4 @@ BRING YOUR OWN MODEL
 Works with Anthropic Claude, OpenAI, Google Gemini, OpenRouter and other providers supported by the pi agent. You sign in with your own account or API key.
 
 OPEN SOURCE
-AndroPI is MIT licensed: https://github.com/imtaqin/andropi
+GripHub is MIT licensed: https://github.com/seseegy/griphub

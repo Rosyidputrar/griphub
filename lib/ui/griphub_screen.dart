@@ -97,7 +97,11 @@ class _GripHubScreenState extends State<GripHubScreen> {
         content: Text(tr('The agent cannot use any model until you add a key again.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Remove'))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Remove')),
+          ),
         ],
       ),
     );
@@ -189,6 +193,7 @@ class _GripHubScreenState extends State<GripHubScreen> {
                     labelText: tr('API key'),
                     hintText: existing?.hasKey == true ? 'Saved. Leave empty to keep it' : 'griphub-…',
                     suffixIcon: IconButton(
+                      tooltip: _showKey ? tr('Hide key') : tr('Show key'),
                       onPressed: () => setState(() => _showKey = !_showKey),
                       icon: Icon(_showKey ? LucideIcons.eyeOff : LucideIcons.eye, size: 18),
                     ),

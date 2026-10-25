@@ -17,28 +17,47 @@ import android.os.IBinder
 class AgentService : Service() {
     companion object {
         private const val ID = 1
-        private var active = false
-        private var stoppable = false
 
         /**
-         * [stoppable]: the agent itself is working (not just background tasks), so the notification offers Stop.
-         * [title] and [text] default to a generic "working" line.
+         * Two independent reasons to keep the process alive. The old code
+         * used one flag for both, so the chat ending switched the service
+         * off while schedules were still relying on it. The service runs
+         * while EITHER reason is active.
          */
-        fun setActive(
-            context: Context,
-            on: Boolean,
-            text: String? = null,
-            title: String? = null,
-            stoppable: Boolean = false,
-        ) {
-            val intent = Intent(context, AgentService::class.java)
-                .putExtra("text", text)
-                .putExtra("title", title)
-                .putExtra("stoppable", stoppable)
-            active = on
-            this.stoppable = stoppable
-            if (on) context.startForegroundService(intent)
-            else context.stopService(intent)
+        private var busy = false
+        private var keepAlive = false
+        private var keepAliveTitle: String? = null
+        private var keepAliveText: String? = null
+        private var stoppable = false
+
+        /** The agent itself is working: the notification offers Stop. */
+        fun setBusy(context: Context, on: Boolean) {
+            busy = on
+            stoppable = on
+            syncService(context)
+        }
+
+        /** Queued runs and schedules need the process alive. */
+        fun setKeepAlive(context: Context, on: Boolean, title: String? = null, text: String? = null) {
+            keepAlive = on
+            if (on) {
+                keepAliveTitle = title
+                keepAliveText = text
+            }
+            syncService(context)
+        }
+
+        private fun syncService(context: Context) {
+            if (busy || keepAlive) {
+                val intent = Intent(context, AgentService::class.java)
+                if (!busy && keepAlive) {
+                    intent.putExtra("title", keepAliveTitle)
+                    intent.putExtra("text", keepAliveText)
+                }
+                context.startForegroundService(intent)
+            } else {
+                context.stopService(Intent(context, AgentService::class.java))
+            }
         }
 
         /**
@@ -46,7 +65,7 @@ class AgentService : Service() {
          * starting the service again from the background is not allowed on Android 12+.
          */
         fun update(context: Context, title: String?, text: String?) {
-            if (!active) return
+            if (!busy && !keepAlive) return
             context.getSystemService(NotificationManager::class.java)
                 .notify(ID, build(context, title, text, stoppable))
         }
@@ -79,7 +98,7 @@ class AgentService : Service() {
             this,
             intent?.getStringExtra("title"),
             intent?.getStringExtra("text"),
-            intent?.getBooleanExtra("stoppable", false) == true,
+            stoppable,
         )
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)

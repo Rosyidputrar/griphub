@@ -193,24 +193,33 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     final files = List<Attachment>.of(attachments);
+    // Clear only on success: a refused message (budget, host error) never
+    // reaches the transcript, so clearing first would lose it.
+    final bool ok;
+    if (files.isEmpty) {
+      ok = await agent.send(text);
+    } else {
+      final prompt = await preparePrompt(text, files, agent.cwd);
+      ok = await agent.sendWith(prompt.text, images: prompt.images);
+    }
+    if (!mounted || !ok) return;
     input.clear();
     setState(() => attachments.clear());
     _saveFiles();
     followBottom = true;
-    if (files.isEmpty) {
-      await agent.send(text);
-    } else {
-      final prompt = await preparePrompt(text, files, agent.cwd);
-      await agent.sendWith(prompt.text, images: prompt.images);
-    }
   }
 
   /// Long-press on send: hand the task to a background agent instead.
   Future<void> _queue() async {
     final text = input.text.trim();
     if (text.isEmpty) return;
+    try {
+      await agent.features.enqueue(text);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
     input.clear();
-    await agent.features.enqueue(text);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -674,7 +683,7 @@ class _Composer extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(Radii.r24),
               border: Border.all(color: focus.hasFocus ? p.accent.withValues(alpha: 0.55) : p.border),
               boxShadow: [
                 BoxShadow(
@@ -832,10 +841,10 @@ class _Chip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: p.raised,
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         child: Container(
           height: 34,
           padding: EdgeInsets.fromLTRB(leading == null ? 12 : 6, 0, 10, 0),

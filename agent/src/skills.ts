@@ -153,7 +153,10 @@ export class Skills {
 
 	private async installUrl(url: string, log: (line: string) => void, source = url) {
 		log(`Fetching ${url}`);
-		const res = await fetch(url, { headers: { Accept: "text/markdown, text/plain, */*" } });
+		const res = await fetch(url, {
+			signal: AbortSignal.timeout(30_000),
+			headers: { Accept: "text/markdown, text/plain, */*" },
+		});
 		if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
 		const body = await res.text();
 		const fm = frontmatter(body);

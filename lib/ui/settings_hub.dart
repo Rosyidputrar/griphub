@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/pricing.dart';
 import '../agent/updater.dart';
 import 'accounts_screen.dart';
 import 'backup_screen.dart';
+import 'license_screen.dart';
 import 'chat_extras.dart';
 import 'container_screen.dart';
 import 'kit.dart';
@@ -73,6 +77,9 @@ class _SettingsHubState extends State<SettingsHub> {
       }
     }
     Appearance.instance.update(appLock: on);
+    // FLAG_SECURE must follow the setting, not just the lock screen: the
+    // leak is the Recents snapshot taken while the app is backgrounded.
+    unawaited(agent.client.setSecure(on).catchError((_) {}));
   }
 
   Future<void> _pickFallbacks() async {
@@ -287,7 +294,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: const Color(0xFF10B981),
                     title: tr('Usage & budget'),
                     subtitle: (it.settings?.dailyBudget ?? 0) > 0
-                        ? '\$${it.settings!.dailyBudget.toStringAsFixed(2)} / day'
+                        ? '${formatCredits(it.settings!.dailyBudget)} credits / day'
                         : tr('Tokens, cost and a daily limit'),
                     onTap: () => _open(UsageScreen(agent: agent)),
                   ),
@@ -298,7 +305,7 @@ class _SettingsHubState extends State<SettingsHub> {
                 children: [
                   SettingsRow(
                     icon: LucideIcons.listTodo,
-                    color: const Color(0xFF3E63DD),
+                    color: context.palette.accentAlt,
                     title: tr('Background tasks'),
                     subtitle: tr('Queue, parallel agents and schedules'),
                     onTap: () => _open(TasksScreen(agent: agent)),
@@ -339,8 +346,15 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.archive,
                     color: const Color(0xFF0EA5E9),
                     title: tr('Backup & restore'),
-                    subtitle: tr('Chats, settings, skills and keys in one file'),
+                    subtitle: tr('Chats, settings and skills in one file'),
                     onTap: () => _open(BackupScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.scale,
+                    color: context.palette.accentAlt,
+                    title: tr('Licenses'),
+                    subtitle: tr('Open-source licenses'),
+                    onTap: () => _open(const LicenseScreen()),
                   ),
                   SettingsRow(
                     icon: LucideIcons.fingerprint,
@@ -578,11 +592,6 @@ class _GripHubCard extends StatelessWidget {
             tr('A special build powered by GripHub Router \u2014 Claude, GPT, Gemini, DeepSeek and more behind one API key. This app talks to GripHub only: add your key and start building.'),
             style: text.bodyMedium?.copyWith(color: p.muted),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'From AndroPI to GripHub',
-            style: text.bodySmall?.copyWith(color: p.muted),
-          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -608,9 +617,9 @@ class _LinkChip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: p.raised,
-      borderRadius: BorderRadius.circular(99),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
-        borderRadius: BorderRadius.circular(99),
+        borderRadius: BorderRadius.circular(Radii.pill),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

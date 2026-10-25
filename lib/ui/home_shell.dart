@@ -269,8 +269,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Future<void> _takeLaunch() async {
     final launch = await agent.client.takeLaunch();
     if (launch == null || !mounted) return;
-    // Close any sheet or page so the new chat opens on top of home.
-    Navigator.of(context).popUntil((r) => r.isFirst);
+    // Close sheets and pages so the new chat opens on top of home — but
+    // never force past a route that refuses to pop. popUntil ignores
+    // PopScope vetoes (it would loop on the editor's save prompt), so pop
+    // one by one and stop at the first refusal: the editor stays intact
+    // underneath, and the new chat simply opens on top of it.
+    while (mounted && Navigator.of(context).canPop()) {
+      if (!await Navigator.of(context).maybePop()) break;
+    }
     switch (launch['action']) {
       case 'new_chat':
         await _newChat();
@@ -398,7 +404,7 @@ class _NavBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     Widget item(int i) =>
-        _NavItem(icon: _items[i].$1, label: _items[i].$2, selected: i == index, onTap: () => onTap(i));
+        _NavItem(icon: _items[i].$1, label: tr(_items[i].$2), selected: i == index, onTap: () => onTap(i));
     return SafeArea(
       top: false,
       child: SizedBox(
@@ -415,7 +421,7 @@ class _NavBar extends StatelessWidget {
                 height: 68,
                 decoration: BoxDecoration(
                   color: p.nav,
-                  borderRadius: BorderRadius.circular(34),
+                  borderRadius: BorderRadius.circular(Radii.r34),
                   boxShadow: [
                     BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 26, offset: const Offset(0, 12)),
                   ],
@@ -685,7 +691,7 @@ class _HomeTabState extends State<_HomeTab> {
       builder: (context, _) {
         final gh = agent.integrations.github;
         final running = agent.features.runs.where((r) => r.active).length;
-        final name = (gh?.name ?? gh?.login ?? 'there').split(' ').first;
+        final name = (gh?.name ?? gh?.login ?? tr('friend')).split(' ').first;
         final quick = _quick.where((q) => category == 'All' || q.category == category).toList();
         return SafeArea(
           bottom: false,
@@ -767,7 +773,7 @@ class _HomeTabState extends State<_HomeTab> {
                     Expanded(child: Text(tr('Recent'), style: text.titleLarge)),
                     TextButton(
                       onPressed: widget.onSeeAll,
-                      style: TextButton.styleFrom(foregroundColor: const Color(0xFF3E63DD)),
+                      style: TextButton.styleFrom(foregroundColor: context.palette.accentAlt),
                       child: Text(tr('See all')),
                     ),
                   ],
@@ -820,7 +826,7 @@ class _ConnectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.r24)),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
@@ -923,7 +929,7 @@ class _QuickCard extends StatelessWidget {
       width: 164,
       child: Material(
         color: p.surface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(Radii.r24),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -995,7 +1001,7 @@ class _SessionRow extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final folder = sessionFolder(session.cwd, workspace);
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(Radii.r18),
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
@@ -1040,7 +1046,7 @@ class _SessionRow extends StatelessWidget {
                 color: selected! ? p.danger : p.faint,
               )
             else
-              Text(_ago(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
+              Text(formatAgo(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
           ],
         ),
       ),
@@ -1048,15 +1054,7 @@ class _SessionRow extends StatelessWidget {
   }
 }
 
-String _ago(DateTime t) {
-  final d = DateTime.now().difference(t);
-  final id = Appearance.instance.language == 'id';
-  if (d.inMinutes < 1) return id ? 'baru saja' : 'now';
-  if (d.inHours < 1) return id ? '${d.inMinutes} mnt lalu' : '${d.inMinutes}m ago';
-  if (d.inDays < 1) return id ? '${d.inHours} jam lalu' : '${d.inHours}h ago';
-  if (d.inDays < 7) return id ? '${d.inDays} hr lalu' : '${d.inDays}d ago';
-  return '${t.day}/${t.month}';
-}
+/// (Relative times now come from the shared formatAgo in i18n.dart.)
 
 // ---------------------------------------------------------------------------
 // Chats
@@ -1092,7 +1090,7 @@ class _ChatsTabState extends State<_ChatsTab> {
             children: [
               SettingsRow(
                 icon: LucideIcons.pencil,
-                color: const Color(0xFF3E63DD),
+                color: context.palette.accentAlt,
                 title: tr('Rename'),
                 onTap: () => Navigator.pop(context, 'rename'),
               ),
@@ -1326,7 +1324,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                 children: [
                   SettingsRow(
                     icon: LucideIcons.messageSquare,
-                    color: const Color(0xFF3E63DD),
+                    color: context.palette.accentAlt,
                     title: tr('Open'),
                     onTap: () => Navigator.pop(context, 'open'),
                   ),
@@ -1474,7 +1472,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                                   decoration: BoxDecoration(
                                                     color: Colors.white.withValues(alpha: 0.85),
-                                                    borderRadius: BorderRadius.circular(99),
+                                                    borderRadius: BorderRadius.circular(Radii.pill),
                                                   ),
                                                   child: Row(
                                                     mainAxisSize: MainAxisSize.min,

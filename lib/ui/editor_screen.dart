@@ -74,6 +74,12 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _canRedo = false;
   String? _error;
   String _saved = '';
+
+  /// The file used CRLF line endings. The editor normalizes to LF, so the
+  /// comparison baseline is normalized too — otherwise every CRLF file
+  /// looked modified on open — and saving converts back, so the file's
+  /// endings survive an edit.
+  bool _crlf = false;
   int _size = 0;
 
   String get _name => widget.path.split('/').last;
@@ -110,7 +116,10 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       _readOnly = bytes.length > _maxEditableBytes;
       final text = utf8.decode(bytes, allowMalformed: true);
-      _saved = text;
+      _crlf = text.contains('\r\n');
+      // Match the editor's own normalization (it splits on \n after
+      // collapsing \r\n and \r), or the file is dirty before any edit.
+      _saved = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
       _controller.value = CodeLineEditingValue(codeLines: CodeLines.fromText(text));
       _controller.clearHistory();
       _controller.addListener(_onChanged);
@@ -153,7 +162,7 @@ class _EditorScreenState extends State<EditorScreen> {
     setState(() => _saving = true);
     try {
       final text = _controller.text;
-      await File(widget.path).writeAsString(text);
+      await File(widget.path).writeAsString(_crlf ? text.replaceAll('\n', '\r\n') : text);
       _saved = text;
       if (!mounted) return true;
       setState(() {
@@ -180,7 +189,11 @@ class _EditorScreenState extends State<EditorScreen> {
         content: Text('${tr('Save changes before leaving?')} ($_name)'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, 'discard'), child: Text(tr('Discard'))),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+            child: Text(tr('Discard')),
+          ),
           TextButton(onPressed: () => Navigator.pop(ctx, 'save'), child: Text(tr('Save'))),
         ],
       ),
@@ -343,7 +356,7 @@ class _EditorScreenState extends State<EditorScreen> {
               const SizedBox(height: 16),
               Text(tr('Binary file'), style: t.titleMedium),
               const SizedBox(height: 4),
-              Text('${_formatSize(_size)} · can\'t be shown as text', style: t.bodySmall?.copyWith(color: p.muted)),
+              Text('${_formatSize(_size)} · ${tr("can't be shown as text")}', style: t.bodySmall?.copyWith(color: p.muted)),
             ],
           ),
         ),
@@ -564,7 +577,7 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
           filled: true,
           fillColor: p.bg,
           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r8), borderSide: BorderSide.none),
         ),
       ),
     );
@@ -574,13 +587,13 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
     final p = context.palette;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(Radii.r6),
       child: Container(
         margin: const EdgeInsets.only(left: 4),
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         decoration: BoxDecoration(
           color: on ? p.accent.withValues(alpha: 0.15) : null,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(Radii.r6),
         ),
         child: Text(
           label,
@@ -593,7 +606,6 @@ class _FindBar extends StatelessWidget implements PreferredSizeWidget {
   Widget _icon(IconData icon, String tooltip, VoidCallback? onTap, Color color) {
     return IconButton(
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
       iconSize: 18,
       color: color,
       onPressed: onTap,

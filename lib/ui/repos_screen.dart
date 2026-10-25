@@ -142,10 +142,10 @@ class _RepoTile extends StatelessWidget {
     final meta = [
       ?repo.language,
       if (repo.stars > 0) '★ ${repo.stars}',
-      if (repo.pushedAt != null) _ago(repo.pushedAt!),
+      if (repo.pushedAt != null) '${tr('updated')} ${formatAgo(repo.pushedAt!)}',
     ].join('  ·  ');
     return InkWell(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(Radii.r10),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -178,7 +178,7 @@ class _RepoTile extends StatelessWidget {
                 margin: const EdgeInsets.only(left: 8, top: 2),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(99),
+                  borderRadius: BorderRadius.circular(Radii.pill),
                   border: Border.all(color: p.border),
                 ),
                 child: Text(tr('On device'), style: text.labelSmall),
@@ -189,11 +189,4 @@ class _RepoTile extends StatelessWidget {
     );
   }
 
-  static String _ago(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inHours < 1) return 'updated just now';
-    if (d.inDays < 1) return 'updated ${d.inHours}h ago';
-    if (d.inDays < 30) return 'updated ${d.inDays}d ago';
-    return 'updated ${t.year}-${t.month.toString().padLeft(2, '0')}';
-  }
 }

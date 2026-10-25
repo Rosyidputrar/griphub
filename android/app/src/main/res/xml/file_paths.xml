@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Project files can live in app storage or shared storage, so sharing covers both. -->
+<!-- Only app-owned storage: internal files/cache plus the app-specific
+     external dir (updater APKs). No external-path (all of shared storage)
+     and no root-path (the whole device, private files included). -->
 <paths>
     <files-path name="files" path="." />
     <cache-path name="cache" path="." />
-    <external-path name="external" path="." />
-    <root-path name="root" path="." />
+    <external-files-path name="external-files" path="." />
 </paths>

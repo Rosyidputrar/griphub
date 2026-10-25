@@ -126,13 +126,19 @@ class AgentController extends ChangeNotifier {
   // -------------------------------------------------------------------------
   // Conversation
 
-  Future<void> send(String text) async {
+  /// Sends a chat message. Returns false when the host refuses it (budget,
+  /// no model, host error): the caller must then keep the text, because a
+  /// refused message never reaches the transcript and would otherwise be
+  /// lost. The failure itself is shown as a notice.
+  Future<bool> send(String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return false;
     try {
       await client.call('prompt', {'text': trimmed});
+      return true;
     } on AgentError catch (e) {
       _addNotice(e.message, error: true);
+      return false;
     }
   }
 
@@ -231,13 +237,16 @@ class AgentController extends ChangeNotifier {
   }
 
   /// Sends with images (base64) attached; files are referenced by path in [text].
-  Future<void> sendWith(String text, {List<Map<String, String>> images = const []}) async {
+  /// Same false-on-refusal contract as [send].
+  Future<bool> sendWith(String text, {List<Map<String, String>> images = const []}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty && images.isEmpty) return;
+    if (trimmed.isEmpty && images.isEmpty) return false;
     try {
       await client.call('prompt', {'text': trimmed.isEmpty ? 'See the attached image.' : trimmed, 'images': images});
+      return true;
     } on AgentError catch (e) {
       _addNotice(e.message, error: true);
+      return false;
     }
   }
 
@@ -502,6 +511,7 @@ class AgentController extends ChangeNotifier {
     if (busy == value) return;
     busy = value;
     client.setBusy(value);
+    features.setChatBusy(value);
   }
 
   void _applyState(Map<String, dynamic> s) {
