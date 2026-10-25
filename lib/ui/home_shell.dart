@@ -581,8 +581,21 @@ class _CreateButtonState extends State<_CreateButton> {
 // Home
 
 class _Quick {
-  const _Quick(this.title, this.icon, this.color, this.category, this.art, {this.prompt, this.clone = false, this.openImages = false});
+  const _Quick(
+    this.title,
+    this.blurb,
+    this.icon,
+    this.color,
+    this.category,
+    this.art, {
+    this.prompt,
+    this.clone = false,
+    this.openImages = false,
+  });
   final String title;
+
+  /// One line under the title: what you get.
+  final String blurb;
 
   /// Storyset illustration shown on the card.
   final String art;
@@ -594,20 +607,31 @@ class _Quick {
   final bool openImages;
 }
 
+/// Category chips over the quick starts: id -> label.
+const _categories = {'All': 'All types', 'Build': 'Make', 'Code': 'Code', 'Ops': 'Deploy & automate'};
+
 const _quick = [
   _Quick(
     'Build a web app',
+    'A site or app, ready to deploy',
     LucideIcons.layoutTemplate,
     Color(0xFFFF7A1A),
     'Build',
     'projects',
     prompt: 'Build me a polished, mobile-first web app: ',
   ),
-  _Quick('Chat with the smartest agent', LucideIcons.sparkles, Color(0xFF7C5CFC), 'Code', 'ai'),
-  _Quick('Generate an image', LucideIcons.image, Color(0xFFEC4899), 'Build', 'ai', openImages: true),
-  _Quick('Clone a GitHub repo', SimpleIcons.github, Color(0xFF111113), 'Code', 'git', clone: true),
+  _Quick(
+    'Generate an image',
+    'Logos, mockups, illustrations',
+    LucideIcons.image,
+    Color(0xFFEC4899),
+    'Build',
+    'ai',
+    openImages: true,
+  ),
   _Quick(
     'Design a modern UI',
+    'A polished screen from a description',
     LucideIcons.palette,
     Color(0xFF14B8A6),
     'Build',
@@ -615,24 +639,52 @@ const _quick = [
     prompt: 'Using the ui-designer skill, design and build a modern screen for: ',
   ),
   _Quick(
+    'Chat with the smartest agent',
+    'Ask, plan or brainstorm',
+    LucideIcons.sparkles,
+    Color(0xFF7C5CFC),
+    'Code',
+    'chat',
+  ),
+  _Quick(
+    'Clone a GitHub repo',
+    'Pick up an existing project',
+    SimpleIcons.github,
+    Color(0xFF475569),
+    'Code',
+    'git',
+    clone: true,
+  ),
+  _Quick(
+    'Fix a bug',
+    'Find the cause and patch it',
+    LucideIcons.bug,
+    Color(0xFFEF4444),
+    'Code',
+    'bug',
+    prompt: 'Help me find and fix this bug: ',
+  ),
+  _Quick(
     'Python in Linux',
+    'Scripts in a real Linux container',
     SimpleIcons.python,
     Color(0xFF3B82F6),
-    'Ops',
+    'Code',
     'python',
     prompt: 'Set up a Python project in the Linux container and write a script that ',
   ),
-  _Quick('Fix a bug', LucideIcons.bug, Color(0xFFEF4444), 'Code', 'bug', prompt: 'Help me find and fix this bug: '),
   _Quick(
     'Deploy a site',
+    'Get a live URL in minutes',
     LucideIcons.rocket,
-    Color(0xFFEC4899),
+    Color(0xFF0EA5E9),
     'Ops',
     'launch',
     prompt: 'Deploy this project and give me the live URL. Project: ',
   ),
   _Quick(
     'Automate a task',
+    'A script that does it for you',
     LucideIcons.zap,
     Color(0xFFF59E0B),
     'Ops',
@@ -684,6 +736,13 @@ class _HomeTabState extends State<_HomeTab> {
       ..createSync(recursive: true);
     await agent.newSession(dir: dir.path);
     if (mounted) await openChat(context, agent, prompt: q.prompt);
+    // Backed out without sending anything: don't leave an empty project behind.
+    if (agent.cwd == dir.path && agent.entries.isEmpty && dir.existsSync() && dir.listSync().isEmpty) {
+      dir.deleteSync();
+      try {
+        await agent.newSession();
+      } catch (_) {}
+    }
     _refresh();
   }
 
@@ -749,11 +808,11 @@ class _HomeTabState extends State<_HomeTab> {
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     children: [
-                      for (final c in const ['All', 'Build', 'Code', 'Ops'])
+                      for (final MapEntry(key: c, value: label) in _categories.entries)
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: _PillChip(
-                            label: tr(c == 'All' ? 'All types' : c),
+                            label: tr(label),
                             selected: category == c,
                             onTap: () => setState(() => category = c),
                           ),
@@ -763,7 +822,7 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
-                  height: 218,
+                  height: 244,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     clipBehavior: Clip.none,
@@ -974,13 +1033,31 @@ class _QuickCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 26, 10, 0),
-                  child: Text(
-                    tr(q.title),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 24, 10, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            tr(q.title),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Flexible(
+                          child: Text(
+                            tr(q.blurb),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, height: 1.3, color: p.muted),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
