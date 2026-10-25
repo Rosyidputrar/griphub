@@ -89,8 +89,28 @@ class SurfaceCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Padding(padding: padding, child: child),
+        child: Padding(
+          padding: padding,
+          child: OnSurface(child: child),
+        ),
       ),
+    );
+  }
+}
+
+/// Text fields are filled with the surface colour, so inside a surface card
+/// they vanish into it. Under this widget they are filled with the page colour
+/// instead and read as inset wells.
+class OnSurface extends StatelessWidget {
+  const OnSurface({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(inputDecorationTheme: theme.inputDecorationTheme.copyWith(fillColor: context.palette.bg)),
+      child: child,
     );
   }
 }
@@ -153,13 +173,15 @@ class SettingsGroup extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r24)),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) Divider(height: 1, indent: 66, endIndent: 16, color: p.border),
-            children[i],
+      child: OnSurface(
+        child: Column(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) Divider(height: 1, indent: 66, endIndent: 16, color: p.border),
+              children[i],
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

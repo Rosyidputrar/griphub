@@ -828,36 +828,44 @@ class _ConnectCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.r24)),
       clipBehavior: Clip.antiAlias,
-      child: Stack(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Positioned(right: -8, bottom: -6, child: Illustration('connect', height: 128)),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          Row(
+            children: [
+              Expanded(
+                child: Text(
                   tr('Connect GripHub'),
                   style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  tr('Add your GripHub Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through GripHub.'),
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
+              ),
+              const SizedBox(width: 12),
+              // In its own tile, like the quick-start cards, so it never sits on the text.
+              const SizedBox.square(
+                dimension: 84,
+                child: MeshArt(
+                  seed: 'connect',
+                  radius: 22,
+                  child: Padding(padding: EdgeInsets.all(6), child: Illustration('connect', height: 72)),
                 ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF111113),
-                    minimumSize: const Size(0, 44),
-                  ),
-                  onPressed: () =>
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
-                  child: Text(tr('Add API key')),
-                ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            tr('Add your GripHub Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through GripHub.'),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF111113),
+              minimumSize: const Size(0, 44),
             ),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
+            child: Text(tr('Add API key')),
           ),
         ],
       ),
@@ -1017,7 +1025,7 @@ class _SessionRow extends StatelessWidget {
                   child: Icon(
                     folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare,
                     size: 20,
-                    color: Colors.white,
+                    color: MeshArt.inkFor(session.id),
                   ),
                 ),
               ),
@@ -1460,7 +1468,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                                         child: Icon(
                                           pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
                                           size: 44,
-                                          color: const Color(0xFF111113).withValues(alpha: 0.55),
+                                          color: MeshArt.inkFor(pr.name),
                                         ),
                                       ),
                                       Padding(
