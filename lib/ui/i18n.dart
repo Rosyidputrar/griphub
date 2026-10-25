@@ -15,6 +15,15 @@ String localNumber(String plain) {
   return '${m[1]}$whole$frac${m[4]}';
 }
 
+/// Reads a number typed in the app's language: "1,5" and "1.000" in Indonesian
+/// (decimal comma, dot thousands), "1.5" and "1,000" in English. Null if it isn't one.
+double? parseLocalNumber(String text) {
+  final id = Appearance.instance.language == 'id';
+  final t = text.trim().replaceAll(' ', '');
+  final plain = id ? t.replaceAll('.', '').replaceAll(',', '.') : t.replaceAll(',', '');
+  return double.tryParse(plain);
+}
+
 /// One relative-time helper for the whole app (previously a private copy in
 /// five screens, each with slightly different thresholds and only one of them
 /// localized). Old dates show months/years, like git history did.
@@ -765,6 +774,7 @@ const _id = <String, String>{
       'Agent berjalan di HP kamu. Masuk ke provider atau tambahkan API key untuk memilih modelnya.',
   'Coding agent on your phone': 'Agent coding di HP kamu',
   'Working': 'Bekerja',
+  'Enter a number, like 2 or 1.5': 'Masukkan angka, misalnya 2 atau 1,5',
   'Advanced': 'Lanjutan',
   'Built-in GripHub app': 'App bawaan GripHub',
   'credits': 'kredit',

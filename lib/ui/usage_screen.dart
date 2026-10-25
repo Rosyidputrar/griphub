@@ -104,36 +104,7 @@ class _UsageScreenState extends State<UsageScreen> {
   num get _budget => _num(agent.integrations.settings?.json['dailyBudget']);
 
   Future<void> _editBudget() async {
-    final ctrl = TextEditingController(text: _budget == 0 ? '' : '$_budget');
-    final value = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(tr('Daily budget')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(tr('The agent stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.')),
-            const SizedBox(height: 14),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-              decoration: InputDecoration(suffixText: 'credits', hintText: tr('No limit')),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
-          TextButton(
-            onPressed: () => Navigator.pop(context, double.tryParse(ctrl.text.trim()) ?? 0),
-            child: Text(tr('Save')),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
+    final value = await showDialog<double>(context: context, builder: (_) => _BudgetDialog(current: _budget));
     if (value == null) return;
     try {
       await agent.integrations.updateSettings({'dailyBudget': value < 0 ? 0 : value});
@@ -594,6 +565,72 @@ class _BarChart extends StatelessWidget {
             Text(short(labels.last), style: text.labelSmall),
           ],
         ),
+      ],
+    );
+  }
+}
+
+/// The daily budget editor. It owns its text controller, so the field is not
+/// disposed while the dialog is still animating out.
+class _BudgetDialog extends StatefulWidget {
+  const _BudgetDialog({required this.current});
+  final num current;
+
+  @override
+  State<_BudgetDialog> createState() => _BudgetDialogState();
+}
+
+class _BudgetDialogState extends State<_BudgetDialog> {
+  late final _ctrl = TextEditingController(
+    text: widget.current == 0
+        ? ''
+        : localNumber(widget.current.toString().replaceAll(RegExp(r'\.0+$'), '')),
+  );
+  String? _problem;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _ctrl.text.trim();
+    // Empty is "no limit"; anything else must read as a number, or a typo would
+    // silently clear the limit (it used to save 0, and "1,5" used to become 15).
+    if (text.isEmpty) return Navigator.pop(context, 0.0);
+    final v = parseLocalNumber(text);
+    if (v == null || v < 0) return setState(() => _problem = tr('Enter a number, like 2 or 1.5'));
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(tr('Daily budget')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr(
+              'The agent stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.',
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+            onSubmitted: (_) => _save(),
+            decoration: InputDecoration(suffixText: tr('credits'), hintText: tr('No limit'), errorText: _problem),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+        TextButton(onPressed: _save, child: Text(tr('Save'))),
       ],
     );
   }
