@@ -10,7 +10,6 @@ import '../agent/pricing.dart';
 import '../agent/updater.dart';
 import 'accounts_screen.dart';
 import 'backup_screen.dart';
-import 'license_screen.dart';
 import 'chat_extras.dart';
 import 'container_screen.dart';
 import 'kit.dart';
@@ -348,13 +347,6 @@ class _SettingsHubState extends State<SettingsHub> {
                     title: tr('Backup & restore'),
                     subtitle: tr('Chats, settings and skills in one file'),
                     onTap: () => _open(BackupScreen(agent: agent)),
-                  ),
-                  SettingsRow(
-                    icon: LucideIcons.scale,
-                    color: context.palette.accentAlt,
-                    title: tr('Licenses'),
-                    subtitle: tr('Open-source licenses'),
-                    onTap: () => _open(const LicenseScreen()),
                   ),
                   SettingsRow(
                     icon: LucideIcons.fingerprint,

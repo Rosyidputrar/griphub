@@ -45,6 +45,10 @@ export interface AppSettings {
 	s1Search?: boolean;
 	s1Crawl?: boolean;
 	s1Screenshot?: boolean;
+	/** TinyFish Search key; unset means the engine is skipped, never an error. */
+	tinyfishKey?: string;
+	/** Whether the agent uses TinyFish Search; unset means on. */
+	tinyfishSearch?: boolean;
 	/** GripHub Router search backends (OpenAI Responses + Anthropic Messages); unset means on. */
 	openaiSearch?: boolean;
 	anthropicSearch?: boolean;
@@ -103,8 +107,8 @@ export interface CiSnapshot {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const FAILED = new Set(["failure", "cancelled", "timed_out", "startup_failure", "action_required"]);
 
-export type KeyService = "brave" | "tavily" | "s1";
-const KEY_FIELD = { brave: "braveKey", tavily: "tavilyKey", s1: "s1Key" } as const;
+export type KeyService = "brave" | "tavily" | "s1" | "tinyfish";
+const KEY_FIELD = { brave: "braveKey", tavily: "tavilyKey", s1: "s1Key", tinyfish: "tinyfishKey" } as const;
 
 export class Integrations {
 	private store: Store = { sshHosts: [] };
@@ -131,17 +135,18 @@ export class Integrations {
 
 	/** Keys are write-only from the app's point of view: it only sees their last four characters. */
 	publicSettings() {
-		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, approvalMode, fallbackModels, dailyBudget } = this.settings;
+		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget } = this.settings;
 		const masked = (text?: string) => parseKeys(text).map(maskKey);
 		return {
 			dns,
 			dnsUrl: dnsUrl ?? null,
 			braveKey: !!braveKey,
 			tavilyKey: !!tavilyKey,
-			keys: { brave: masked(braveKey), tavily: masked(tavilyKey), s1: masked(s1Key) },
+			keys: { brave: masked(braveKey), tavily: masked(tavilyKey), s1: masked(s1Key), tinyfish: masked(tinyfishKey) },
 			s1Search: this.settings.s1Search ?? true,
 			s1Crawl: this.settings.s1Crawl ?? true,
 			s1Screenshot: this.settings.s1Screenshot ?? true,
+			tinyfishSearch: this.settings.tinyfishSearch ?? true,
 			openaiSearch: this.settings.openaiSearch ?? true,
 			anthropicSearch: this.settings.anthropicSearch ?? true,
 			openaiSearchModel: this.settings.openaiSearchModel ?? "gpt-5.6-luna",
@@ -187,9 +192,11 @@ export class Integrations {
 			brave: parseKeys(s.braveKey),
 			tavily: parseKeys(s.tavilyKey),
 			s1: parseKeys(s.s1Key),
+			tinyfish: parseKeys(s.tinyfishKey),
 			s1Search: s.s1Search ?? true,
 			s1Crawl: s.s1Crawl ?? true,
 			s1Screenshot: s.s1Screenshot ?? true,
+			tinyfishSearch: s.tinyfishSearch ?? true,
 			openaiSearch: s.openaiSearch ?? true,
 			anthropicSearch: s.anthropicSearch ?? true,
 			openaiSearchModel: s.openaiSearchModel ?? "gpt-5.6-luna",

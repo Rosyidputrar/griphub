@@ -307,6 +307,7 @@ const _id = <String, String>{
       'Agent punya tool web_search dan web_fetch. Pencarian GripHub di bawah jalan duluan dengan model search di bawah, lalu key di bawah, lalu DuckDuckGo.',
   'web_search via Brave': 'web_search lewat Brave',
   'web_search via Tavily': 'web_search lewat Tavily',
+  'web_search via TinyFish': 'web_search lewat TinyFish',
   'OpenAI search': 'Pencarian OpenAI',
   'OpenAI search model': 'Model search OpenAI',
   'Anthropic search model': 'Model search Anthropic',

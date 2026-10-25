@@ -147,6 +147,7 @@ class AppSettings {
       ((json['projectSearch'] as Map?) ?? const {}).map((k, v) => MapEntry(k as String, v == true));
   bool get braveSearch => json['braveSearch'] != false;
   bool get tavilySearch => json['tavilySearch'] != false;
+  bool get tinyfishSearch => json['tinyfishSearch'] != false;
   String get approvalMode => json['approvalMode'] as String? ?? 'ask_risky';
 
   /// GitHub OAuth App Client ID for the device flow, entered in Settings.
