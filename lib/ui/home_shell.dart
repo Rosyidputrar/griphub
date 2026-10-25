@@ -177,7 +177,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (error != null) {
       agent.client.notify(
         _doneId,
-        tr('pi stopped with an error'),
+        tr('The agent stopped with an error'),
         error,
         launch: open,
         actions: [
@@ -187,7 +187,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     } else {
       agent.client.notify(
         _doneId,
-        '${tr('pi is done')}: ${agent.chatTitle}',
+        '${tr('The agent is done')}: ${agent.chatTitle}',
         preview.isEmpty ? tr('Tap to see the result') : preview,
         launch: open,
       );
@@ -200,7 +200,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (pending.length > approvalsSeen && _inBackground) {
       agent.client.notify(
         _approvalId,
-        tr('pi needs your approval'),
+        tr('The agent needs your approval'),
         '${pending.last.toolName}: ${pending.last.summary}',
         channel: 'approvals',
         launch: {'action': 'open_chat'},

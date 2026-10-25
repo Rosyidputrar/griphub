@@ -201,8 +201,8 @@ class _ContainerScreenState extends State<ContainerScreen> {
                             color: p.accent,
                             title: 'Use as the agent\'s shell',
                             subtitle: c.enabled
-                                ? 'Every command pi runs happens inside ${d.name}'
-                                : 'pi uses the Android shell; `box` still reaches Linux',
+                                ? '${tr('Every command the agent runs happens inside')} ${d.name}'
+                                : tr('The agent uses the Android shell; `box` still reaches Linux'),
                             trailing: switching
                                 ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
                                 : Switch(value: c.enabled, onChanged: widget.agent.busy ? null : _setShell),

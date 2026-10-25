@@ -105,7 +105,7 @@ class _UsageScreenState extends State<UsageScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr('pi stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.')),
+            Text(tr('The agent stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.')),
             const SizedBox(height: 14),
             TextField(
               controller: ctrl,

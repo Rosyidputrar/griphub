@@ -73,7 +73,7 @@ class _McpScreenState extends State<McpScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Remove server?')),
-        content: Text('"${s.name}" ${tr('and its tools will be removed from pi.')}'),
+        content: Text('"${s.name}" ${tr('and its tools will be removed from the agent.')}'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           TextButton(
@@ -126,7 +126,7 @@ class _McpScreenState extends State<McpScreen> {
                       const SizedBox(height: 10),
                       Text(
                         tr(
-                          'Connect pi to databases, docs, browsers and more through Model Context Protocol servers; '
+                          'Connect the agent to databases, docs, browsers and more through Model Context Protocol servers; '
                           'their tools show up as mcp_<server>_<tool>.',
                         ),
                         style: text.bodyMedium?.copyWith(color: p.muted),

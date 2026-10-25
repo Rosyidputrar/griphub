@@ -163,7 +163,7 @@ class _TasksScreenState extends State<TasksScreen> {
                         minLines: 2,
                         maxLines: 6,
                         textInputAction: TextInputAction.newline,
-                        decoration: InputDecoration(hintText: tr('What should pi do while you are away?')),
+                        decoration: InputDecoration(hintText: tr('What should the agent do while you are away?')),
                       ),
                       const SizedBox(height: 10),
                       Row(
@@ -628,11 +628,11 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
                 TextField(
                   controller: _label,
                   autocorrect: false,
-                  decoration: InputDecoration(labelText: tr('Label'), hintText: 'pi'),
+                  decoration: InputDecoration(labelText: tr('Label'), hintText: 'agent'),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'pi picks up new issues with this label. The issue is added to your prompt.',
+                  tr('The agent picks up new issues with this label. The issue is added to your prompt.'),
                   style: text.bodySmall,
                 ),
               ],

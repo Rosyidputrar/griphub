@@ -175,13 +175,15 @@ class _SettingsHubState extends State<SettingsHub> {
                           Text(tr('GripHub AI Agent'), style: text.titleLarge),
                           const SizedBox(height: 2),
                           Text(
-                            'pi ${agent.info['version'] ?? ''} · Node ${agent.info['node'] ?? ''}',
-                            style: TextStyle(fontFamily: mono, fontSize: 12, color: p.muted),
+                            Updater.instance.currentVersion.isEmpty
+                                ? tr('Coding agent on your phone')
+                                : '${tr('Version')} ${Updater.instance.currentVersion}',
+                            style: TextStyle(fontSize: 12.5, color: p.muted),
                           ),
                         ],
                       ),
                     ),
-                    Pill(agent.busy ? 'Working' : 'Ready', color: agent.busy ? p.warning : p.success, dot: true),
+                    Pill(agent.busy ? tr('Working') : tr('Ready'), color: agent.busy ? p.warning : p.success, dot: true),
                   ],
                 ),
               ),
@@ -269,7 +271,7 @@ class _SettingsHubState extends State<SettingsHub> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          tr('All permissions bypassed: pi never asks before acting.'),
+                          tr('All permissions bypassed: the agent never asks before acting.'),
                           style: text.bodySmall?.copyWith(color: p.warning),
                         ),
                       ),

@@ -124,7 +124,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    tr('Type /name followed by arguments in chat and pi expands the template.'),
+                    tr('Type /name followed by arguments in chat and the agent expands the template.'),
                     style: text.bodyMedium?.copyWith(color: p.muted),
                   ),
                   const SizedBox(height: 12),

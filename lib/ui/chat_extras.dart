@@ -199,7 +199,7 @@ Future<bool> confirmBypass(BuildContext context) async =>
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Bypass all permissions?')),
-        content: Text(tr('pi will run every command, edit any file and use every tool without asking.')),
+        content: Text(tr('The agent will run every command, edit any file and use every tool without asking.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Bypass'))),
@@ -611,7 +611,7 @@ Future<void> showProjectTools(
                     icon: LucideIcons.history,
                     color: const Color(0xFF7C5CFC),
                     title: tr('Changes & undo'),
-                    subtitle: tr('What pi changed, and roll it back'),
+                    subtitle: tr('What the agent changed, and roll it back'),
                     onTap: () => go(ChangesScreen(agent: agent)),
                   ),
                   SettingsRow(
@@ -625,11 +625,11 @@ Future<void> showProjectTools(
                     icon: LucideIcons.brain,
                     color: const Color(0xFFEC4899),
                     title: tr('Project memory'),
-                    subtitle: tr('AGENTS.md: rules pi follows in this folder'),
+                    subtitle: tr('AGENTS.md: rules the agent follows in this folder'),
                     onTap: () {
                       final f = File(memory);
                       if (!f.existsSync()) {
-                        f.writeAsStringSync('# Project notes for pi\n\n- Stack:\n- How to run:\n- Conventions:\n');
+                        f.writeAsStringSync('# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n');
                       }
                       go(EditorScreen(agent: agent, path: memory));
                     },

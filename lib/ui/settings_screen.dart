@@ -86,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               _Header(tr('Environment')),
-              _InfoRow('pi', agent.info['version']?.toString() ?? '—'),
+              _InfoRow(tr('Agent engine (pi)'), agent.info['version']?.toString() ?? '—'),
               _InfoRow('Node.js', agent.info['node']?.toString() ?? '—'),
               _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—', monospace: true),
               _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—', monospace: true),

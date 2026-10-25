@@ -38,7 +38,7 @@ Future<void> installUpdate(BuildContext context, AgentController agent) async {
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(tr('pi is still working')),
+        title: Text(tr('The agent is still working')),
         content: Text(tr('Installing the update closes GripHub AI Agent and stops the current run.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Wait'))),

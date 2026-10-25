@@ -291,7 +291,7 @@ class _GitScreenState extends State<GitScreen> {
           Text(tr('Not a git repository'), textAlign: TextAlign.center, style: text.titleMedium),
           const SizedBox(height: 6),
           Text(
-            tr("This folder isn't a git repository. Ask pi to run `git init`, or clone a repo."),
+            tr("This folder isn't a git repository. Ask the agent to run `git init`, or clone a repo."),
             textAlign: TextAlign.center,
             style: text.bodySmall,
           ),
