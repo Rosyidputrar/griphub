@@ -87,6 +87,16 @@ class AgentController extends ChangeNotifier {
 
   bool get hasModel => model != null;
 
+  /// The display name for a model id from a transcript ("claude-sonnet-5-5" -> "Claude Sonnet 5.5"),
+  /// or the id itself when the model isn't in the list.
+  String modelLabel(String id) {
+    if (model?.id == id) return model!.name;
+    for (final m in models) {
+      if (m.id == id) return m.name;
+    }
+    return id;
+  }
+
   /// The tool the agent is running right now, for the ongoing notification.
   String? runningTool;
 

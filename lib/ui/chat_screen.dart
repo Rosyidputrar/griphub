@@ -17,6 +17,7 @@ import 'package:simple_icons/simple_icons.dart';
 import 'repos_screen.dart';
 import 'kit.dart';
 import 'illustration.dart';
+import 'mesh.dart';
 import 'model_sheet.dart';
 import 'tasks_screen.dart';
 import 'terminal_screen.dart';
@@ -296,7 +297,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     try {
       final points = await agent.features.forkPoints();
-      if (userIndex >= points.length) throw 'This message cannot be edited';
+      if (userIndex >= points.length) throw tr('This message cannot be edited');
       final entryId = points[userIndex].entryId;
       final text = action == 'edit' ? await agent.editMessage(entryId) : await agent.forkAt(entryId);
       _prefill(text.isEmpty ? entry.text : text);
@@ -455,7 +456,13 @@ class _ChatScreenState extends State<ChatScreen> {
             e,
             onLongPress: (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
           ),
-          AssistantEntry() => AssistantMessageView(e, tools: agent.tools, cwd: agent.cwd, live: agent),
+          AssistantEntry() => AssistantMessageView(
+            e,
+            tools: agent.tools,
+            cwd: agent.cwd,
+            live: agent,
+            modelLabel: agent.modelLabel,
+          ),
           NoticeEntry() => NoticeView(e),
         };
         final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
@@ -504,7 +511,7 @@ class _Title extends StatelessWidget {
     final p = context.palette;
     final name = agent.sessionName?.trim();
     final firstUser = agent.entries.whereType<UserEntry>().firstOrNull?.text.split('\n').first;
-    final title = (name != null && name.isNotEmpty) ? name : (firstUser ?? 'New chat');
+    final title = (name != null && name.isNotEmpty) ? name : (firstUser ?? tr('New chat'));
     // Sessions inside a project folder show which one.
     final project = sessionFolder(agent.cwd, agent.info['workspace'] as String? ?? '');
     return Column(
@@ -556,19 +563,21 @@ class _EmptyState extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final ready = agent.hasModel;
     final suggestions = [
+      // Same names, blurbs and colours as the quick starts on Home.
       (
         LucideIcons.layoutTemplate,
-        const Color(0xFF8B5CF6),
+        const Color(0xFFFF7A1A),
         'Build a web app',
-        'A polished single-page app I can preview',
+        'A site or app, ready to deploy',
         'Build me a polished, mobile-first web app: ',
       ),
-      (SimpleIcons.github, p.text, 'Clone a repo', 'Pick one of your GitHub repositories', null),
+      // p.text, not Home's slate: this soft tile tints the icon with its own colour.
+      (SimpleIcons.github, p.text, 'Clone a GitHub repo', 'Pick up an existing project', null),
       (
         SimpleIcons.python,
         const Color(0xFF3B82F6),
-        'Set up Python',
-        'Install Python and packages in Linux',
+        'Python in Linux',
+        'Scripts in a real Linux container',
         'Set up a Python environment in the Linux container with requests and rich, then write a hello script.',
       ),
       (
@@ -587,10 +596,19 @@ class _EmptyState extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Illustration('ai', height: 190),
+              // In a pastel tile like the Home cards; on the bare page its white panels look like a pasted box.
+              const SizedBox(
+                width: 236,
+                height: 196,
+                child: MeshArt(
+                  seed: 'hello',
+                  radius: Radii.xl,
+                  child: Padding(padding: EdgeInsets.all(12), child: Illustration('ai', height: 172)),
+                ),
+              ),
               const SizedBox(height: 24),
               Text(
-                ready ? 'What should we build?' : 'Connect a model to begin',
+                tr(ready ? 'What should we build?' : 'Connect a model to begin'),
                 style: text.displaySmall?.copyWith(fontSize: 26),
                 textAlign: TextAlign.center,
               ),
@@ -620,15 +638,17 @@ class _EmptyState extends StatelessWidget {
                     for (final (icon, color, title, blurb, prompt) in suggestions)
                       SurfaceCard(
                         padding: const EdgeInsets.all(14),
-                        onTap: prompt == null ? onClone : () => onPrompt(prompt),
+                        onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             IconTile(icon: icon, color: color, size: 32),
-                            const Spacer(),
-                            Text(title, style: text.titleSmall),
+                            // Text from the top, so titles line up across a row whatever the blurb length.
+                            const SizedBox(height: 14),
+                            Text(tr(title), style: text.titleSmall),
                             const SizedBox(height: 2),
-                            Text(blurb, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall),
+                            Text(tr(blurb), maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall),
+                            const Spacer(),
                           ],
                         ),
                       ),
@@ -721,35 +741,48 @@ class _Composer extends StatelessWidget {
                   children: [
                     _IconChip(icon: LucideIcons.plus, label: tr('Attach'), onTap: onAttach),
                     const SizedBox(width: 6),
-                    Flexible(
-                      child: _Chip(
-                        leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 20),
-                        label: agent.model?.name ?? 'Choose model',
-                        icon: LucideIcons.chevronsUpDown,
-                        onTap: onPickModel,
+                    // The chips share what the buttons on the right leave; the model chip shrinks first,
+                    // and the buttons stay flush right however short the model name is.
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: _Chip(
+                              leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 20),
+                              label: agent.model?.name ?? tr('Choose model'),
+                              icon: LucideIcons.chevronsUpDown,
+                              onTap: onPickModel,
+                            ),
+                          ),
+                          if (agent.thinkingLevels.length > 1) ...[
+                            const SizedBox(width: 6),
+                            _ThinkingChip(agent: agent),
+                          ],
+                          const SizedBox(width: 6),
+                          _IconChip(
+                            icon: LucideIcons.listChecks,
+                            label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
+                            active: agent.planMode,
+                            onTap: () => agent.setPlanMode(!agent.planMode),
+                          ),
+                        ],
                       ),
                     ),
-                    if (agent.thinkingLevels.length > 1) ...[const SizedBox(width: 6), _ThinkingChip(agent: agent)],
-                    const SizedBox(width: 6),
-                    _IconChip(
-                      icon: LucideIcons.listChecks,
-                      label: agent.planMode ? 'Plan mode on' : 'Plan mode',
-                      active: agent.planMode,
-                      onTap: () => agent.setPlanMode(!agent.planMode),
-                    ),
-                    const Spacer(),
-                    if (busy && !hasText)
-                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: true, onTap: agent.abort)
-                    else if (!hasText)
-                      _RoundButton(icon: LucideIcons.mic, label: tr('Voice'), filled: false, onTap: onVoice)
-                    else
+                    const SizedBox(width: 8),
+                    // While the agent works, Stop stays reachable; typed text adds Send (queues a follow-up).
+                    if (busy)
+                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: agent.abort),
+                    if (busy && hasText) const SizedBox(width: 6),
+                    if (hasText)
                       _RoundButton(
                         onLongPress: onQueue,
                         icon: LucideIcons.arrowUp,
                         label: tr('Send'),
                         filled: true,
-                        onTap: hasText ? onSend : null,
-                      ),
+                        onTap: onSend,
+                      )
+                    else if (!busy)
+                      _RoundButton(icon: LucideIcons.mic, label: tr('Voice'), filled: false, onTap: onVoice),
                   ],
                 ),
               ),
@@ -804,7 +837,13 @@ class _ThinkingChip extends StatelessWidget {
       onSelected: agent.setThinking,
       position: PopupMenuPosition.over,
       elevation: 0,
-      itemBuilder: (_) => [
+      itemBuilder: (context) => [
+        // "Medium" alone doesn't say what it sets.
+        PopupMenuItem(
+          enabled: false,
+          height: 32,
+          child: Text(tr('Thinking level'), style: Theme.of(context).textTheme.labelSmall),
+        ),
         for (final level in agent.thinkingLevels)
           PopupMenuItem(value: level, height: 40, child: Text(_levelLabel(level))),
       ],
@@ -819,12 +858,12 @@ class _ThinkingChip extends StatelessWidget {
   }
 
   static String _levelLabel(String level) => switch (level) {
-    'off' => 'Off',
-    'minimal' => 'Minimal',
-    'low' => 'Low',
-    'medium' => 'Medium',
-    'high' => 'High',
-    'xhigh' => 'Max',
+    'off' => tr('Off'),
+    'minimal' => tr('Minimal'),
+    'low' => tr('Low'),
+    'medium' => tr('Medium'),
+    'high' => tr('High'),
+    'xhigh' => tr('Max'),
     _ => level,
   };
 }

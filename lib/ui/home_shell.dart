@@ -741,7 +741,7 @@ class _HomeTabState extends State<_HomeTab> {
     final dir = Directory('$ws/$slug-${n.month}${n.day}-${n.hour}${n.minute.toString().padLeft(2, '0')}')
       ..createSync(recursive: true);
     await agent.newSession(dir: dir.path);
-    if (mounted) await openChat(context, agent, prompt: q.prompt);
+    if (mounted) await openChat(context, agent, prompt: tr(q.prompt!));
     // Backed out without sending anything: don't leave an empty project behind.
     if (agent.cwd == dir.path && agent.entries.isEmpty && dir.existsSync() && dir.listSync().isEmpty) {
       dir.deleteSync();
