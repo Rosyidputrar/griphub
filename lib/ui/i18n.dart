@@ -4,6 +4,17 @@ import 'theme.dart';
 /// missing translation falls back to English instead of showing a placeholder.
 String tr(String en) => Appearance.instance.language == 'id' ? (_id[en] ?? en) : en;
 
+/// Number text in the app's language: 7350 -> "7.350" and 0.978 -> "0,978" in
+/// Indonesian, "7,350" and "0.978" in English. A suffix (k, M) is kept.
+String localNumber(String plain) {
+  final m = RegExp(r'^(-?)(\d+)(?:\.(\d+))?(.*)$').firstMatch(plain);
+  if (m == null) return plain;
+  final id = Appearance.instance.language == 'id';
+  final whole = m[2]!.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => id ? '.' : ',');
+  final frac = m[3] == null ? '' : '${id ? ',' : '.'}${m[3]}';
+  return '${m[1]}$whole$frac${m[4]}';
+}
+
 /// One relative-time helper for the whole app (previously a private copy in
 /// five screens, each with slightly different thresholds and only one of them
 /// localized). Old dates show months/years, like git history did.
@@ -448,10 +459,10 @@ const _id = <String, String>{
   'Remove container': 'Hapus container',
   'Frees the space; workspace files stay': 'Mengosongkan ruang; file workspace tetap ada',
   'Daily budget': 'Anggaran harian',
-  'GripHub credit': 'Credit GripHub',
+  'GripHub credit': 'Kredit GripHub',
   'Top usage': 'Pemakaian terbanyak',
   'Account suspended': 'Akun ditangguhkan',
-  '1 credit = Rp 300 · prices as of Oct 2026': 'Kurs 1 credit = Rp 300 · tarif per Okt 2026',
+  '1 credit = Rp 300 · prices as of Oct 2026': 'Kurs 1 kredit = Rp 300 · tarif per Okt 2026',
   'No limit': 'Tanpa batas',
   'This chat': 'Chat ini',
   'Limits': 'Batas',
@@ -754,6 +765,38 @@ const _id = <String, String>{
       'Agent berjalan di HP kamu. Masuk ke provider atau tambahkan API key untuk memilih modelnya.',
   'Coding agent on your phone': 'Agent coding di HP kamu',
   'Working': 'Bekerja',
+  'credits': 'kredit',
+  '{n} per day': '{n} per hari',
+  'Earliest batch expires {date} ({n})': 'Batch paling cepat kedaluwarsa {date} ({n})',
+  'Estimated from the rates of 25 Oct 2026 · total ≈ {rp} · the exact figure is on the GripHub credit card above':
+      'Perkiraan dari tarif 25 Okt 2026 · total ≈ {rp} · angka pasti ada di kartu Kredit GripHub di atas',
+  'Cost per day': 'Biaya per hari',
+  'Tokens per day': 'Token per hari',
+  'Peak': 'Puncak',
+  'Nothing yet': 'Belum ada',
+  'Connect a provider to start': 'Hubungkan provider untuk mulai',
+  'Instructions the agent loads on demand': 'Instruksi yang dimuat agent saat dibutuhkan',
+  '{n} installed': '{n} terpasang',
+  'Debian or Alpine with apt / apk': 'Debian atau Alpine dengan apt / apk',
+  'agent shell': 'shell agent',
+  'Not installed · run apt, pip, npm and more': 'Belum terpasang · jalankan apt, pip, npm, dan lainnya',
+  'web search for the agent': 'pencarian web untuk agent',
+  'System DNS': 'DNS sistem',
+  'Agent directory': 'Folder agent',
+  'git push and Pages enabled': 'git push dan Pages aktif',
+  'Hide token option': 'Sembunyikan opsi token',
+  'Use a personal access token instead': 'Pakai personal access token saja',
+  'Host': 'Host',
+  'Port': 'Port',
+  'User': 'User',
+  'Edit server': 'Edit server',
+  'Deploy folder (optional)': 'Folder deploy (opsional)',
+  'Generate a key for this device, then add its public half to your servers or GitHub.':
+      'Buat key untuk perangkat ini, lalu tambahkan bagian publiknya ke server atau GitHub kamu.',
+  'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.':
+      'Tambahkan public key ini ke ~/.ssh/authorized_keys di server kamu, atau ke GitHub untuk remote SSH.',
+  'Code copied': 'Kode disalin',
+  'OAuth client ID saved': 'Client ID OAuth disimpan',
   'Scheduled': 'Terjadwal',
   'From GitHub issue': 'Dari issue GitHub',
   'In progress': 'Berjalan',

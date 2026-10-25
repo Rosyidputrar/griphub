@@ -98,7 +98,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                           avatarUrl: it.github!.avatarUrl,
                           icon: SimpleIcons.github,
                           title: it.github!.name ?? it.github!.login,
-                          subtitle: '@${it.github!.login} · git push and Pages enabled',
+                          subtitle: '@${it.github!.login} · ${tr('git push and Pages enabled')}',
                           onDisconnect: () => _disconnect('GitHub', it.githubLogout),
                         ),
                   _Header(tr('Vercel')),
@@ -376,7 +376,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                 TextButton(
                   onPressed: () => setState(() => showToken = !showToken),
                   style: TextButton.styleFrom(foregroundColor: p.muted),
-                  child: Text(showToken ? 'Hide token option' : 'Use a personal access token instead'),
+                  child: Text(tr(showToken ? 'Hide token option' : 'Use a personal access token instead')),
                 ),
             ],
           ),
@@ -639,9 +639,11 @@ class _SshKeyCardState extends State<_SshKeyCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            key == null
-                ? 'Generate a key for this device, then add its public half to your servers or GitHub.'
-                : 'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.',
+            tr(
+              key == null
+                  ? 'Generate a key for this device, then add its public half to your servers or GitHub.'
+                  : 'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.',
+            ),
             style: text.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -780,7 +782,7 @@ class _HostSheetState extends State<_HostSheet> {
             keyboardType: type,
             autocorrect: false,
             style: monospace ? const TextStyle(fontFamily: mono, fontSize: 14) : null,
-            decoration: InputDecoration(labelText: label, hintText: hint),
+            decoration: InputDecoration(labelText: tr(label), hintText: hint),
           ),
         );
     return SafeArea(
@@ -791,7 +793,7 @@ class _HostSheetState extends State<_HostSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(widget.host == null ? 'Add server' : 'Edit server', style: text.titleLarge),
+              Text(tr(widget.host == null ? 'Add server' : 'Edit server'), style: text.titleLarge),
               const SizedBox(height: 16),
               field(name, 'Name', hint: 'my-vps'),
               Row(
