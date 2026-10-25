@@ -34,9 +34,10 @@ class _ModelSheetState extends State<_ModelSheet> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
-      listenable: widget.agent,
+      listenable: Listenable.merge([widget.agent, Appearance.instance]),
       builder: (context, _) {
         final agent = widget.agent;
+        final appearance = Appearance.instance;
         final q = query.toLowerCase();
         final filtered = agent.models
             .where((m) => q.isEmpty || m.name.toLowerCase().contains(q) || m.key.toLowerCase().contains(q))
@@ -46,6 +47,9 @@ class _ModelSheetState extends State<_ModelSheet> {
           byProvider.putIfAbsent(m.provider, () => []).add(m);
         }
         final names = {for (final pr in agent.providers) pr.id: pr.name};
+        // Pinned above the provider groups, only when not searching: the
+        // favorites the user starred, in starring order.
+        final favorites = favoriteModelsInOrder(agent.models, appearance.favoriteModels);
 
         return DraggableScrollableSheet(
           expand: false,
@@ -94,6 +98,13 @@ class _ModelSheetState extends State<_ModelSheet> {
                         controller: scroll,
                         padding: const EdgeInsets.only(bottom: 24),
                         children: [
+                          if (q.isEmpty && favorites.isNotEmpty) ...[
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+                              child: Text(tr('Favorites').toUpperCase(), style: text.labelSmall),
+                            ),
+                            for (final m in favorites) _ModelTile(model: m, agent: agent),
+                          ],
                           for (final entry in byProvider.entries) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
@@ -121,6 +132,7 @@ class _ModelTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final selected = agent.model?.key == model.key;
+    final isFav = Appearance.instance.isFavorite(model.key);
     final details = [
       if (model.contextWindow != null && model.contextWindow! > 0)
         '${formatTokens(model.contextWindow!)} ${tr('context')}',
@@ -135,7 +147,18 @@ class _ModelTile extends StatelessWidget {
       },
       title: Text(model.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: details.isEmpty ? null : Text(details),
-      trailing: selected ? Icon(LucideIcons.check, size: 18, color: p.text) : null,
+      // The star is its own button, so tapping it never selects the model.
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            onPressed: () => Appearance.instance.toggleFavorite(model.key),
+            tooltip: isFav ? tr('Remove from favorites') : tr('Add to favorites'),
+            icon: Icon(LucideIcons.star, size: 18, color: isFav ? p.warning : p.muted),
+          ),
+          if (selected) Icon(LucideIcons.check, size: 18, color: p.text),
+        ],
+      ),
     );
   }
 }

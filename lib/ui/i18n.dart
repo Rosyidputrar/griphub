@@ -422,6 +422,9 @@ const _id = <String, String>{
   'The key is stored encrypted on this device.': 'Key disimpan terenkripsi di perangkat ini.',
   'All': 'Semua',
   'Search models': 'Cari model',
+  'Favorites': 'Favorit',
+  'Add to favorites': 'Tambah ke favorit',
+  'Remove from favorites': 'Hapus dari favorit',
   'Fetch the list from the endpoint, or type a model ID below.':
       'Ambil daftar dari endpoint, atau ketik ID model di bawah.',
   'Add model ID manually': 'Tambah ID model manual',
