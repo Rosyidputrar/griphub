@@ -503,6 +503,10 @@ const _id = <String, String>{
   'Add a server under Accounts & servers first': 'Tambahkan server di Akun & server dulu',
   'No commands yet': 'Belum ada perintah',
   'Command history': 'Riwayat perintah',
+  'Not at a shell prompt': 'Bukan di prompt shell',
+  'This tab is not sitting at a local shell prompt. Sending this would type into whatever program is running here (for example vim, less, ssh, or a REPL) instead of the shell. Send it anyway?':
+      'Tab ini tidak sedang di prompt shell lokal. Mengirim akan mengetik ke program yang sedang berjalan di sini (mis. vim, less, ssh, atau REPL), bukan ke shell. Tetap kirim?',
+  'Send anyway': 'Tetap kirim',
   'SSH to a server': 'SSH ke server',
   'Restart shell': 'Mulai ulang shell',
   'New shell': 'Shell baru',
