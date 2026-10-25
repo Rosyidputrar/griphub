@@ -241,6 +241,26 @@ class _NetworkScreenState extends State<NetworkScreen> {
                     ),
                     const SizedBox(height: 10),
                     _KeyList(
+                      service: 'tinyfish',
+                      icon: LucideIcons.fish,
+                      color: const Color(0xFF14B8A6),
+                      title: 'TinyFish',
+                      integrations: it,
+                      onLink: () => widget.agent.client.openUrl('https://agent.tinyfish.ai/sign-up'),
+                      footer: _InsetGroup(
+                        children: [
+                          _FeatureSwitch(
+                            icon: LucideIcons.search,
+                            title: tr('Search'),
+                            subtitle: tr('web_search via TinyFish'),
+                            value: s.tinyfishSearch,
+                            onChanged: (v) => _save({'tinyfishSearch': v}),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _KeyList(
                       service: 'brave',
                       icon: SimpleIcons.brave,
                       color: const Color(0xFFFB542B),

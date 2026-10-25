@@ -3,7 +3,7 @@
  * docs and error messages instead of guessing.
  *
  * Search works without a key (DuckDuckGo, DuckDuckGo Lite, then Brave, scraped
- * from their HTML pages). Search1API, Brave Search or Tavily keys, when configured, are used first;
+ * from their HTML pages). Search1API, TinyFish, Brave Search or Tavily keys, when configured, are used first;
  * each service can have several keys, used in turn (keyring.ts). Search1API can also read pages
  * (crawl) and take screenshots.
  */
@@ -26,10 +26,13 @@ export interface SearchKeys {
 	brave: string[];
 	tavily: string[];
 	s1: string[];
+	tinyfish: string[];
 	/** Which Search1API features to use when it has keys. */
 	s1Search: boolean;
 	s1Crawl: boolean;
 	s1Screenshot: boolean;
+	/** Whether the agent uses TinyFish Search when it has keys. */
+	tinyfishSearch: boolean;
 	/** GripHub Router search: OpenAI Responses + Anthropic Messages, both with a server-side web_search tool. */
 	openaiSearch: boolean;
 	anthropicSearch: boolean;
@@ -153,6 +156,43 @@ export async function s1Usage(keys: string[]) {
 			}
 		}),
 	);
+}
+
+// ---------------------------------------------------------------------------
+// TinyFish Search (https://api.search.tinyfish.ai — GET, X-API-Key header)
+//
+// Returns { query, results: [{ position, site_name, title, snippet, url }],
+// total_results }. No documented count parameter, so the caller slices to n
+// client-side. Defensive like the other keyed engines: a missing or
+// non-array results field is an empty list, not an error.
+
+const TINYFISH_SEARCH = "https://api.search.tinyfish.ai";
+
+async function tinyfishSearch(q: string, n: number, key: string, signal?: AbortSignal): Promise<SearchResult[]> {
+	// A stalled mobile connection must not hang the agent: a minute is plenty.
+	const timeout = AbortSignal.timeout(60_000);
+	const res = await fetch(`${TINYFISH_SEARCH}?query=${encodeURIComponent(q)}`, {
+		headers: { "X-API-Key": key },
+		signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+	});
+	if (!res.ok) {
+		const raw = await res.text().catch(() => "");
+		let message = "";
+		try {
+			const json = JSON.parse(raw);
+			message = json.message ?? json.error ?? json.detail ?? "";
+		} catch {
+			message = raw.slice(0, 200);
+		}
+		throw new KeyError(`TinyFish ${res.status}${message ? `: ${message}` : ""}`, res.status);
+	}
+	const body = (await res.json()) as any;
+	const results = Array.isArray(body?.results) ? body.results : [];
+	return results.slice(0, n).map((r: any) => ({
+		title: r.title ?? "",
+		url: r.url ?? "",
+		snippet: r.snippet ?? "",
+	})) as SearchResult[];
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +510,7 @@ export async function webSearch(q: string, n: number, keys: SearchKeys, signal?:
 		const name = source ? `search1api/${source}` : "search1api";
 		attempts.push([name, () => withKeys("Search1API", keys.s1, (k) => s1Search(q, n, k, source, signal), s1KeyProblem)]);
 	}
+	if (keys.tinyfishSearch && keys.tinyfish.length) attempts.push(["tinyfish", () => withKeys("TinyFish", keys.tinyfish, (k) => tinyfishSearch(q, n, k, signal))]);
 	if (keys.braveSearch && keys.brave.length) attempts.push(["brave", () => withKeys("Brave", keys.brave, (k) => braveSearch(q, n, k, signal))]);
 	if (keys.tavilySearch && keys.tavily.length) attempts.push(["tavily", () => withKeys("Tavily", keys.tavily, (k) => tavilySearch(q, n, k, signal))]);
 	attempts.push(
