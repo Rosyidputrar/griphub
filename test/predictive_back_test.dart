@@ -69,11 +69,15 @@ void main() {
     final released = tester.getRect(find.text('page b'));
     await _send(tester, 'commitBackGesture');
     await tester.pump();
+    // The exit starts exactly where the finger left the page: no jump.
+    final atCommit = tester.getRect(find.text('page b'));
+    expect((atCommit.center.dx - released.center.dx).abs(), lessThan(1.0));
+    expect((atCommit.width - released.width).abs(), lessThan(1.0));
     await tester.pump(const Duration(milliseconds: 16));
-    // The exit carries on from where the finger left the page, with no jump back to full size.
+    // ... then slides away fast toward the edge, relaxing back to full size as it goes.
     final exiting = tester.getRect(find.text('page b'));
-    expect((exiting.center.dx - released.center.dx).abs(), lessThan(12));
-    expect(exiting.width, lessThanOrEqualTo(released.width + 0.5));
+    expect((exiting.center.dx - released.center.dx).abs(), greaterThan(50));
+    expect(exiting.width, greaterThanOrEqualTo(released.width - 0.5));
     await tester.pumpAndSettle();
     expect(find.text('page b'), findsNothing);
     expect(find.text('push'), findsOneWidget);

@@ -126,7 +126,8 @@ class PredictiveBack extends NavigatorObserver with WidgetsBindingObserver {
 
 /// Pages glide in: a short slide from the right with a fade, while the page underneath eases back and dims a
 /// little. During a predictive back gesture the page instead shrinks toward the finger with rounded corners,
-/// revealing the page underneath, and fades out when released.
+/// revealing the page underneath (which grows back to full size); when released, the page slides all the way
+/// off-screen instead of fading in place. Popping without a gesture likewise slides the page fully off-screen.
 class SmoothPageTransitions extends PageTransitionsBuilder {
   const SmoothPageTransitions();
 
@@ -144,7 +145,7 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    final enter = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final enter = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeOutCubic);
     final under = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic);
     final gesture = PredictiveBack.instance.gesture;
     return AnimatedBuilder(
@@ -171,11 +172,22 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
           shadow = math.min(1.0, drag * 4);
           dx = dir * shift * drag;
           if (g.committed) {
+            // Released: keep sliding all the way off-screen instead of fading in
+            // place, relaxing the gesture shrink and corners as it goes.
             final c = g.committedAt <= 0 ? 1.0 : (1 - animation.value / g.committedAt).clamp(0.0, 1.0);
-            scale -= 0.04 * c;
-            dx += dir * 24 * c;
-            opacity = 1 - Curves.easeOut.transform(c);
+            final ce = Curves.easeOutCubic.transform(c);
+            dx = dir * (shift * drag + (width - shift * drag) * ce);
+            scale = 1 - 0.1 * drag * (1 - ce);
+            radius = 28 * math.min(1.0, drag * 4) * (1 - ce);
+            shadow = math.min(1.0, drag * 4) * (1 - ce);
+            // opacity stays 1: the page leaves the screen instead of vanishing.
           }
+        } else if (g == null && animation.status == AnimationStatus.reverse) {
+          // Popping without a gesture: slide all the way off to the right with a
+          // gentle landing, no fade — so the page travels out instead of
+          // vanishing part-way.
+          dx = width * (1 - enter.value);
+          // opacity stays 1; radius and shadow stay 0.
         } else {
           final u = under.value;
           if (g == null) {
@@ -183,8 +195,11 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
             dx = -0.08 * width * u;
             scrim = 0.18 * u;
           } else {
-            // Revealed by a back gesture: stays put, brightening as the page above moves away.
+            // Revealed by a back gesture: grows to full size as the page above
+            // leaves (secondaryAnimation falls with the top page's animation),
+            // brightening as the page above moves away.
             scrim = 0.12 * secondaryAnimation.value;
+            scale = 0.92 + 0.08 * (1 - secondaryAnimation.value);
           }
           // Coming in: slides from the right, fading in over the first part only, so two pages never blend.
           dx += 0.18 * width * (1 - enter.value);
