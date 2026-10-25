@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import 'griphub_screen.dart';
 import 'kit.dart';
-import 'illustration.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
-/// First-run welcome: what GripHub AI Agent is, then straight to connecting a model.
+/// First-run welcome, rewritten for GripHub: what the router gives you,
+/// then straight to adding its API key.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key, required this.agent});
   final AgentController agent;
@@ -19,15 +21,42 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final pages = PageController();
   int page = 0;
 
+  // Carousel kept, copy rewritten for GripHub: slide 1 is the brand,
+  // slide 2 the models + credits, slide 3 ends on the key action.
   static const _slides = [
-    ('ai', 'Boost your\nproductivity', 'Chat with a coding agent that runs right on your phone.'),
-    ('linux', 'Real Linux,\nin your pocket', 'Install Python, Node and more with apt. No root needed.'),
-    ('search', 'Search, build\nand preview', 'Your agent looks things up on the web and shows your pages live.'),
-    ('launch', 'Ship it\nanywhere', 'Deploy to Vercel, GitHub Pages or your own server.'),
+    (_Hero.logo, 'GripHub AI Agent', 'One GripHub key, every AI model.'),
+    (
+      _Hero.models,
+      '50+ models,\none key',
+      'Claude, GPT, Gemini, DeepSeek and more, paid with GripHub credits — 1 credit = Rp 300.'
+    ),
+    (
+      _Hero.key,
+      'Add your key\nto start',
+      'Paste your GripHub Router API key. The model list loads itself — nothing else to configure.'
+    ),
   ];
 
   // Home takes over from here and offers to connect a model if none is set.
   void _start() => Appearance.instance.finishOnboarding();
+
+  void _next() => pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
+
+  /// Push the GripHub key screen; a saved key finishes onboarding straight
+  /// into Home (no connect card — the key is already there). Backing out
+  /// leaves the user on this slide, with Skip still available.
+  Future<void> _addKey() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => GripHubScreen(agent: widget.agent)),
+    );
+    if (saved == true && mounted) _start();
+  }
+
+  @override
+  void dispose() {
+    pages.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,139 +64,91 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final text = Theme.of(context).textTheme;
     final last = page == _slides.length - 1;
     return Scaffold(
-      body: Stack(
-        children: [
-          // Soft colour washes behind everything, like the cards' mesh art.
-          SafeArea(
-            child: Column(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              child: Row(
+                children: [
+                  Material(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(Radii.r12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(Radii.r12),
+                      onTap: _start,
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                        child: Text(tr('Skip'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                ],
+              ),
+            ),
+            Expanded(
+              child: PageView.builder(
+                controller: pages,
+                itemCount: _slides.length,
+                onPageChanged: (i) => setState(() => page = i),
+                itemBuilder: (context, i) {
+                  final (hero, title, body) = _slides[i];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(height: 240, child: Center(child: _heroWidget(hero))),
+                        const SizedBox(height: 40),
+                        Text(tr(title), textAlign: TextAlign.center, style: text.displayMedium),
+                        const SizedBox(height: 14),
+                        Text(
+                          tr(body),
+                          textAlign: TextAlign.center,
+                          style: text.bodyLarge?.copyWith(color: p.muted),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                  child: Row(
-                    children: [
-                      Material(
-                        color: p.surface,
-                        borderRadius: BorderRadius.circular(Radii.r12),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(Radii.r12),
-                          onTap: _start,
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                            child: Text(tr('Skip'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                    ],
+                for (var i = 0; i < _slides.length; i++)
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: i == page ? p.accentAlt : Colors.transparent,
+                      border: Border.all(color: i == page ? p.accentAlt : p.faint, width: 1.5),
+                    ),
                   ),
-                ),
-                Expanded(
-                  child: PageView.builder(
-                    controller: pages,
-                    itemCount: _slides.length,
-                    onPageChanged: (i) => setState(() => page = i),
-                    itemBuilder: (context, i) {
-                      final (art, title, body) = _slides[i];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 28),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _Hero(illustration: art),
-                            const SizedBox(height: 40),
-                            Text(tr(title), textAlign: TextAlign.center, style: text.displayMedium),
-                            const SizedBox(height: 14),
-                            Text(
-                              tr(body),
-                              textAlign: TextAlign.center,
-                              style: text.bodyLarge?.copyWith(color: p.muted),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    for (var i = 0; i < _slides.length; i++)
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: i == page ? p.accentAlt : Colors.transparent,
-                          border: Border.all(color: i == page ? p.accentAlt : p.faint, width: 1.5),
-                        ),
-                      ),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 28, 24, 10),
-                  child: PrimaryButton(
-                    label: last ? 'Get started' : 'Next',
-                    onPressed: last
-                        ? _start
-                        : () => pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: StorysetCredit(openUrl: widget.agent.client.openUrl),
-                ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Hero extends StatelessWidget {
-  const _Hero({required this.illustration});
-  final String illustration;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    return SizedBox(
-      width: 300,
-      height: 280,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // A soft blob behind the scene.
-          Container(
-            width: 270,
-            height: 250,
-            decoration: BoxDecoration(
-              color: p.accent.withValues(alpha: 0.12),
-              borderRadius: const BorderRadius.all(Radius.elliptical(150, 125)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+              child: PrimaryButton(
+                label: last ? tr('Add API key') : tr('Next'),
+                onPressed: last ? _addKey : _next,
+              ),
             ),
-          ),
-          Illustration(illustration, height: 270),
-          Positioned(left: 4, top: 60, child: _Dot(color: context.palette.accentAlt, size: 14)),
-          const Positioned(right: 2, top: 30, child: _Dot(color: Color(0xFFFF8C42), size: 8)),
-          const Positioned(right: 10, bottom: 80, child: _Dot(color: Color(0xFF30A46C), size: 12)),
-        ],
+          ],
+        ),
       ),
     );
   }
+
+  Widget _heroWidget(_Hero hero) => switch (hero) {
+    _Hero.logo => Image.asset('assets/brand/logo.png', height: 200),
+    _Hero.models => const IconTile(icon: LucideIcons.sparkles, size: 132),
+    _Hero.key => const IconTile(icon: LucideIcons.keyRound, size: 132),
+  };
 }
 
-class _Dot extends StatelessWidget {
-  const _Dot({required this.color, required this.size});
-  final Color color;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-  );
-}
+enum _Hero { logo, models, key }

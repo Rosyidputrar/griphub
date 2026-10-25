@@ -82,8 +82,6 @@ const _id = <String, String>{
       'Build ini hanya terhubung ke GripHub Router. Tempel API key kamu dan model akan dimuat otomatis.',
   'This build only connects to GripHub Router. One API key unlocks every model it serves.':
       'Build ini hanya terhubung ke GripHub Router. Satu API key membuka semua model yang disajikannya.',
-  'Your agent looks things up on the web and shows your pages live.':
-      'Agent kamu mencari di web dan menampilkan halamanmu secara langsung.',
 
   'Repositories': 'Repositori',
   'Accounts & servers': 'Akun & server',
@@ -307,6 +305,7 @@ const _id = <String, String>{
       'Agent punya tool web_search dan web_fetch. Pencarian GripHub di bawah jalan duluan dengan model search di bawah, lalu key di bawah, lalu DuckDuckGo.',
   'web_search via Brave': 'web_search lewat Brave',
   'web_search via Tavily': 'web_search lewat Tavily',
+  'web_search via TinyFish': 'web_search lewat TinyFish',
   'OpenAI search': 'Pencarian OpenAI',
   'OpenAI search model': 'Model search OpenAI',
   'Anthropic search model': 'Model search Anthropic',
@@ -757,13 +756,16 @@ const _id = <String, String>{
   'History': 'Riwayat',
   'Make pictures with GripHub image models': 'Buat gambar dengan model gambar GripHub',
   // Tahap 4: strings that used to bypass tr() or had no Indonesian entry.
-  'Boost your\nproductivity': 'Tingkatkan\nproduktivitasmu',
-  'Chat with a coding agent that runs right on your phone.': 'Chat dengan agen coding yang berjalan langsung di HP-mu.',
-  'Real Linux,\nin your pocket': 'Linux beneran,\ndi sakumu',
-  'Install Python, Node and more with apt. No root needed.': 'Instal Python, Node, dan lainnya lewat apt. Tanpa root.',
-  'Search, build\nand preview': 'Cari, bangun,\ndan pratinjau',
-  'Ship it\nanywhere': 'Rilis ke\nmana saja',
-  'Deploy to Vercel, GitHub Pages or your own server.': 'Deploy ke Vercel, GitHub Pages, atau servermu sendiri.',
+  // Welcome carousel, rewritten for GripHub.
+  'GripHub AI Agent': 'GripHub AI Agent',
+  'One GripHub key, every AI model.': 'Satu kunci GripHub, semua model AI.',
+  '50+ models,\none key': '50+ model,\nsatu kunci',
+  'Claude, GPT, Gemini, DeepSeek and more, paid with GripHub credits — 1 credit = Rp 300.':
+      'Claude, GPT, Gemini, DeepSeek, dan lainnya, dibayar dengan kredit GripHub — 1 kredit = Rp 300.',
+  'Add your key\nto start': 'Tambahkan kuncimu\nuntuk memulai',
+  'Paste your GripHub Router API key. The model list loads itself — nothing else to configure.':
+      'Tempel API key GripHub Router-mu. Daftar model termuat sendiri — tidak ada lagi yang perlu diatur.',
+  'Next': 'Lanjut',
   'Android shell': 'Shell Android',
   'Confirm deploy': 'Konfirmasi deploy',
   'Custom DoH': 'DoH kustom',
