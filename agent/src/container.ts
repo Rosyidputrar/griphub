@@ -131,12 +131,38 @@ export class Container {
 			);
 			this.token = ((await res.json()) as any).token;
 		}
-		const res = await fetch(`https://registry-1.docker.io/v2/${repo}/${path}`, {
-			signal: AbortSignal.timeout(30_000),
-			headers: { Authorization: `Bearer ${this.token}`, ...(accept ? { Accept: accept } : {}) },
-		});
-		if (!res.ok) throw new Error(`Registry ${path}: ${res.status} ${res.statusText}`);
-		return res;
+		// 30 seconds without progress, not 30 seconds in total: a whole layer
+		// (tens of MB) used to have to arrive within the same 30 seconds, which
+		// a slow phone connection can't do. Every chunk of the body restarts it.
+		const ctrl = new AbortController();
+		const stall = setTimeout(() => ctrl.abort(new Error(`Registry ${path}: no data for 30 seconds`)), 30_000);
+		let res: Response;
+		try {
+			res = await fetch(`https://registry-1.docker.io/v2/${repo}/${path}`, {
+				signal: ctrl.signal,
+				headers: { Authorization: `Bearer ${this.token}`, ...(accept ? { Accept: accept } : {}) },
+			});
+		} catch (e) {
+			clearTimeout(stall);
+			throw e;
+		}
+		if (!res.ok || !res.body) {
+			clearTimeout(stall);
+			if (!res.ok) throw new Error(`Registry ${path}: ${res.status} ${res.statusText}`);
+			return res;
+		}
+		const body = res.body.pipeThrough(
+			new TransformStream<Uint8Array, Uint8Array>({
+				transform(chunk, out) {
+					stall.refresh();
+					out.enqueue(chunk);
+				},
+				flush() {
+					clearTimeout(stall);
+				},
+			}),
+		);
+		return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
 	}
 
 	private async resolveLayers(repo: string, tag: string) {

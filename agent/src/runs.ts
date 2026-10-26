@@ -6,6 +6,11 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
+/** Nobody watches a background run, so one that never settles is stopped after this long. */
+export const RUN_TIME_LIMIT_MS = 60 * 60_000;
+/** Finished runs kept in the list; queued and running ones are always kept. */
+const KEEP_FINISHED = 100;
+
 export interface RunSession {
 	sessionFile?: string;
 	prompt(text: string): Promise<void>;
@@ -27,6 +32,8 @@ export interface Run {
 	finishedAt?: number;
 	sessionFile?: string;
 	summary?: string;
+	/** The schedule that queued this run, so a slow run is not queued again on top of itself. */
+	scheduleId?: string;
 }
 
 export interface Schedule {
@@ -80,7 +87,9 @@ export class Runner {
 	}
 
 	private save() {
-		this.store.runs = this.store.runs.slice(0, 100);
+		// Cutting the list at a fixed length used to drop the oldest runs even while they were still queued.
+		let finished = 0;
+		this.store.runs = this.store.runs.filter((r) => r.status === "queued" || r.status === "running" || ++finished <= KEEP_FINISHED);
 		writeFileSync(this.file, JSON.stringify(this.store, null, 1));
 	}
 
@@ -110,7 +119,7 @@ export class Runner {
 		this.pump();
 	}
 
-	enqueue(prompt: string, cwd: string, title?: string, source: Run["source"] = "queue") {
+	enqueue(prompt: string, cwd: string, title?: string, source: Run["source"] = "queue", scheduleId?: string) {
 		const run: Run = {
 			id: `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
 			title: title || prompt.split("\n")[0].slice(0, 80),
@@ -119,6 +128,7 @@ export class Runner {
 			status: "queued",
 			source,
 			createdAt: Date.now(),
+			scheduleId,
 		};
 		this.store.runs.unshift(run);
 		this.changed();
@@ -157,13 +167,20 @@ export class Runner {
 		run.startedAt = Date.now();
 		this.changed();
 		let session: RunSession | undefined;
+		let timer: NodeJS.Timeout | undefined;
+		let timedOut = false;
 		try {
 			session = await this.makeSession(run.cwd);
 			this.active.set(run.id, session);
 			run.sessionFile = session.sessionFile;
 			this.changed();
+			const started = session;
+			timer = setTimeout(() => {
+				timedOut = true;
+				void started.abort();
+			}, RUN_TIME_LIMIT_MS);
 			await session.prompt(run.prompt);
-			const err = session.errorText();
+			const err = timedOut ? `Stopped after ${RUN_TIME_LIMIT_MS / 60_000} minutes without finishing.` : session.errorText();
 			if ((run.status as string) === "cancelled") return;
 			run.status = err ? "error" : "done";
 			run.summary = (err ?? session.lastText() ?? "").slice(0, 600);
@@ -173,6 +190,7 @@ export class Runner {
 				run.summary = String((e as Error).message ?? e).slice(0, 600);
 			}
 		} finally {
+			clearTimeout(timer);
 			run.finishedAt = Date.now();
 			this.active.delete(run.id);
 			session?.dispose();
@@ -218,7 +236,7 @@ export class Runner {
 		const s = this.store.schedules.find((x) => x.id === id);
 		if (!s) throw new Error("Unknown schedule");
 		s.lastRun = Date.now();
-		return this.enqueue(s.prompt, s.cwd, s.name, "schedule");
+		return this.enqueue(s.prompt, s.cwd, s.name, "schedule", s.id);
 	}
 
 	private due(s: Schedule, now: Date) {
@@ -244,8 +262,10 @@ export class Runner {
 				continue;
 			}
 			if (this.due(s, now)) {
+				// Still queued or running from last time: wait for it instead of stacking another (lastRun is left as is, so it runs once that one ends).
+				if (this.store.runs.some((r) => r.scheduleId === s.id && (r.status === "queued" || r.status === "running"))) continue;
 				s.lastRun = now.getTime();
-				this.enqueue(s.prompt, s.cwd, s.name, "schedule");
+				this.enqueue(s.prompt, s.cwd, s.name, "schedule", s.id);
 			}
 		}
 		this.save();
