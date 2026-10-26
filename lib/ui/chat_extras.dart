@@ -224,6 +224,9 @@ class _ApprovalCardsState extends State<ApprovalCards> {
   Approval? _justAnswered;
   Timer? _timer;
 
+  /// The card last announced with a buzz, so each approval buzzes once.
+  String? _buzzed;
+
   @override
   void dispose() {
     _timer?.cancel();
@@ -240,15 +243,52 @@ class _ApprovalCardsState extends State<ApprovalCards> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
-    final text = Theme.of(context).textTheme;
     return ListenableBuilder(
       listenable: widget.features,
       builder: (context, _) {
         final approvals = widget.features.approvals;
         final a = _justAnswered ?? (approvals.isEmpty ? null : approvals.first);
-        if (a == null) return const SizedBox.shrink();
-        return Padding(
+        if (a != null && _justAnswered == null && a.id != _buzzed) {
+          _buzzed = a.id;
+          // The agent stopped to ask: worth a nudge, even if the user is looking elsewhere.
+          WidgetsBinding.instance.addPostFrameCallback((_) => HapticFeedback.mediumImpact());
+        }
+        // Rises from the composer and folds back into it; the next card in the queue cross-fades
+        // in once the answered one has had its moment on screen (see _onAnswered).
+        return AnimatedSwitcher(
+          duration: Motion.of(context, Motion.normal),
+          switchInCurve: Motion.curve,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) => SizeTransition(
+            sizeFactor: animation,
+            alignment: Alignment.bottomCenter,
+            child: FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween(begin: const Offset(0, 0.12), end: Offset.zero).animate(animation),
+                // A card on its way out takes no taps, so only the card fading in can be answered.
+                child: AnimatedBuilder(
+                  animation: animation,
+                  child: child,
+                  builder: (context, child) => IgnorePointer(
+                    ignoring: animation.status == AnimationStatus.reverse,
+                    child: child,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          child: a == null ? const SizedBox(key: ValueKey('none'), width: double.infinity) : _card(context, a, approvals),
+        );
+      },
+    );
+  }
+
+  Widget _card(BuildContext context, Approval a, List<Approval> approvals) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+          key: ValueKey(a.id),
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Container(
             padding: const EdgeInsets.all(14),
@@ -314,8 +354,6 @@ class _ApprovalCardsState extends State<ApprovalCards> {
             ),
           ),
         );
-      },
-    );
   }
 }
 

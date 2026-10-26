@@ -271,6 +271,26 @@ class Radii {
   static const double pill = 99;
 }
 
+/// Motion shared by the app's animations, so they feel like one family: short, easing out.
+/// [of] honours Android's "Remove animations" setting.
+class Motion {
+  const Motion._();
+
+  /// State changes on one control (a chevron turning, a pill changing colour).
+  static const fast = Duration(milliseconds: 150);
+
+  /// Things appearing, resizing or swapping (a card sliding in, a section opening).
+  static const normal = Duration(milliseconds: 240);
+
+  static const curve = Curves.easeOutCubic;
+
+  /// True when the user asked the system to remove animations.
+  static bool reduced(BuildContext context) => MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+  /// [d], or no time at all when animations are off.
+  static Duration of(BuildContext context, Duration d) => reduced(context) ? Duration.zero : d;
+}
+
 ThemeData buildTheme(Brightness brightness) {
   final look = Appearance.instance;
   final light = brightness == Brightness.light;

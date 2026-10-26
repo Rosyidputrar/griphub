@@ -774,6 +774,8 @@ const _id = <String, String>{
       'Agent berjalan di HP kamu. Masuk ke provider atau tambahkan API key untuk memilih modelnya.',
   'Coding agent on your phone': 'Agent coding di HP kamu',
   'Working': 'Bekerja',
+  'Thinking…': 'Berpikir…',
+  'Running {tool}…': 'Menjalankan {tool}…',
   'Today': 'Hari ini',
   'Yesterday': 'Kemarin',
   'This week': 'Minggu ini',

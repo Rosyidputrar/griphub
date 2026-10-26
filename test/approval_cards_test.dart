@@ -71,9 +71,11 @@ void main() {
     expect(find.text('rm -rf /tmp/x'), findsOneWidget);
     expect(find.text('rm -rf /tmp/y'), findsNothing);
 
-    // After the hold window the next card appears and can be answered.
+    // After the hold window the next card cross-fades in and can be answered.
     await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
     expect(find.text('rm -rf /tmp/y'), findsOneWidget);
+    expect(find.text('rm -rf /tmp/x'), findsNothing);
     await tester.tap(find.byType(FilledButton));
     await tester.pump();
     await tester.idle();
