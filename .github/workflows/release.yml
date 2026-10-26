@@ -206,10 +206,10 @@ jobs:
           GH_REPO: ${{ env.RELEASES_REPO }}
           TAG: v${{ steps.version.outputs.name }}
         run: |
-          # --generate-notes would read the public repository, which has none of these commits: list the
-          # pushed commits' first lines instead (they become public with the release).
-          jq -r '.commits[]?.message | split("\n")[0] | "- " + .' "$GITHUB_EVENT_PATH" > notes.md
-          [ -s notes.md ] || echo "GripHub ${{ steps.version.outputs.name }}" > notes.md
+          # Release notes stay static on purpose: listing pushed commits here
+          # would publish the source repository and branch names on the public
+          # releases page (e.g. "Merge pull request #N from ...").
+          echo "GripHub ${{ steps.version.outputs.name }}" > notes.md
           # A re-run of the same run number replaces the files of its own release.
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
