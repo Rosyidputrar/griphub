@@ -1347,7 +1347,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                       ),
                     ),
                   for (final e in groups.entries) ...[
-                    SectionLabel(e.key, padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
+                    SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
                     for (final s in e.value)
                       _SessionRow(
                         session: s,
@@ -1615,7 +1615,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                               Text(pr.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
                               const SizedBox(height: 2),
                               Text(
-                                pr.githubSlug ?? (pr.dirty ? 'uncommitted changes' : 'local folder'),
+                                pr.githubSlug ?? tr(pr.dirty ? 'uncommitted changes' : 'local folder'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(fontSize: 11.5, color: p.muted),
