@@ -1,7 +1,7 @@
 name: griphub_agent
 description: "GripHub AI Agent — the pi coding agent on Android, powered by GripHub Router."
 publish_to: 'none'
-version: 1.0.11+12
+version: 1.0.35+37
 
 environment:
   sdk: ^3.13.4
