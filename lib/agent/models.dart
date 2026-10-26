@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'sent_attachments.dart';
+
 class ModelInfo {
   ModelInfo(this.json);
   final Map<String, dynamic> json;
@@ -121,9 +123,14 @@ class SessionSummary {
 sealed class ChatEntry {}
 
 class UserEntry extends ChatEntry {
-  UserEntry(this.text, {this.images = 0});
+  UserEntry(this.text, {this.images = 0, this.attachments = const []});
   final String text;
   final int images;
+
+  /// Files/pictures sent with this message, from the sent-attachments
+  /// store. Empty for messages sent before attachment display existed:
+  /// those still show their text unchanged.
+  final List<SentAttachment> attachments;
 }
 
 enum BlockKind { text, thinking, toolCall }
