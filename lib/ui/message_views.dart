@@ -8,6 +8,9 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import '../agent/models.dart';
+import '../agent/sent_attachments.dart';
+import '../agent/updater.dart';
+import 'attachment_viewer.dart';
 import 'code_view.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
@@ -24,6 +27,10 @@ class UserMessageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Attachments recorded for this message (empty for messages sent before
+    // this feature, which keep rendering exactly as before: text only).
+    final attachments = entry.attachments;
+    final text = attachments.isEmpty ? entry.text : stripAttachedNote(entry.text);
     return Align(
       alignment: Alignment.centerRight,
       child: ConstrainedBox(
@@ -31,8 +38,119 @@ class UserMessageView extends StatelessWidget {
         child: Builder(
           builder: (bubbleContext) => GestureDetector(
             onLongPress: onLongPress == null ? null : () => onLongPress!(bubbleContext),
-            child: UserBubble(entry.text),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (attachments.isNotEmpty) ...[
+                  MessageAttachments(attachments: attachments),
+                  const SizedBox(height: 8),
+                ],
+                if (text.isNotEmpty) UserBubble(text),
+              ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Thumbnails and file chips for a sent message's attachments, shown above
+/// its bubble. Photos open full-screen; files open the attachment viewer.
+class MessageAttachments extends StatelessWidget {
+  const MessageAttachments({super.key, required this.attachments});
+  final List<SentAttachment> attachments;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final photos = attachments.where(sentIsImage).toList();
+    final files = attachments.where((a) => !sentIsImage(a)).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (photos.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            children: [
+              for (final a in photos)
+                GestureDetector(
+                  onTap: () => openAttachmentViewer(context, a),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(Radii.md),
+                    child: Image.file(
+                      File(a.path),
+                      width: 160,
+                      height: 160,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        width: 160,
+                        height: 160,
+                        color: p.raised,
+                        child: Icon(LucideIcons.imageOff, size: 24, color: p.muted),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        if (files.isNotEmpty) ...[
+          if (photos.isNotEmpty) const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.end,
+            children: [for (final a in files) _AttachmentFileChip(attachment: a)],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AttachmentFileChip extends StatelessWidget {
+  const _AttachmentFileChip({required this.attachment});
+  final SentAttachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final a = attachment;
+    return GestureDetector(
+      onTap: () => openAttachmentViewer(context, a),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 240),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: p.raised,
+          borderRadius: BorderRadius.circular(Radii.md),
+          border: Border.all(color: p.accent.withValues(alpha: 0.18)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.fileText, size: 16, color: p.muted),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                a.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+            if (a.size >= 0) ...[
+              const SizedBox(width: 6),
+              Text(
+                formatBytes(a.size),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+              ),
+            ],
+          ],
         ),
       ),
     );
