@@ -52,10 +52,10 @@ class UserBubble extends StatelessWidget {
       decoration: BoxDecoration(
         color: p.raised,
         borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(Radii.r20),
-          topRight: Radius.circular(Radii.r20),
-          bottomLeft: Radius.circular(Radii.r20),
-          bottomRight: Radius.circular(Radii.r6),
+          topLeft: Radius.circular(Radii.lg),
+          topRight: Radius.circular(Radii.lg),
+          bottomLeft: Radius.circular(Radii.lg),
+          bottomRight: Radius.circular(Radii.sm),
         ),
         border: Border.all(color: p.accent.withValues(alpha: 0.18)),
       ),
@@ -319,7 +319,7 @@ class _ThinkingViewState extends State<ThinkingView> {
       children: [
         InkWell(
           onTap: () => setState(() => open = !open),
-          borderRadius: BorderRadius.circular(Radii.r6),
+          borderRadius: BorderRadius.circular(Radii.sm),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Row(
@@ -461,14 +461,14 @@ class _ToolCallViewState extends State<ToolCallView> {
 
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(Radii.r12),
+        borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(Radii.r12),
+            borderRadius: BorderRadius.circular(Radii.md),
             onTap: () => setState(() => open = !open),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
@@ -599,7 +599,7 @@ class _ErrorNote extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(Radii.r10),
+        borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.danger.withValues(alpha: 0.4)),
       ),
       child: SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),

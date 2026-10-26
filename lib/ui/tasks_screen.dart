@@ -163,7 +163,7 @@ class _TasksScreenState extends State<TasksScreen> {
                         minLines: 2,
                         maxLines: 6,
                         textInputAction: TextInputAction.newline,
-                        decoration: InputDecoration(hintText: tr('What should pi do while you are away?')),
+                        decoration: InputDecoration(hintText: tr('What should the agent do while you are away?')),
                       ),
                       const SizedBox(height: 10),
                       Row(
@@ -193,15 +193,11 @@ class _TasksScreenState extends State<TasksScreen> {
                               ],
                             ),
                           ),
-                          SegmentedButton<int>(
-                            showSelectedIcon: false,
-                            segments: const [
-                              ButtonSegment(value: 1, label: Text('1')),
-                              ButtonSegment(value: 2, label: Text('2')),
-                              ButtonSegment(value: 3, label: Text('3')),
-                            ],
-                            selected: {f.concurrency.clamp(1, 3)},
-                            onSelectionChanged: (s) => _guard(() => f.setConcurrency(s.first)),
+                          PillSegments<int>(
+                            value: f.concurrency.clamp(1, 3),
+                            options: const {1: '1', 2: '2', 3: '3'},
+                            onChanged: (v) => _guard(() => f.setConcurrency(v)),
+                            expand: false,
                           ),
                         ],
                       ),
@@ -213,6 +209,12 @@ class _TasksScreenState extends State<TasksScreen> {
                   trailing: finished > 0
                       ? TextButton.icon(
                           onPressed: () => _guard(f.clearRuns),
+                          // Sized to sit beside a section label, not to compete with it.
+                          style: TextButton.styleFrom(
+                            foregroundColor: p.muted,
+                            textStyle: Theme.of(context).textTheme.labelMedium,
+                            visualDensity: VisualDensity.compact,
+                          ),
                           icon: const Icon(LucideIcons.x, size: 14),
                           label: Text(tr('Clear finished')),
                         )
@@ -315,15 +317,26 @@ class _RunCard extends StatelessWidget {
       'cancelled' => Icon(LucideIcons.ban, size: 18, color: p.faint),
       _ => Icon(LucideIcons.circleDashed, size: 18, color: p.muted),
     };
-    final sourceColor = switch (run.source) {
-      'schedule' => p.accentAlt,
-      'trigger' => p.warning,
-      _ => p.muted,
+    // Only runs that didn't come from the queue say where they came from.
+    final source = switch (run.source) {
+      'schedule' => tr('Scheduled'),
+      'trigger' => tr('From GitHub issue'),
+      _ => null,
+    };
+    final (label, color) = switch (run.status) {
+      'running' => (tr('In progress'), p.accent),
+      'queued' => (tr('Waiting'), p.muted),
+      'done' => (tr('Done'), p.success),
+      'error' => (tr('Failed'), p.danger),
+      'cancelled' => (tr('Cancelled'), p.faint),
+      _ => (run.status, p.muted),
     };
     final when = run.finishedAt ?? run.createdAt;
     final summary = run.summary;
+    final open = run.active ? null : onOpen;
     return SurfaceCard(
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
+      onTap: open,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -335,39 +348,36 @@ class _RunCard extends StatelessWidget {
                 child: Text(run.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
               ),
               const SizedBox(width: 8),
-              Pill(run.source, color: sourceColor),
+              Pill(label, color: color),
+              if (run.active)
+                IconButton(
+                  tooltip: tr('Cancel'),
+                  onPressed: onCancel,
+                  icon: Icon(LucideIcons.x, size: 18, color: p.muted),
+                )
+              else if (open != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 0, 8, 0),
+                  child: Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+                )
+              else
+                const SizedBox(width: 8),
             ],
           ),
-          const SizedBox(height: 4),
           Padding(
-            padding: const EdgeInsets.only(left: 30),
+            padding: const EdgeInsets.only(left: 30, right: 8),
             child: Text(
-              [run.status, formatAgo(when), if (run.cwd.isNotEmpty) _basename(run.cwd)].join(' · '),
+              [?source, formatAgo(when), if (run.cwd.isNotEmpty) _basename(run.cwd)].join(' · '),
               style: text.bodySmall?.copyWith(color: p.muted),
             ),
           ),
           if (summary != null && summary.isNotEmpty) ...[
             const SizedBox(height: 6),
             Padding(
-              padding: const EdgeInsets.only(left: 30),
+              padding: const EdgeInsets.only(left: 30, right: 8),
               child: Text(summary, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodyMedium),
             ),
           ],
-          if (run.active || (onOpen != null && (run.status == 'done' || run.status == 'error')))
-            Align(
-              alignment: Alignment.centerRight,
-              child: run.active
-                  ? TextButton.icon(
-                      onPressed: onCancel,
-                      icon: const Icon(LucideIcons.x, size: 14),
-                      label: Text(tr('Cancel')),
-                    )
-                  : TextButton.icon(
-                      onPressed: onOpen,
-                      icon: const Icon(LucideIcons.messageSquare, size: 14),
-                      label: Text(tr('Open chat')),
-                    ),
-            ),
         ],
       ),
     );
@@ -399,7 +409,7 @@ class _ScheduleRow extends StatelessWidget {
           ? IconTile(icon: SimpleIcons.github, color: p.text)
           : IconTile(icon: LucideIcons.calendarClock, color: s.enabled ? p.accentAlt : p.faint),
       title: s.name,
-      subtitle: '${_describeSchedule(s)}${last != null ? ' · last run ${formatAgo(last)}' : ''}',
+      subtitle: '${_describeSchedule(s)}${last != null ? ' · ${tr('last run')} ${formatAgo(last)}' : ''}',
       onTap: onTap,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -564,16 +574,15 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
               decoration: InputDecoration(labelText: tr('Prompt'), alignLabelWithHint: true),
             ),
             const SizedBox(height: 16),
-            SegmentedButton<_Kind>(
-              showSelectedIcon: false,
-              segments: [
-                ButtonSegment(value: _Kind.interval, label: Text(tr('Interval'))),
-                ButtonSegment(value: _Kind.daily, label: Text(tr('Daily'))),
-                ButtonSegment(value: _Kind.github, label: Text(tr('GitHub trigger'))),
-              ],
-              selected: {_kind},
-              onSelectionChanged: (s) => setState(() {
-                _kind = s.first;
+            PillSegments<_Kind>(
+              value: _kind,
+              options: {
+                _Kind.interval: tr('Interval'),
+                _Kind.daily: tr('Daily'),
+                _Kind.github: tr('GitHub trigger'),
+              },
+              onChanged: (v) => setState(() {
+                _kind = v;
                 _problem = null;
               }),
             ),
@@ -628,11 +637,11 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
                 TextField(
                   controller: _label,
                   autocorrect: false,
-                  decoration: InputDecoration(labelText: tr('Label'), hintText: 'pi'),
+                  decoration: InputDecoration(labelText: tr('Label'), hintText: 'agent'),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'pi picks up new issues with this label. The issue is added to your prompt.',
+                  tr('The agent picks up new issues with this label. The issue is added to your prompt.'),
                   style: text.bodySmall,
                 ),
               ],

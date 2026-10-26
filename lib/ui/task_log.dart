@@ -175,7 +175,7 @@ class _TaskSheetState<T> extends State<_TaskSheet<T>> {
                 height: ci != null ? 140 : 220,
                 decoration: BoxDecoration(
                   color: p.surface,
-                  borderRadius: BorderRadius.circular(Radii.r10),
+                  borderRadius: BorderRadius.circular(Radii.md),
                   border: Border.all(color: p.border),
                 ),
                 child: ListView.builder(

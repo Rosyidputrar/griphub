@@ -4,6 +4,26 @@ import 'theme.dart';
 /// missing translation falls back to English instead of showing a placeholder.
 String tr(String en) => Appearance.instance.language == 'id' ? (_id[en] ?? en) : en;
 
+/// Number text in the app's language: 7350 -> "7.350" and 0.978 -> "0,978" in
+/// Indonesian, "7,350" and "0.978" in English. A suffix (k, M) is kept.
+String localNumber(String plain) {
+  final m = RegExp(r'^(-?)(\d+)(?:\.(\d+))?(.*)$').firstMatch(plain);
+  if (m == null) return plain;
+  final id = Appearance.instance.language == 'id';
+  final whole = m[2]!.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => id ? '.' : ',');
+  final frac = m[3] == null ? '' : '${id ? ',' : '.'}${m[3]}';
+  return '${m[1]}$whole$frac${m[4]}';
+}
+
+/// Reads a number typed in the app's language: "1,5" and "1.000" in Indonesian
+/// (decimal comma, dot thousands), "1.5" and "1,000" in English. Null if it isn't one.
+double? parseLocalNumber(String text) {
+  final id = Appearance.instance.language == 'id';
+  final t = text.trim().replaceAll(' ', '');
+  final plain = id ? t.replaceAll('.', '').replaceAll(',', '.') : t.replaceAll(',', '');
+  return double.tryParse(plain);
+}
+
 /// One relative-time helper for the whole app (previously a private copy in
 /// five screens, each with slightly different thresholds and only one of them
 /// localized). Old dates show months/years, like git history did.
@@ -33,7 +53,17 @@ const _id = <String, String>{
   'All types': 'Semua',
   'Build': 'Bangun',
   'Code': 'Kode',
-  'Ops': 'Ops',
+  'Make': 'Bikin',
+  'Deploy & automate': 'Deploy & otomasi',
+  'A site or app, ready to deploy': 'Situs atau app, siap deploy',
+  'Logos, mockups, illustrations': 'Logo, mockup, ilustrasi',
+  'A polished screen from a description': 'Layar rapi dari deskripsi',
+  'Ask, plan or brainstorm': 'Tanya, rencanakan, atau brainstorm',
+  'Pick up an existing project': 'Lanjutkan proyek yang sudah ada',
+  'Find the cause and patch it': 'Cari penyebabnya lalu perbaiki',
+  'Scripts in a real Linux container': 'Script di container Linux sungguhan',
+  'Get a live URL in minutes': 'Dapat URL live dalam hitungan menit',
+  'A script that does it for you': 'Script yang mengerjakannya untukmu',
   'Hello,': 'Halo,',
   'What should we build today?': 'Mau bikin apa hari ini?',
   'Connect a model to get started.': 'Hubungkan model untuk mulai.',
@@ -106,9 +136,9 @@ const _id = <String, String>{
   'Bypass': 'Bypass',
   'Bypass all permissions': 'Bypass semua izin',
   'Bypass all permissions?': 'Bypass semua izin?',
-  'pi will run every command, edit any file and use every tool without asking.':
-      'pi akan menjalankan semua perintah, mengedit file apa pun, dan memakai semua tool tanpa bertanya.',
-  'All permissions bypassed: pi never asks before acting.': 'Semua izin di-bypass: pi tidak pernah bertanya dulu.',
+  'The agent will run every command, edit any file and use every tool without asking.':
+      'Agent akan menjalankan semua perintah, mengedit file apa pun, dan memakai semua tool tanpa bertanya.',
+  'All permissions bypassed: the agent never asks before acting.': 'Semua izin di-bypass: agent tidak pernah bertanya dulu.',
   'Fallback models': 'Model cadangan',
   'Used when the current model hits a limit or errors': 'Dipakai saat model utama kena limit atau error',
   'None': 'Tidak ada',
@@ -160,10 +190,10 @@ const _id = <String, String>{
   'Thinking level': 'Level berpikir',
   'View': 'Lihat',
   'Voice': 'Suara',
-  'Wait for pi to finish first': 'Tunggu pi selesai dulu',
-  'Ask pi anything': 'Tanya pi apa saja',
+  'Wait for the agent to finish first': 'Tunggu agent selesai dulu',
+  'Ask the agent anything': 'Tanya agent apa saja',
   'Queue a follow-up…': 'Antrekan pesan berikutnya…',
-  'Ask pi to build, fix or deploy…': 'Minta pi bikin, perbaiki, atau deploy…',
+  'Ask the agent to build, fix or deploy…': 'Minta agent bikin, perbaiki, atau deploy…',
   'Plan mode': 'Mode rencana',
   // Chat extras
   'Allow': 'Izinkan',
@@ -186,11 +216,11 @@ const _id = <String, String>{
   'Search': 'Cari',
   'Find text across every file': 'Cari teks di semua file',
   'Changes & undo': 'Perubahan & undo',
-  'What pi changed, and roll it back': 'Apa yang diubah pi, dan kembalikan',
+  'What the agent changed, and roll it back': 'Apa yang diubah agent, dan kembalikan',
   'Git': 'Git',
   'Commit, push, branches, issues and PRs': 'Commit, push, branch, issue, dan PR',
   'Project memory': 'Memori proyek',
-  'AGENTS.md: rules pi follows in this folder': 'AGENTS.md: aturan yang diikuti pi di folder ini',
+  'AGENTS.md: rules the agent follows in this folder': 'AGENTS.md: aturan yang diikuti agent di folder ini',
   'Usage': 'Pemakaian',
   'Tokens and cost': 'Token dan biaya',
   'Import files': 'Impor file',
@@ -206,7 +236,6 @@ const _id = <String, String>{
   'Each chat can have its own folder to work in.': 'Setiap chat bisa punya folder kerjanya sendiri.',
   'Recent projects': 'Proyek terbaru',
   // App updates
-  'pi is still working': 'pi masih bekerja',
   'Installing the update closes GripHub AI Agent and stops the current run.':
       'Memasang pembaruan akan menutup GripHub AI Agent dan menghentikan proses yang sedang berjalan.',
   'Wait': 'Tunggu',
@@ -439,10 +468,10 @@ const _id = <String, String>{
   'Remove container': 'Hapus container',
   'Frees the space; workspace files stay': 'Mengosongkan ruang; file workspace tetap ada',
   'Daily budget': 'Anggaran harian',
-  'GripHub credit': 'Credit GripHub',
+  'GripHub credit': 'Kredit GripHub',
   'Top usage': 'Pemakaian terbanyak',
   'Account suspended': 'Akun ditangguhkan',
-  '1 credit = Rp 300 · prices as of Oct 2026': 'Kurs 1 credit = Rp 300 · tarif per Okt 2026',
+  '1 credit = Rp 300 · prices as of Oct 2026': 'Kurs 1 kredit = Rp 300 · tarif per Okt 2026',
   'No limit': 'Tanpa batas',
   'This chat': 'Chat ini',
   'Limits': 'Batas',
@@ -530,7 +559,7 @@ const _id = <String, String>{
   'Content': 'Isi',
   'Delete schedule?': 'Hapus jadwal?',
   'Run in background': 'Jalankan di latar belakang',
-  'What should pi do while you are away?': 'Apa yang harus dikerjakan pi saat kamu pergi?',
+  'What should the agent do while you are away?': 'Apa yang harus dikerjakan agent saat kamu pergi?',
   'Queue': 'Antrean',
   'Parallel agents': 'Agent paralel',
   'How many run at once': 'Berapa yang jalan bersamaan',
@@ -572,8 +601,8 @@ const _id = <String, String>{
   'Uncommitted changes': 'Perubahan belum di-commit',
   'The slash command will no longer be available in chat.': 'Slash command ini tidak akan tersedia lagi di chat.',
   'New template': 'Template baru',
-  'Type /name followed by arguments in chat and pi expands the template.':
-      'Ketik /nama lalu argumen di chat, dan pi akan mengisi template-nya.',
+  'Type /name followed by arguments in chat and the agent expands the template.':
+      'Ketik /nama lalu argumen di chat, dan agent akan mengisi template-nya.',
   'No templates yet. Save a prompt you use often.': 'Belum ada template. Simpan prompt yang sering kamu pakai.',
   'Description': 'Deskripsi',
   'Review': 'Tinjau',
@@ -707,7 +736,7 @@ const _id = <String, String>{
   'Runs through proot: no root or Termux needed. Your home folder and workspace are the same paths inside, so the agent can `apt install python3 nodejs` and work on your files directly.': 'Berjalan lewat proot: tanpa root atau Termux. Folder home dan workspace memakai path yang sama di dalamnya, jadi agent bisa `apt install python3 nodejs` dan langsung mengerjakan file kamu.',
   'Downloads the official image from Docker Hub, then installs git, curl, ssh and certificates.':
       'Mengunduh image resmi dari Docker Hub, lalu memasang git, curl, ssh, dan sertifikat.',
-  'Connect pi to databases, docs, browsers and more through Model Context Protocol servers; their tools show up as mcp_<server>_<tool>.': 'Hubungkan pi ke database, dokumentasi, browser, dan lainnya lewat server Model Context Protocol; tool-nya muncul sebagai mcp_<server>_<tool>.',
+  'Connect the agent to databases, docs, browsers and more through Model Context Protocol servers; their tools show up as mcp_<server>_<tool>.': 'Hubungkan agent ke database, dokumentasi, browser, dan lainnya lewat server Model Context Protocol; tool-nya muncul sebagai mcp_<server>_<tool>.',
   'Sync failed; tap for details': 'Sinkron gagal; ketuk untuk detail',
   'Chats and projects on all your phones': 'Chat dan project di semua HP kamu',
   'Chats deleted elsewhere': 'Chat dihapus di perangkat lain',
@@ -726,10 +755,72 @@ const _id = <String, String>{
   'Task done': 'Task selesai',
   'Task cancelled': 'Task dibatalkan',
   'Task failed': 'Task gagal',
-  'pi stopped with an error': 'pi berhenti karena error',
-  'pi is done': 'pi selesai',
+  'The agent stopped with an error': 'Agent berhenti karena error',
+  'The agent is done': 'Agent selesai',
+  'Every command the agent runs happens inside': 'Semua perintah agent dijalankan di dalam',
+  'The agent uses the Android shell; `box` still reaches Linux': 'Agent memakai shell Android; `box` tetap bisa masuk ke Linux',
+  'The agent picks up new issues with this label. The issue is added to your prompt.':
+      'Agent mengambil issue baru berlabel ini. Isi issue-nya ditambahkan ke prompt kamu.',
+  'Searches the Anthropic and pi-skills collections, skills.md, and all of GitHub.':
+      'Mencari di koleksi Anthropic dan pi-skills, skills.md, dan seluruh GitHub.',
+  'Searches the Anthropic and pi-skills collections and skills.md.': 'Mencari di koleksi Anthropic dan pi-skills serta skills.md.',
+  'Documents, design, web testing, MCP': 'Dokumen, desain, testing web, MCP',
+  'Community collection for pi-based agents': 'Koleksi komunitas untuk agent berbasis pi',
+  "The agent sees each skill's name and description, and reads the full instructions only when a task needs them. Force one in chat with /skill:name.":
+      'Agent melihat nama dan deskripsi tiap skill, dan baru membaca instruksi lengkapnya saat tugas membutuhkannya. Paksa pakai di chat dengan /skill:nama.',
+  'The agent codes, runs commands, installs packages and deploys, right here on your phone.':
+      'Agent menulis kode, menjalankan perintah, memasang paket, dan deploy, langsung di HP kamu.',
+  'The agent runs on your phone. Sign in to a provider or add an API key to choose its model.':
+      'Agent berjalan di HP kamu. Masuk ke provider atau tambahkan API key untuk memilih modelnya.',
+  'Coding agent on your phone': 'Agent coding di HP kamu',
+  'Working': 'Bekerja',
+  'Enter a number, like 2 or 1.5': 'Masukkan angka, misalnya 2 atau 1,5',
+  'Advanced': 'Lanjutan',
+  'Built-in GripHub app': 'App bawaan GripHub',
+  'credits': 'kredit',
+  '{n} per day': '{n} per hari',
+  'Earliest batch expires {date} ({n})': 'Batch paling cepat kedaluwarsa {date} ({n})',
+  'Estimated from the rates of 25 Oct 2026 · total ≈ {rp} · the exact figure is on the GripHub credit card above':
+      'Perkiraan dari tarif 25 Okt 2026 · total ≈ {rp} · angka pasti ada di kartu Kredit GripHub di atas',
+  'Cost per day': 'Biaya per hari',
+  'Tokens per day': 'Token per hari',
+  'Peak': 'Puncak',
+  'Nothing yet': 'Belum ada',
+  'Connect a provider to start': 'Hubungkan provider untuk mulai',
+  'Instructions the agent loads on demand': 'Instruksi yang dimuat agent saat dibutuhkan',
+  '{n} installed': '{n} terpasang',
+  'Debian or Alpine with apt / apk': 'Debian atau Alpine dengan apt / apk',
+  'agent shell': 'shell agent',
+  'Not installed · run apt, pip, npm and more': 'Belum terpasang · jalankan apt, pip, npm, dan lainnya',
+  'web search for the agent': 'pencarian web untuk agent',
+  'System DNS': 'DNS sistem',
+  'Agent directory': 'Folder agent',
+  'git push and Pages enabled': 'git push dan Pages aktif',
+  'Hide token option': 'Sembunyikan opsi token',
+  'Use a personal access token instead': 'Pakai personal access token saja',
+  'Host': 'Host',
+  'Port': 'Port',
+  'User': 'User',
+  'Edit server': 'Edit server',
+  'Deploy folder (optional)': 'Folder deploy (opsional)',
+  'Generate a key for this device, then add its public half to your servers or GitHub.':
+      'Buat key untuk perangkat ini, lalu tambahkan bagian publiknya ke server atau GitHub kamu.',
+  'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.':
+      'Tambahkan public key ini ke ~/.ssh/authorized_keys di server kamu, atau ke GitHub untuk remote SSH.',
+  'Code copied': 'Kode disalin',
+  'OAuth client ID saved': 'Client ID OAuth disimpan',
+  'Scheduled': 'Terjadwal',
+  'From GitHub issue': 'Dari issue GitHub',
+  'In progress': 'Berjalan',
+  'Waiting': 'Antre',
+  'Done': 'Selesai',
+  'Failed': 'Gagal',
+  'Cancelled': 'Dibatalkan',
+  'last run': 'terakhir jalan',
+  'Ready': 'Siap',
+  'Agent engine (pi)': 'Mesin agent (pi)',
   'Tap to see the result': 'Ketuk untuk melihat hasilnya',
-  'pi needs your approval': 'pi butuh persetujuanmu',
+  'The agent needs your approval': 'Agent butuh persetujuanmu',
   'Agent is working': 'Agent sedang bekerja',
   'Running': 'Menjalankan',
   'GitHub sync is failing': 'Sinkron GitHub gagal terus',
@@ -777,8 +868,8 @@ const _id = <String, String>{
   'Confirm deploy': 'Konfirmasi deploy',
   'Custom DoH': 'DoH kustom',
   'DoH URL': 'URL DoH',
-  'For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.':
-      'Untuk login device-flow. Buat OAuth App sendiri dengan Device Flow aktif lalu tempel Client ID-nya di sini (publik, bukan rahasia). Kosong berarti login GitHub belum dikonfigurasi.',
+  'Only for a build with its own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.':
+      'Hanya untuk build dengan OAuth App GitHub sendiri (Device Flow aktif): tempel Client ID-nya di sini. Ini publik, bukan rahasia. Kosongkan untuk login dengan app bawaan.',
   'GitHub OAuth client ID': 'Client ID OAuth GitHub',
   'Headers': 'Header',
   'Linux shell (box)': 'Shell Linux (box)',
@@ -802,21 +893,21 @@ const _id = <String, String>{
   'credit': 'kredit',
   'Folder': 'Folder',
   'No upstream': 'Tanpa upstream',
-  "pi stops starting new requests once today's spend reaches this, in GripHub credits. Leave empty for no limit.":
-      'pi berhenti memulai request baru begitu pengeluaran hari ini mencapai batas ini, dalam kredit GripHub. Kosongkan untuk tanpa batas.',
+  "The agent stops starting new requests once today's spend reaches this, in GripHub credits. Leave empty for no limit.":
+      'Agent berhenti memulai request baru begitu pengeluaran hari ini mencapai batas ini, dalam kredit GripHub. Kosongkan untuk tanpa batas.',
   'Branch: gh-pages — your working branch is not touched.': 'Branch: gh-pages — branch kerjamu tidak disentuh.',
   'Only this folder is uploaded (no .env, dotfiles, node_modules, symlinks).':
       'Hanya folder ini yang diunggah (tanpa .env, dotfile, node_modules, symlink).',
   'will stop running.': 'akan berhenti berjalan.',
-  'and its tools will be removed from pi.': 'dan tool-nya akan dihapus dari pi.',
+  'and its tools will be removed from the agent.': 'dan tool-nya akan dihapus dari agent.',
   '••• keeps the saved value unchanged.': '••• membiarkan nilai tersimpan tidak berubah.',
   "can't be shown as text": 'tidak bisa ditampilkan sebagai teks',
   'first 200 rows': '200 baris pertama',
   'is untracked and will be deleted. This cannot be undone.': 'tidak terlacak dan akan dihapus. Ini tidak bisa dibatalkan.',
   'Your changes to': 'Perubahan Anda pada',
   'will be lost. This cannot be undone.': 'akan hilang. Ini tidak bisa dibatalkan.',
-  "This folder isn't a git repository. Ask pi to run `git init`, or clone a repo.":
-      'Folder ini bukan repositori git. Minta pi menjalankan `git init`, atau clone repo.',
+  "This folder isn't a git repository. Ask the agent to run `git init`, or clone a repo.":
+      'Folder ini bukan repositori git. Minta agent menjalankan `git init`, atau clone repo.',
   'Chats, settings and skills in one file': 'Chat, pengaturan, dan skill dalam satu file',
   'Licenses': 'Lisensi',
   'Open-source licenses': 'Lisensi open-source',

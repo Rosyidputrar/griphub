@@ -68,7 +68,7 @@ class _Boot extends StatelessWidget {
           children: [
             const LogoMark(size: 56),
             const SizedBox(height: 20),
-            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(Radii.r2))),
+            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(Radii.xs))),
             const SizedBox(height: 14),
             Text(tr('Starting agent'), style: Theme.of(context).textTheme.bodySmall),
           ],
@@ -103,7 +103,7 @@ class _BootFailed extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: p.surface,
-                    borderRadius: BorderRadius.circular(Radii.r10),
+                    borderRadius: BorderRadius.circular(Radii.md),
                     border: Border.all(color: p.border),
                   ),
                   child: SingleChildScrollView(

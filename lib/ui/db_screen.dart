@@ -480,7 +480,7 @@ class _ErrorBox extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: p.danger.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(Radii.r12),
+            borderRadius: BorderRadius.circular(Radii.md),
             border: Border.all(color: p.danger.withValues(alpha: 0.3)),
           ),
           child: Row(

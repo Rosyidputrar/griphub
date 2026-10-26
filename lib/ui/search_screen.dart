@@ -249,9 +249,9 @@ class _Toggle extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: on ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(Radii.r18),
+      borderRadius: BorderRadius.circular(Radii.lg),
       child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.r18),
+        borderRadius: BorderRadius.circular(Radii.lg),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),

@@ -291,7 +291,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     if (agent.busy) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Wait for pi to finish first'))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Wait for the agent to finish first'))));
       return;
     }
     try {
@@ -597,8 +597,8 @@ class _EmptyState extends StatelessWidget {
               const SizedBox(height: 10),
               Text(
                 ready
-                    ? 'pi codes, runs commands, installs packages and deploys, right here on your phone.'
-                    : 'The agent runs on your phone. Sign in to a provider or add an API key to choose its model.',
+                    ? tr('The agent codes, runs commands, installs packages and deploys, right here on your phone.')
+                    : tr('The agent runs on your phone. Sign in to a provider or add an API key to choose its model.'),
                 style: text.bodyMedium?.copyWith(color: p.muted),
                 textAlign: TextAlign.center,
               ),
@@ -683,7 +683,7 @@ class _Composer extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(Radii.r24),
+              borderRadius: BorderRadius.circular(Radii.xl),
               border: Border.all(color: focus.hasFocus ? p.accent.withValues(alpha: 0.55) : p.border),
               boxShadow: [
                 BoxShadow(
@@ -707,7 +707,7 @@ class _Composer extends StatelessWidget {
                 textCapitalization: TextCapitalization.sentences,
                 style: Theme.of(context).textTheme.bodyLarge,
                 decoration: InputDecoration(
-                  hintText: busy ? tr('Queue a follow-up…') : tr('Ask pi to build, fix or deploy…'),
+                  hintText: busy ? tr('Queue a follow-up…') : tr('Ask the agent to build, fix or deploy…'),
                   filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,

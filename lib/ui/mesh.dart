@@ -23,6 +23,13 @@ class MeshArt extends StatelessWidget {
 
   static List<Color> colorsFor(String seed) => _palettes[_hash(seed) % _palettes.length];
 
+  /// Icons and initials on the tile: a deep shade of its own hue (5:1 or more
+  /// against every pastel; white on them is barely 1.3:1).
+  static Color inkFor(String seed) {
+    final hsl = HSLColor.fromColor(colorsFor(seed)[0]);
+    return hsl.withLightness(0.26).withSaturation(hsl.saturation.clamp(0, 0.55)).toColor();
+  }
+
   static int _hash(String s) {
     var h = 0;
     for (final c in s.codeUnits) {
@@ -97,7 +104,7 @@ class Avatar extends StatelessWidget {
     child: Center(
       child: Text(
         text,
-        style: TextStyle(fontSize: size * 0.38, fontWeight: FontWeight.w700, color: Colors.white),
+        style: TextStyle(fontSize: size * 0.38, fontWeight: FontWeight.w700, color: MeshArt.inkFor(name)),
       ),
     ),
   );

@@ -200,22 +200,11 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
           else
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-              child: SegmentedButton<_Root>(
-                showSelectedIcon: false,
-                segments: [
-                  ButtonSegment(
-                    value: _Root.workspace,
-                    icon: Icon(LucideIcons.boxes, size: 16),
-                    label: Text(tr('Workspace')),
-                  ),
-                  ButtonSegment(
-                    value: _Root.phone,
-                    icon: Icon(LucideIcons.smartphone, size: 16),
-                    label: Text(tr('Phone storage')),
-                  ),
-                ],
-                selected: {root},
-                onSelectionChanged: (s) => _switch(s.first),
+              child: PillSegments<_Root>(
+                value: root,
+                options: {_Root.workspace: tr('Workspace'), _Root.phone: tr('Phone storage')},
+                icons: const {_Root.workspace: LucideIcons.boxes, _Root.phone: LucideIcons.smartphone},
+                onChanged: _switch,
               ),
             ),
           // Breadcrumbs: tap a segment to jump back up.
@@ -329,7 +318,7 @@ class _Crumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return InkWell(
-      borderRadius: BorderRadius.circular(Radii.r8),
+      borderRadius: BorderRadius.circular(Radii.sm),
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
@@ -36,9 +37,9 @@ class PrimaryButton extends StatelessWidget {
       opacity: enabled ? 1 : 0.45,
       child: Material(
         color: p.text,
-        borderRadius: BorderRadius.circular(Radii.r18),
+        borderRadius: BorderRadius.circular(Radii.lg),
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.r18),
+          borderRadius: BorderRadius.circular(Radii.lg),
           onTap: enabled ? onPressed : null,
           child: SizedBox(
             height: 54,
@@ -83,13 +84,125 @@ class SurfaceCard extends StatelessWidget {
     return Material(
       color: p.surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(Radii.r24),
+        borderRadius: BorderRadius.circular(Radii.xl),
         side: highlight ? BorderSide(color: p.text, width: 1.5) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Padding(padding: padding, child: child),
+        child: Padding(
+          padding: padding,
+          child: OnSurface(child: child),
+        ),
+      ),
+    );
+  }
+}
+
+/// Text fields are filled with the surface colour, so inside a surface card
+/// they vanish into it. Under this widget they are filled with the page colour
+/// instead and read as inset wells.
+class OnSurface extends StatelessWidget {
+  const OnSurface({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(inputDecorationTheme: theme.inputDecorationTheme.copyWith(fillColor: context.palette.bg)),
+      child: child,
+    );
+  }
+}
+
+/// The app's one segmented control: the options sit in a soft track and the
+/// chosen one in a solid pill. Every segment keeps its rounded shape (a
+/// SegmentedButton squares off the inner corners of the middle ones).
+class PillSegments<T> extends StatelessWidget {
+  const PillSegments({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.icons = const {},
+    this.expand = true,
+  });
+  final T value;
+  final Map<T, String> options;
+  final Map<T, IconData> icons;
+  final ValueChanged<T> onChanged;
+
+  /// Full width with equal segments; false hugs the labels (a "7 / 30 days" switch).
+  final bool expand;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final style = Theme.of(context).textTheme.labelMedium;
+    final selected = options.containsKey(value) ? value : options.keys.first;
+
+    Widget segment(T key, String label) {
+      final on = key == selected;
+      final fg = on ? p.inverse : p.muted;
+      final icon = icons[key];
+      return Semantics(
+        button: true,
+        selected: on,
+        inMutuallyExclusiveGroup: true,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            color: on ? p.text : Colors.transparent,
+            borderRadius: BorderRadius.circular(Radii.pill),
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              customBorder: const StadiumBorder(),
+              onTap: on
+                  ? null
+                  : () {
+                      HapticFeedback.selectionClick();
+                      onChanged(key);
+                    },
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 40),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: style?.copyWith(color: fg),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
+      child: Row(
+        mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+        children: [
+          for (final e in options.entries)
+            if (expand) Expanded(child: segment(e.key, e.value)) else segment(e.key, e.value),
+        ],
       ),
     );
   }
@@ -151,15 +264,17 @@ class SettingsGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r24)),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.xl)),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) Divider(height: 1, indent: 66, endIndent: 16, color: p.border),
-            children[i],
+      child: OnSurface(
+        child: Column(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0) Divider(height: 1, indent: 66, endIndent: 16, color: p.border),
+              children[i],
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -210,9 +325,14 @@ class SettingsRow extends StatelessWidget {
                 ],
               ),
             ),
-            if (trailing != null)
-              trailing!
-            else if (onTap != null)
+            if (trailing != null) ...[
+              trailing!,
+              // A status pill doesn't say the row opens something; keep the chevron beside it.
+              if (onTap != null && trailing is Pill) ...[
+                const SizedBox(width: 6),
+                Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+              ],
+            ] else if (onTap != null)
               Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
           ],
         ),

@@ -62,16 +62,11 @@ class _AccountsScreenState extends State<AccountsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
     return ListenableBuilder(
       listenable: it,
       builder: (context, _) => Scaffold(
         appBar: AppBar(
           title: Text(tr('Accounts & servers')),
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(1),
-            child: Divider(height: 1, color: p.border),
-          ),
         ),
         body: !it.loaded
             ? const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
@@ -79,7 +74,6 @@ class _AccountsScreenState extends State<AccountsScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
                   _Header(tr('GitHub')),
-                  _GithubClientIdField(agent: widget.agent, onSaved: _snack),
                   it.github == null
                       ? _GithubConnect(
                           agent: widget.agent,
@@ -103,7 +97,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                           avatarUrl: it.github!.avatarUrl,
                           icon: SimpleIcons.github,
                           title: it.github!.name ?? it.github!.login,
-                          subtitle: '@${it.github!.login} · git push and Pages enabled',
+                          subtitle: '@${it.github!.login} · ${tr('git push and Pages enabled')}',
                           onDisconnect: () => _disconnect('GitHub', it.githubLogout),
                         ),
                   _Header(tr('Vercel')),
@@ -182,6 +176,9 @@ class _AccountsScreenState extends State<AccountsScreen> {
                       ),
                     ),
                   for (final h in it.hosts) _HostTile(host: h, onEdit: () => _editHost(h), onTest: () => _testHost(h)),
+                  // Build configuration, not something to set up first: last and folded.
+                  _Header(tr('Advanced')),
+                  _GithubClientIdField(agent: widget.agent, onSaved: _snack),
                 ],
               ),
       ),
@@ -339,7 +336,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r16)),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.lg)),
                     alignment: Alignment.center,
                     child: Text(
                       f.userCode,
@@ -381,7 +378,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                 TextButton(
                   onPressed: () => setState(() => showToken = !showToken),
                   style: TextButton.styleFrom(foregroundColor: p.muted),
-                  child: Text(showToken ? 'Hide token option' : 'Use a personal access token instead'),
+                  child: Text(tr(showToken ? 'Hide token option' : 'Use a personal access token instead')),
                 ),
             ],
           ),
@@ -497,6 +494,23 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
     text: widget.agent.integrations.settings?.githubClientId ?? '',
   );
   bool _saving = false;
+  bool _open = false;
+  bool _edited = false;
+
+  /// What the agent uses now; the field may hold an unsaved edit.
+  String get _saved => widget.agent.integrations.settings?.githubClientId?.trim() ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    // Opened straight from Home, the settings may not be loaded yet. Fill the field once they
+    // are, so saving an untouched box can't replace a custom client ID with an empty one.
+    if (widget.agent.integrations.settings == null) {
+      widget.agent.integrations.refreshSettings().then((_) {
+        if (mounted && !_edited) setState(() => _id.text = _saved);
+      }, onError: (_) {});
+    }
+  }
 
   @override
   void dispose() {
@@ -520,44 +534,73 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.r18),
-        border: Border.all(color: p.border),
-      ),
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
-          const SizedBox(height: 4),
-          Text(
-            tr('For device-flow login. Create your own OAuth App with Device Flow enabled and paste its Client ID here (public, not a secret). Empty means GitHub login is not configured.'),
-            style: text.bodySmall,
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _id,
-                  decoration: InputDecoration(
-                    hintText: 'Ov23…',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.r12)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            borderRadius: BorderRadius.circular(Radii.md),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
+                        const SizedBox(height: 2),
+                        Text(
+                          _saved.isEmpty ? tr('Built-in GripHub app') : _saved,
+                          style: text.bodySmall,
+                        ),
+                      ],
+                    ),
                   ),
-                  onSubmitted: (_) => _save(),
-                ),
+                  AnimatedRotation(
+                    turns: _open ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Icon(LucideIcons.chevronDown, size: 18, color: p.faint),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(tr('Save')),
-              ),
-            ],
+            ),
           ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 4, 10, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr('Only for a build with its own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.'),
+                    style: text.bodySmall,
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _id,
+                          autocorrect: false,
+                          style: const TextStyle(fontFamily: mono, fontSize: 14),
+                          decoration: const InputDecoration(hintText: 'Ov23…'),
+                          onChanged: (_) => _edited = true,
+                          onSubmitted: (_) => _save(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(onPressed: _saving ? null : _save, child: Text(tr('Save'))),
+                    ],
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -644,9 +687,11 @@ class _SshKeyCardState extends State<_SshKeyCard> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            key == null
-                ? 'Generate a key for this device, then add its public half to your servers or GitHub.'
-                : 'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.',
+            tr(
+              key == null
+                  ? 'Generate a key for this device, then add its public half to your servers or GitHub.'
+                  : 'Add this public key to ~/.ssh/authorized_keys on your servers, or to GitHub for SSH remotes.',
+            ),
             style: text.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -712,21 +757,19 @@ class _HostTile extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
+      // The same borderless card and icon tile as every other row on this screen.
       child: Material(
         color: p.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(Radii.r14),
-          side: BorderSide(color: p.border),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.xl)),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
-          borderRadius: BorderRadius.circular(Radii.r14),
           onTap: onEdit,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             child: Row(
               children: [
-                Icon(LucideIcons.server, size: 20, color: p.muted),
-                const SizedBox(width: 12),
+                IconTile(icon: LucideIcons.server, color: p.muted),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -785,7 +828,7 @@ class _HostSheetState extends State<_HostSheet> {
             keyboardType: type,
             autocorrect: false,
             style: monospace ? const TextStyle(fontFamily: mono, fontSize: 14) : null,
-            decoration: InputDecoration(labelText: label, hintText: hint),
+            decoration: InputDecoration(labelText: tr(label), hintText: hint),
           ),
         );
     return SafeArea(
@@ -796,7 +839,7 @@ class _HostSheetState extends State<_HostSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(widget.host == null ? 'Add server' : 'Edit server', style: text.titleLarge),
+              Text(tr(widget.host == null ? 'Add server' : 'Edit server'), style: text.titleLarge),
               const SizedBox(height: 16),
               field(name, 'Name', hint: 'my-vps'),
               Row(

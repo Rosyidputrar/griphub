@@ -408,7 +408,7 @@ class _InsetGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Container(
-      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r18)),
+      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.lg)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [

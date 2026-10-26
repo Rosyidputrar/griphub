@@ -38,7 +38,7 @@ Future<void> installUpdate(BuildContext context, AgentController agent) async {
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(tr('pi is still working')),
+        title: Text(tr('The agent is still working')),
         content: Text(tr('Installing the update closes GripHub AI Agent and stops the current run.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Wait'))),
@@ -139,7 +139,7 @@ class _UpdateSheet extends StatelessWidget {
               if (updater.phase == UpdatePhase.downloading) ...[
                 const SizedBox(height: 18),
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(Radii.r4),
+                  borderRadius: BorderRadius.circular(Radii.xs),
                   child: LinearProgressIndicator(value: d.status == 'running' ? d.progress : null, minHeight: 6),
                 ),
                 const SizedBox(height: 8),
@@ -176,7 +176,7 @@ class _UpdateSheet extends StatelessWidget {
                 ConstrainedBox(
                   constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.35),
                   child: Container(
-                    decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r14)),
+                    decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md)),
                     padding: const EdgeInsets.all(12),
                     child: SingleChildScrollView(
                       child: MarkdownBody(

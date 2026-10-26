@@ -37,10 +37,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         return Scaffold(
           appBar: AppBar(
             title: Text(tr('Models & providers')),
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(1),
-              child: Divider(height: 1, color: p.border),
-            ),
           ),
           body: ListView(
             padding: const EdgeInsets.only(bottom: 32),
@@ -86,7 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
               _Header(tr('Environment')),
-              _InfoRow('pi', agent.info['version']?.toString() ?? '—'),
+              _InfoRow(tr('Agent engine (pi)'), agent.info['version']?.toString() ?? '—'),
               _InfoRow('Node.js', agent.info['node']?.toString() ?? '—'),
               _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—', monospace: true),
               _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—', monospace: true),

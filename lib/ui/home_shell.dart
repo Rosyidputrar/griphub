@@ -177,7 +177,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (error != null) {
       agent.client.notify(
         _doneId,
-        tr('pi stopped with an error'),
+        tr('The agent stopped with an error'),
         error,
         launch: open,
         actions: [
@@ -187,7 +187,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     } else {
       agent.client.notify(
         _doneId,
-        '${tr('pi is done')}: ${agent.chatTitle}',
+        '${tr('The agent is done')}: ${agent.chatTitle}',
         preview.isEmpty ? tr('Tap to see the result') : preview,
         launch: open,
       );
@@ -200,7 +200,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (pending.length > approvalsSeen && _inBackground) {
       agent.client.notify(
         _approvalId,
-        tr('pi needs your approval'),
+        tr('The agent needs your approval'),
         '${pending.last.toolName}: ${pending.last.summary}',
         channel: 'approvals',
         launch: {'action': 'open_chat'},
@@ -396,8 +396,9 @@ class _NavBar extends StatelessWidget {
   static const _items = [
     (LucideIcons.house, 'Home'),
     (LucideIcons.messagesSquare, 'Chats'),
-    (LucideIcons.compass, 'Skills'),
-    (LucideIcons.layoutGrid, 'Projects'),
+    // The same icons the Settings rows and project tiles use for these.
+    (LucideIcons.puzzle, 'Skills'),
+    (LucideIcons.folders, 'Projects'),
   ];
 
   @override
@@ -421,9 +422,14 @@ class _NavBar extends StatelessWidget {
                 height: 68,
                 decoration: BoxDecoration(
                   color: p.nav,
-                  borderRadius: BorderRadius.circular(Radii.r34),
+                  borderRadius: BorderRadius.circular(Radii.pill),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.22), blurRadius: 26, offset: const Offset(0, 12)),
+                    // A soft lift; the dark-mode strength reads as a grey slab on white.
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: Theme.of(context).brightness == Brightness.light ? 0.10 : 0.22),
+                      blurRadius: 26,
+                      offset: const Offset(0, 12),
+                    ),
                   ],
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -467,46 +473,51 @@ class _NavItemState extends State<_NavItem> {
   Widget build(BuildContext context) {
     const ink = Color(0xFF111113);
     final selected = widget.selected;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: widget.label,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => setState(() => pressed = true),
-        onTapCancel: () => setState(() => pressed = false),
-        onTapUp: (_) {
-          setState(() => pressed = false);
-          HapticFeedback.selectionClick();
-          widget.onTap();
-        },
-        child: SizedBox.square(
-          dimension: 52,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // The white disc grows in with a little overshoot.
-              AnimatedScale(
-                scale: selected ? 1 : 0,
-                duration: const Duration(milliseconds: 380),
-                curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+    // Icon-only bar: a long press names the tab (the label also reaches screen readers).
+    return Tooltip(
+      message: widget.label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: widget.label,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (_) => setState(() => pressed = true),
+          onTapCancel: () => setState(() => pressed = false),
+          onTapUp: (_) {
+            setState(() => pressed = false);
+            HapticFeedback.selectionClick();
+            widget.onTap();
+          },
+          child: SizedBox.square(
+            dimension: 52,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // The white disc grows in with a little overshoot.
+                AnimatedScale(
+                  scale: selected ? 1 : 0,
+                  duration: const Duration(milliseconds: 380),
+                  curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                  ),
                 ),
-              ),
-              AnimatedScale(
-                scale: pressed ? 0.8 : (selected ? 1.08 : 1),
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                child: TweenAnimationBuilder<Color?>(
-                  tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
+                AnimatedScale(
+                  scale: pressed ? 0.8 : (selected ? 1.08 : 1),
                   duration: const Duration(milliseconds: 220),
-                  builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
+                  curve: Curves.easeOutBack,
+                  child: TweenAnimationBuilder<Color?>(
+                    tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
+                    duration: const Duration(milliseconds: 220),
+                    builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -576,8 +587,21 @@ class _CreateButtonState extends State<_CreateButton> {
 // Home
 
 class _Quick {
-  const _Quick(this.title, this.icon, this.color, this.category, this.art, {this.prompt, this.clone = false, this.openImages = false});
+  const _Quick(
+    this.title,
+    this.blurb,
+    this.icon,
+    this.color,
+    this.category,
+    this.art, {
+    this.prompt,
+    this.clone = false,
+    this.openImages = false,
+  });
   final String title;
+
+  /// One line under the title: what you get.
+  final String blurb;
 
   /// Storyset illustration shown on the card.
   final String art;
@@ -589,20 +613,31 @@ class _Quick {
   final bool openImages;
 }
 
+/// Category chips over the quick starts: id -> label.
+const _categories = {'All': 'All types', 'Build': 'Make', 'Code': 'Code', 'Ops': 'Deploy & automate'};
+
 const _quick = [
   _Quick(
     'Build a web app',
+    'A site or app, ready to deploy',
     LucideIcons.layoutTemplate,
     Color(0xFFFF7A1A),
     'Build',
     'projects',
     prompt: 'Build me a polished, mobile-first web app: ',
   ),
-  _Quick('Chat with the smartest agent', LucideIcons.sparkles, Color(0xFF7C5CFC), 'Code', 'ai'),
-  _Quick('Generate an image', LucideIcons.image, Color(0xFFEC4899), 'Build', 'ai', openImages: true),
-  _Quick('Clone a GitHub repo', SimpleIcons.github, Color(0xFF111113), 'Code', 'git', clone: true),
+  _Quick(
+    'Generate an image',
+    'Logos, mockups, illustrations',
+    LucideIcons.image,
+    Color(0xFFEC4899),
+    'Build',
+    'ai',
+    openImages: true,
+  ),
   _Quick(
     'Design a modern UI',
+    'A polished screen from a description',
     LucideIcons.palette,
     Color(0xFF14B8A6),
     'Build',
@@ -610,24 +645,52 @@ const _quick = [
     prompt: 'Using the ui-designer skill, design and build a modern screen for: ',
   ),
   _Quick(
+    'Chat with the smartest agent',
+    'Ask, plan or brainstorm',
+    LucideIcons.sparkles,
+    Color(0xFF7C5CFC),
+    'Code',
+    'chat',
+  ),
+  _Quick(
+    'Clone a GitHub repo',
+    'Pick up an existing project',
+    SimpleIcons.github,
+    Color(0xFF475569),
+    'Code',
+    'git',
+    clone: true,
+  ),
+  _Quick(
+    'Fix a bug',
+    'Find the cause and patch it',
+    LucideIcons.bug,
+    Color(0xFFEF4444),
+    'Code',
+    'bug',
+    prompt: 'Help me find and fix this bug: ',
+  ),
+  _Quick(
     'Python in Linux',
+    'Scripts in a real Linux container',
     SimpleIcons.python,
     Color(0xFF3B82F6),
-    'Ops',
+    'Code',
     'python',
     prompt: 'Set up a Python project in the Linux container and write a script that ',
   ),
-  _Quick('Fix a bug', LucideIcons.bug, Color(0xFFEF4444), 'Code', 'bug', prompt: 'Help me find and fix this bug: '),
   _Quick(
     'Deploy a site',
+    'Get a live URL in minutes',
     LucideIcons.rocket,
-    Color(0xFFEC4899),
+    Color(0xFF0EA5E9),
     'Ops',
     'launch',
     prompt: 'Deploy this project and give me the live URL. Project: ',
   ),
   _Quick(
     'Automate a task',
+    'A script that does it for you',
     LucideIcons.zap,
     Color(0xFFF59E0B),
     'Ops',
@@ -679,6 +742,13 @@ class _HomeTabState extends State<_HomeTab> {
       ..createSync(recursive: true);
     await agent.newSession(dir: dir.path);
     if (mounted) await openChat(context, agent, prompt: q.prompt);
+    // Backed out without sending anything: don't leave an empty project behind.
+    if (agent.cwd == dir.path && agent.entries.isEmpty && dir.existsSync() && dir.listSync().isEmpty) {
+      dir.deleteSync();
+      try {
+        await agent.newSession();
+      } catch (_) {}
+    }
     _refresh();
   }
 
@@ -723,11 +793,24 @@ class _HomeTabState extends State<_HomeTab> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    GestureDetector(
-                      onTap: () =>
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
-                      child: Avatar(name: gh?.name ?? gh?.login ?? 'GripHub AI Agent', url: gh?.avatarUrl, size: 44),
-                    ),
+                    // Signed out: a person icon, not initials made from the app name ("GA").
+                    if (gh == null)
+                      _CircleButton(
+                        icon: LucideIcons.userRound,
+                        label: tr('Accounts & servers'),
+                        onTap: () =>
+                            Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
+                      )
+                    else
+                      Semantics(
+                        button: true,
+                        label: tr('Accounts & servers'),
+                        child: GestureDetector(
+                          onTap: () =>
+                              Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
+                          child: Avatar(name: gh.name ?? gh.login, url: gh.avatarUrl, size: 44),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 26),
@@ -739,16 +822,16 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
                 if (!agent.hasModel) ...[const SizedBox(height: 18), _ConnectCard(agent: agent)],
                 const SizedBox(height: 22),
-                SizedBox(
-                  height: 38,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
+                // Sized by its chips (a fixed height clipped them at larger text sizes).
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
                     children: [
-                      for (final c in const ['All', 'Build', 'Code', 'Ops'])
+                      for (final MapEntry(key: c, value: label) in _categories.entries)
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: _PillChip(
-                            label: tr(c == 'All' ? 'All types' : c),
+                            label: tr(label),
                             selected: category == c,
                             onTap: () => setState(() => category = c),
                           ),
@@ -758,7 +841,8 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
-                  height: 218,
+                  // Art and padding are fixed; the title and blurb grow with the text size.
+                  height: 132 + MediaQuery.textScalerOf(context).scale(112),
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     clipBehavior: Clip.none,
@@ -826,38 +910,46 @@ class _ConnectCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.r24)),
+      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.xl)),
       clipBehavior: Clip.antiAlias,
-      child: Stack(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Positioned(right: -8, bottom: -6, child: Illustration('connect', height: 128)),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          Row(
+            children: [
+              Expanded(
+                child: Text(
                   tr('Connect GripHub'),
                   style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: -0.3),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  tr('Add your GripHub Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through GripHub.'),
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
+              ),
+              const SizedBox(width: 12),
+              // In its own tile, like the quick-start cards, so it never sits on the text.
+              const SizedBox.square(
+                dimension: 84,
+                child: MeshArt(
+                  seed: 'connect',
+                  radius: 22,
+                  child: Padding(padding: EdgeInsets.all(6), child: Illustration('connect', height: 72)),
                 ),
-                const SizedBox(height: 16),
-                FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF111113),
-                    minimumSize: const Size(0, 44),
-                  ),
-                  onPressed: () =>
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
-                  child: Text(tr('Add API key')),
-                ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            tr('Add your GripHub Router API key and get Claude, GPT, Gemini, DeepSeek and more \u2014 all through GripHub.'),
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13, height: 1.45),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF111113),
+              minimumSize: const Size(0, 44),
             ),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent))),
+            child: Text(tr('Add API key')),
           ),
         ],
       ),
@@ -929,7 +1021,7 @@ class _QuickCard extends StatelessWidget {
       width: 164,
       child: Material(
         color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.r24),
+        borderRadius: BorderRadius.circular(Radii.xl),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -961,13 +1053,31 @@ class _QuickCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 26, 10, 0),
-                  child: Text(
-                    tr(q.title),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 24, 10, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            tr(q.title),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Flexible(
+                          child: Text(
+                            tr(q.blurb),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, height: 1.3, color: p.muted),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -1001,7 +1111,7 @@ class _SessionRow extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final folder = sessionFolder(session.cwd, workspace);
     return InkWell(
-      borderRadius: BorderRadius.circular(Radii.r18),
+      borderRadius: BorderRadius.circular(Radii.lg),
       onTap: onTap,
       onLongPress: onLongPress,
       child: Padding(
@@ -1017,7 +1127,7 @@ class _SessionRow extends StatelessWidget {
                   child: Icon(
                     folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare,
                     size: 20,
-                    color: Colors.white,
+                    color: MeshArt.inkFor(session.id),
                   ),
                 ),
               ),
@@ -1460,7 +1570,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                                         child: Icon(
                                           pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
                                           size: 44,
-                                          color: const Color(0xFF111113).withValues(alpha: 0.55),
+                                          color: MeshArt.inkFor(pr.name),
                                         ),
                                       ),
                                       Padding(

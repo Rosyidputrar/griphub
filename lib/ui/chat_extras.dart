@@ -144,7 +144,7 @@ class AttachmentStrip extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(Radii.r12),
+                borderRadius: BorderRadius.circular(Radii.md),
                 child: a.isImage
                     ? Image.file(File(a.path), width: 56, height: 56, fit: BoxFit.cover)
                     : Container(
@@ -199,7 +199,7 @@ Future<bool> confirmBypass(BuildContext context) async =>
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Bypass all permissions?')),
-        content: Text(tr('pi will run every command, edit any file and use every tool without asking.')),
+        content: Text(tr('The agent will run every command, edit any file and use every tool without asking.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Bypass'))),
@@ -254,7 +254,7 @@ class _ApprovalCardsState extends State<ApprovalCards> {
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: p.surface,
-              borderRadius: BorderRadius.circular(Radii.r22),
+              borderRadius: BorderRadius.circular(Radii.xl),
               border: Border.all(color: p.warning.withValues(alpha: 0.6), width: 1.2),
             ),
             child: Column(
@@ -281,7 +281,7 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                   width: double.infinity,
                   constraints: const BoxConstraints(maxHeight: 110),
                   padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.r12)),
+                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.md)),
                   child: SingleChildScrollView(
                     child: Text(
                       a.summary,
@@ -393,7 +393,7 @@ class PlanBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
-        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.r18)),
+        decoration: BoxDecoration(color: p.accent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.lg)),
         child: Row(
           children: [
             Icon(LucideIcons.listChecks, size: 18, color: p.accent),
@@ -467,7 +467,7 @@ class _DevServerBannerState extends State<DevServerBanner> {
                   padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
                   decoration: BoxDecoration(
                     color: p.success.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(Radii.r18),
+                    borderRadius: BorderRadius.circular(Radii.lg),
                   ),
                   child: Row(
                     children: [
@@ -539,7 +539,7 @@ class SlashMenu extends StatelessWidget {
       constraints: const BoxConstraints(maxHeight: 260),
       decoration: BoxDecoration(
         color: p.bg,
-        borderRadius: BorderRadius.circular(Radii.r20),
+        borderRadius: BorderRadius.circular(Radii.lg),
         border: Border.all(color: p.border),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
       ),
@@ -611,7 +611,7 @@ Future<void> showProjectTools(
                     icon: LucideIcons.history,
                     color: const Color(0xFF7C5CFC),
                     title: tr('Changes & undo'),
-                    subtitle: tr('What pi changed, and roll it back'),
+                    subtitle: tr('What the agent changed, and roll it back'),
                     onTap: () => go(ChangesScreen(agent: agent)),
                   ),
                   SettingsRow(
@@ -625,11 +625,11 @@ Future<void> showProjectTools(
                     icon: LucideIcons.brain,
                     color: const Color(0xFFEC4899),
                     title: tr('Project memory'),
-                    subtitle: tr('AGENTS.md: rules pi follows in this folder'),
+                    subtitle: tr('AGENTS.md: rules the agent follows in this folder'),
                     onTap: () {
                       final f = File(memory);
                       if (!f.existsSync()) {
-                        f.writeAsStringSync('# Project notes for pi\n\n- Stack:\n- How to run:\n- Conventions:\n');
+                        f.writeAsStringSync('# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n');
                       }
                       go(EditorScreen(agent: agent, path: memory));
                     },

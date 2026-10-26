@@ -173,7 +173,7 @@ class _DiffViewState extends State<DiffView> {
     if (widget.patch.trim().isEmpty) {
       return Container(
         padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
-        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.r16)),
+        decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
         alignment: Alignment.center,
         child: Text(tr('No changes'), style: Theme.of(context).textTheme.bodySmall),
       );
@@ -220,7 +220,7 @@ class _FileDiff extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: p.raised,
-        borderRadius: BorderRadius.circular(Radii.r16),
+        borderRadius: BorderRadius.circular(Radii.lg),
         border: Border.all(color: p.border),
       ),
       clipBehavior: Clip.antiAlias,

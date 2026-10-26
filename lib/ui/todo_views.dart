@@ -82,7 +82,7 @@ class _PlanHeader extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         ClipRRect(
-          borderRadius: BorderRadius.circular(Radii.r4),
+          borderRadius: BorderRadius.circular(Radii.xs),
           child: LinearProgressIndicator(
             value: plan.total == 0 ? 0 : plan.done / plan.total,
             minHeight: 4,
@@ -119,7 +119,7 @@ class TodoCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
       decoration: BoxDecoration(
         color: p.surface,
-        borderRadius: BorderRadius.circular(Radii.r14),
+        borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.border),
       ),
       child: failed
@@ -197,7 +197,7 @@ class TodoProgressBar extends StatelessWidget {
     final color = plan.finished ? p.success : (paused ? p.muted : p.accent);
     return Material(
       color: p.surface,
-      borderRadius: BorderRadius.circular(Radii.r14),
+      borderRadius: BorderRadius.circular(Radii.md),
       clipBehavior: Clip.antiAlias,
       child: Row(
         children: [
@@ -243,7 +243,7 @@ class TodoProgressBar extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       ClipRRect(
-                        borderRadius: BorderRadius.circular(Radii.r3),
+                        borderRadius: BorderRadius.circular(Radii.xs),
                         child: LinearProgressIndicator(
                           value: plan.total == 0 ? 0 : plan.done / plan.total,
                           minHeight: 3,

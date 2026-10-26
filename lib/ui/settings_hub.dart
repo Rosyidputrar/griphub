@@ -153,9 +153,9 @@ class _SettingsHubState extends State<SettingsHub> {
         final connected = agent.providers.where((x) => x.configured).toList();
         final c = it.container;
         final dnsLabel = switch (it.settings?.dns) {
-          'system' => 'System DNS',
+          'system' => tr('System DNS'),
           'google' => 'Google DoH',
-          'custom' => 'Custom DoH',
+          'custom' => tr('Custom DoH'),
           _ => 'Cloudflare DoH',
         };
         return Scaffold(
@@ -175,13 +175,15 @@ class _SettingsHubState extends State<SettingsHub> {
                           Text(tr('GripHub AI Agent'), style: text.titleLarge),
                           const SizedBox(height: 2),
                           Text(
-                            'pi ${agent.info['version'] ?? ''} · Node ${agent.info['node'] ?? ''}',
-                            style: TextStyle(fontFamily: mono, fontSize: 12, color: p.muted),
+                            Updater.instance.currentVersion.isEmpty
+                                ? tr('Coding agent on your phone')
+                                : '${tr('Version')} ${Updater.instance.currentVersion}',
+                            style: TextStyle(fontSize: 12.5, color: p.muted),
                           ),
                         ],
                       ),
                     ),
-                    Pill(agent.busy ? 'Working' : 'Ready', color: agent.busy ? p.warning : p.success, dot: true),
+                    Pill(agent.busy ? tr('Working') : tr('Ready'), color: agent.busy ? p.warning : p.success, dot: true),
                   ],
                 ),
               ),
@@ -193,7 +195,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: p.accent,
                     title: tr('Models & providers'),
                     subtitle: connected.isEmpty
-                        ? 'Connect a provider to start'
+                        ? tr('Connect a provider to start')
                         : '${connected.map((x) => x.name).join(', ')}${agent.model != null ? ' · ${agent.model!.name}' : ''}',
                     onTap: () => _open(SettingsScreen(agent: agent)),
                   ),
@@ -201,7 +203,9 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.puzzle,
                     color: const Color(0xFFEC4899),
                     title: tr('Skills'),
-                    subtitle: skillCount == null ? 'Instructions the agent loads on demand' : '$skillCount installed',
+                    subtitle: skillCount == null
+                        ? tr('Instructions the agent loads on demand')
+                        : tr('{n} installed').replaceAll('{n}', '$skillCount'),
                     onTap: () => _open(SkillsScreen(agent: agent)),
                   ),
                   SettingsRow(
@@ -221,10 +225,10 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: c?.distro == 'alpine' ? const Color(0xFF0D597F) : const Color(0xFFD70A53),
                     title: tr('Linux container'),
                     subtitle: c == null
-                        ? 'Debian or Alpine with apt / apk'
+                        ? tr('Debian or Alpine with apt / apk')
                         : c.installed
-                        ? '${c.image}${c.enabled ? ' · agent shell' : ''}'
-                        : 'Not installed · run apt, pip, npm and more',
+                        ? '${c.image}${c.enabled ? ' · ${tr('agent shell')}' : ''}'
+                        : tr('Not installed · run apt, pip, npm and more'),
                     trailing: c?.enabled == true ? Pill(tr('On'), color: p.success, dot: true) : null,
                     onTap: () => _open(ContainerScreen(agent: agent)),
                   ),
@@ -244,7 +248,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.globe,
                     color: const Color(0xFF06B6D4),
                     title: tr('Web & DNS'),
-                    subtitle: '$dnsLabel · web search for the agent',
+                    subtitle: '$dnsLabel · ${tr('web search for the agent')}',
                     onTap: () => _open(NetworkScreen(agent: agent)),
                   ),
                 ],
@@ -269,7 +273,7 @@ class _SettingsHubState extends State<SettingsHub> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          tr('All permissions bypassed: pi never asks before acting.'),
+                          tr('All permissions bypassed: the agent never asks before acting.'),
                           style: text.bodySmall?.copyWith(color: p.warning),
                         ),
                       ),
@@ -293,7 +297,10 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: const Color(0xFF10B981),
                     title: tr('Usage & budget'),
                     subtitle: (it.settings?.dailyBudget ?? 0) > 0
-                        ? '${formatCredits(it.settings!.dailyBudget)} credits / day'
+                        ? tr('{n} per day').replaceAll(
+                            '{n}',
+                            '${localNumber(formatCredits(it.settings!.dailyBudget))} ${tr('credits')}',
+                          )
                         : tr('Tokens, cost and a daily limit'),
                     onTap: () => _open(UsageScreen(agent: agent)),
                   ),
@@ -489,7 +496,7 @@ class _InfoRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: Theme.of(context).textTheme.labelMedium),
+          Text(tr(label), style: Theme.of(context).textTheme.labelMedium),
           const SizedBox(height: 3),
           SelectableText(
             value,
@@ -523,21 +530,7 @@ class _Segmented<T> extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
             child: Text(label!, style: Theme.of(context).textTheme.labelMedium),
           ),
-        SizedBox(
-          width: double.infinity,
-          child: SegmentedButton<T>(
-            showSelectedIcon: false,
-            segments: [
-              for (final e in options.entries)
-                ButtonSegment(
-                  value: e.key,
-                  label: Text(e.value, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            selected: {options.containsKey(value) ? value : options.keys.first},
-            onSelectionChanged: (s) => onChanged(s.first),
-          ),
-        ),
+        PillSegments<T>(value: value, options: options, onChanged: onChanged),
       ],
     );
   }

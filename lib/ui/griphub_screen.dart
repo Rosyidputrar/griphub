@@ -136,10 +136,6 @@ class _GripHubScreenState extends State<GripHubScreen> {
               icon: Icon(LucideIcons.trash2, size: 18, color: p.danger),
             ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Divider(height: 1, color: p.border),
-        ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

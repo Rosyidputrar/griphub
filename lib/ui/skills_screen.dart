@@ -16,7 +16,7 @@ import 'theme.dart';
 /// Curated places to browse skills from.
 const _collections = [
   ('anthropics/skills', 'Anthropic', 'Documents, design, web testing, MCP'),
-  ('badlogic/pi-skills', 'pi skills', 'Made for the pi agent'),
+  ('badlogic/pi-skills', 'pi skills', 'Community collection for pi-based agents'),
 ];
 
 /// Agent Skills: SKILL.md folders pi loads when a task calls for them.
@@ -201,7 +201,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Searches Anthropic and pi collections, skills.md${it.github != null ? ', and all of GitHub' : ''}.',
+            tr(it.github != null ? 'Searches the Anthropic and pi-skills collections, skills.md, and all of GitHub.' : 'Searches the Anthropic and pi-skills collections and skills.md.'),
             style: text.bodySmall,
           ),
           if (searching) ...[
@@ -279,7 +279,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                   SettingsRow(
                     leading: IconTile(icon: SimpleIcons.github, color: p.text),
                     title: title,
-                    subtitle: '$repo · $blurb',
+                    subtitle: '$repo · ${tr(blurb)}',
                     onTap: () => _browse(repo, title),
                   ),
                 SettingsRow(
@@ -294,8 +294,10 @@ class _SkillsScreenState extends State<SkillsScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'pi sees each skill\'s name and description, and reads the full instructions only when a task needs '
-              'them. Force one in chat with /skill:name.',
+              tr(
+                'The agent sees each skill\'s name and description, and reads the full instructions only when a task needs '
+                'them. Force one in chat with /skill:name.',
+              ),
               style: text.bodySmall,
             ),
           ],

@@ -16,16 +16,23 @@ String _money(num v) {
 
 String _compact(num n) {
   String trim(double v) => v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '');
-  if (n >= 1e9) return '${trim(n / 1e9)}B';
-  if (n >= 1e6) return '${trim(n / 1e6)}M';
-  if (n >= 1e3) return '${trim(n / 1e3)}k';
-  return '${n.round()}';
+  if (n >= 1e9) return localNumber('${trim(n / 1e9)}B');
+  if (n >= 1e6) return localNumber('${trim(n / 1e6)}M');
+  if (n >= 1e3) return localNumber('${trim(n / 1e3)}k');
+  return localNumber('${n.round()}');
 }
 
 num _num(Object? o) => o is num ? o : 0;
 
-/// Credits with at most 2 decimals, trailing zeros trimmed (80.38, 1, 0.15).
-String _creditsFmt(num v) => v.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), '');
+/// Credits with at most 2 decimals, trailing zeros trimmed (80.38, 1, 0.15), in the app's number format.
+String _creditsFmt(num v) => localNumber(v.toStringAsFixed(2).replaceAll(RegExp(r'\.?0+$'), ''));
+
+/// An amount with its unit, the same way everywhere on the screen ("7.350 kredit", "0,978 kredit").
+String _creditText(num v, {bool precise = false}) =>
+    '${precise ? localNumber(formatCredits(v)) : _creditsFmt(v)} ${tr(v == 1 ? 'credit' : 'credits')}';
+
+/// Numbers line up and share the body font (the mono face made a few figures look like code).
+const _figures = [FontFeature.tabularFigures()];
 
 /// Rupiah with dot thousands (Rp 24.114).
 String _rp(num v) {
@@ -33,11 +40,12 @@ String _rp(num v) {
   return 'Rp ${s.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => '.')}';
 }
 
-/// Local date in Indonesian short form (30 Okt 2026).
+/// Local date in short form, months in the app's language (30 Okt 2026 / 30 Oct 2026).
 String _dateId(String iso) {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthsId = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
   final d = DateTime.parse(iso).toLocal();
-  return '${d.day} ${months[d.month - 1]} ${d.year}';
+  return '${d.day} ${(Appearance.instance.language == 'id' ? monthsId : months)[d.month - 1]} ${d.year}';
 }
 
 /// Token and cost usage across sessions, per day and per model, plus the
@@ -96,36 +104,7 @@ class _UsageScreenState extends State<UsageScreen> {
   num get _budget => _num(agent.integrations.settings?.json['dailyBudget']);
 
   Future<void> _editBudget() async {
-    final ctrl = TextEditingController(text: _budget == 0 ? '' : '$_budget');
-    final value = await showDialog<double>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(tr('Daily budget')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(tr('pi stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.')),
-            const SizedBox(height: 14),
-            TextField(
-              controller: ctrl,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-              decoration: InputDecoration(suffixText: 'credits', hintText: tr('No limit')),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
-          TextButton(
-            onPressed: () => Navigator.pop(context, double.tryParse(ctrl.text.trim()) ?? 0),
-            child: Text(tr('Save')),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
+    final value = await showDialog<double>(context: context, builder: (_) => _BudgetDialog(current: _budget));
     if (value == null) return;
     try {
       await agent.integrations.updateSettings({'dailyBudget': value < 0 ? 0 : value});
@@ -167,15 +146,15 @@ class _UsageScreenState extends State<UsageScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${_creditsFmt(remaining)} ${tr('credit')}', style: text.titleMedium),
-                    Text('≈ ${_rp(remaining * kRupiahPerCredit)}', style: text.bodySmall?.copyWith(fontFamily: mono)),
+                    Text(_creditText(remaining), style: text.titleMedium),
+                    Text('≈ ${_rp(remaining * kRupiahPerCredit)}', style: text.bodySmall?.copyWith(fontFeatures: _figures)),
                   ],
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          Text('${tr('Used')} ${_creditsFmt(used)} ${tr('of')} ${_creditsFmt(limit)} ${tr('credit')}', style: text.bodySmall),
+          Text('${tr('Used')} ${_creditsFmt(used)} ${tr('of')} ${_creditText(limit)}', style: text.bodySmall),
           if (limit > 0) ...[
             const SizedBox(height: 8),
             ClipRRect(
@@ -198,7 +177,9 @@ class _UsageScreenState extends State<UsageScreen> {
           if (nearest != null) ...[
             const SizedBox(height: 4),
             Text(
-              'Batch paling cepat kedaluwarsa ${_dateId(nearest['expiresAt'] as String)} (${_creditsFmt(_num(nearest['credits']))} credit)',
+              tr('Earliest batch expires {date} ({n})')
+                  .replaceAll('{date}', _dateId(nearest['expiresAt'] as String))
+                  .replaceAll('{n}', _creditText(_num(nearest['credits']))),
               style: text.bodySmall,
             ),
           ],
@@ -213,8 +194,8 @@ class _UsageScreenState extends State<UsageScreen> {
                   children: [
                     Expanded(child: Text('${m['model']}', style: text.bodySmall, overflow: TextOverflow.ellipsis)),
                     Text(
-                      '${_creditsFmt(_num(m['creditsUsed']))} credit',
-                      style: text.bodySmall?.copyWith(fontFamily: mono),
+                      _creditText(_num(m['creditsUsed'])),
+                      style: text.bodySmall?.copyWith(fontFeatures: _figures),
                     ),
                   ],
                 ),
@@ -242,19 +223,17 @@ class _UsageScreenState extends State<UsageScreen> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final d in const [7, 30])
-                  ChoiceChip(
-                    label: Text('$d ${tr('days')}'),
-                    selected: _days == d,
-                    onSelected: (_) {
-                      setState(() => _days = d);
-                      _load();
-                    },
-                  ),
-              ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: PillSegments<int>(
+                value: _days,
+                options: {for (final d in const [7, 30]) d: '$d ${tr('days')}'},
+                onChanged: (d) {
+                  setState(() => _days = d);
+                  _load();
+                },
+                expand: false,
+              ),
             ),
             const SizedBox(height: 14),
             SectionLabel(tr('GripHub credit')),
@@ -280,7 +259,9 @@ class _UsageScreenState extends State<UsageScreen> {
                   icon: LucideIcons.wallet,
                   color: p.warning,
                   title: tr('Daily budget'),
-                  subtitle: _budget == 0 ? 'No limit' : '${formatCredits(_budget)} credits per day',
+                  subtitle: _budget == 0
+                      ? tr('No limit')
+                      : tr('{n} per day').replaceAll('{n}', _creditText(_budget, precise: true)),
                   onTap: _editBudget,
                 ),
               ],
@@ -364,7 +345,7 @@ class _UsageScreenState extends State<UsageScreen> {
               value: showPiCost
                   ? _money(piCost)
                   : showEstimate
-                      ? '${formatCredits(estimatedTotal)} credit'
+                      ? _creditText(estimatedTotal, precise: true)
                       : '—',
             ),
           ),
@@ -401,19 +382,21 @@ class _UsageScreenState extends State<UsageScreen> {
           ),
         ],
       ),
-      SectionLabel(showPiCost || showEstimate ? 'Cost per day' : 'Tokens per day'),
+      SectionLabel(tr(showPiCost || showEstimate ? 'Cost per day' : 'Tokens per day')),
       SurfaceCard(
         child: _BarChart(
           values: [for (final d in days) perDay[d]!],
           labels: days,
-          format: showPiCost ? _money : showEstimate ? (v) => '${formatCredits(v)} credit' : _compact,
+          format: showPiCost ? _money : showEstimate ? (v) => _creditText(v, precise: true) : _compact,
         ),
       ),
       if (showEstimate)
         Padding(
           padding: const EdgeInsets.only(top: 6),
           child: Text(
-            'Perkiraan dari tarif 25 Okt 2026 · total ≈ ${_rp(estimatedTotal * kRupiahPerCredit)} · angka pasti di kartu Credit GripHub di atas',
+            tr(
+              'Estimated from the rates of 25 Oct 2026 · total ≈ {rp} · the exact figure is on the GripHub credit card above',
+            ).replaceAll('{rp}', _rp(estimatedTotal * kRupiahPerCredit)),
             style: text.bodySmall,
           ),
         ),
@@ -427,10 +410,10 @@ class _UsageScreenState extends State<UsageScreen> {
               SettingsRow(
                 leading: BrandTile(id: m.provider, size: 30),
                 title: m.model.isEmpty ? 'unknown' : m.model,
-                subtitle: '${m.provider} · ${_compact(m.tokens)} tokens',
+                subtitle: '${m.provider} · ${_compact(m.tokens)} ${tr('tokens')}',
                 trailing: Text(
-                  showPiCost ? _money(m.cost) : m.hasRate ? '${formatCredits(m.estCost)} credit' : '—',
-                  style: text.titleSmall?.copyWith(fontFamily: mono),
+                  showPiCost ? _money(m.cost) : m.hasRate ? _creditText(m.estCost, precise: true) : '—',
+                  style: text.titleSmall?.copyWith(fontFeatures: _figures),
                 ),
               ),
           ],
@@ -466,7 +449,7 @@ class _UsageScreenState extends State<UsageScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${_compact(total)} ${tr('tokens')}', style: text.titleMedium),
-                    if (cost > 0) Text(_money(cost), style: text.bodySmall?.copyWith(fontFamily: mono)),
+                    if (cost > 0) Text(_money(cost), style: text.bodySmall?.copyWith(fontFeatures: _figures)),
                   ],
                 ),
               ),
@@ -482,7 +465,7 @@ class _UsageScreenState extends State<UsageScreen> {
                     if (ctxTokens != null && window != null) '${_compact(ctxTokens)} / ${_compact(window)}',
                     '${percent.toStringAsFixed(0)}%',
                   ].join(' · '),
-                  style: text.bodySmall?.copyWith(fontFamily: mono),
+                  style: text.bodySmall?.copyWith(fontFeatures: _figures),
                 ),
               ],
             ),
@@ -520,7 +503,7 @@ class _StatCard extends StatelessWidget {
         children: [
           IconTile(icon: icon, color: color, size: 30),
           const SizedBox(height: 12),
-          Text(value, style: text.titleLarge?.copyWith(fontFamily: mono)),
+          Text(value, style: text.titleLarge?.copyWith(fontFeatures: _figures)),
           const SizedBox(height: 2),
           Text(label, style: text.bodySmall),
         ],
@@ -546,7 +529,10 @@ class _BarChart extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(max == 0 ? 'Nothing yet' : 'Peak ${format(max)}', style: text.bodySmall?.copyWith(fontFamily: mono)),
+        Text(
+          max == 0 ? tr('Nothing yet') : '${tr('Peak')} ${format(max)}',
+          style: text.bodySmall?.copyWith(fontFeatures: _figures),
+        ),
         const SizedBox(height: 12),
         SizedBox(
           height: 120,
@@ -562,7 +548,7 @@ class _BarChart extends StatelessWidget {
                       height: max == 0 ? 3 : (values[i] / max * 116).clamp(3, 116).toDouble(),
                       decoration: BoxDecoration(
                         color: values[i] == 0 ? p.border : p.accent,
-                        borderRadius: BorderRadius.circular(Radii.r4),
+                        borderRadius: BorderRadius.circular(Radii.xs),
                       ),
                     ),
                   ),
@@ -579,6 +565,72 @@ class _BarChart extends StatelessWidget {
             Text(short(labels.last), style: text.labelSmall),
           ],
         ),
+      ],
+    );
+  }
+}
+
+/// The daily budget editor. It owns its text controller, so the field is not
+/// disposed while the dialog is still animating out.
+class _BudgetDialog extends StatefulWidget {
+  const _BudgetDialog({required this.current});
+  final num current;
+
+  @override
+  State<_BudgetDialog> createState() => _BudgetDialogState();
+}
+
+class _BudgetDialogState extends State<_BudgetDialog> {
+  late final _ctrl = TextEditingController(
+    text: widget.current == 0
+        ? ''
+        : localNumber(widget.current.toString().replaceAll(RegExp(r'\.0+$'), '')),
+  );
+  String? _problem;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _ctrl.text.trim();
+    // Empty is "no limit"; anything else must read as a number, or a typo would
+    // silently clear the limit (it used to save 0, and "1,5" used to become 15).
+    if (text.isEmpty) return Navigator.pop(context, 0.0);
+    final v = parseLocalNumber(text);
+    if (v == null || v < 0) return setState(() => _problem = tr('Enter a number, like 2 or 1.5'));
+    Navigator.pop(context, v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(tr('Daily budget')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr(
+              'The agent stops starting new requests once today\'s spend reaches this, in GripHub credits. Leave empty for no limit.',
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+            onSubmitted: (_) => _save(),
+            decoration: InputDecoration(suffixText: tr('credits'), hintText: tr('No limit'), errorText: _problem),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+        TextButton(onPressed: _save, child: Text(tr('Save'))),
       ],
     );
   }
