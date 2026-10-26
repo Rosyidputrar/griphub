@@ -8,7 +8,7 @@
 Write, run, preview and deploy code without a laptop.</p>
 
 <p align="center">
-  <a href="https://github.com/seseegy/griphub/releases/latest"><b>APK downloads</b></a> ·
+  <a href="https://github.com/seseegy/griphub-releases/releases/latest"><b>APK downloads</b></a> ·
   <a href="https://github.com/seseegy/griphub"><b>Source</b></a>
 </p>
 

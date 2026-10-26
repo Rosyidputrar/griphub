@@ -224,6 +224,15 @@ async function tavilySearch(q: string, n: number, key: string, signal?: AbortSig
 	return (body.results ?? []).map((r: any) => ({ title: r.title, url: r.url, snippet: r.content ?? "" }));
 }
 
+/**
+ * DuckDuckGo answers a rate-limited client with HTTP 202 and a bot-check page.
+ * That used to read as "no results", which a model takes as a cue to rephrase
+ * and search again; saying "blocked" lets it stop instead.
+ */
+function duckBlocked(res: Response, html: string) {
+	return res.status === 202 || html.includes("anomaly-modal");
+}
+
 async function duckSearch(q: string, n: number, signal?: AbortSignal): Promise<SearchResult[]> {
 	const res = await fetch("https://html.duckduckgo.com/html/", {
 		method: "POST",
@@ -233,6 +242,7 @@ async function duckSearch(q: string, n: number, signal?: AbortSignal): Promise<S
 	});
 	if (!res.ok) throw new Error(`DuckDuckGo ${res.status}`);
 	const html = await res.text();
+	if (duckBlocked(res, html)) throw new Error("DuckDuckGo blocked the request (bot check)");
 	const out: SearchResult[] = [];
 	const block = /<div class="result results_links[\s\S]*?(?=<div class="result results_links|<\/div>\s*<\/div>\s*<div id="links_wrapper"|$)/g;
 	for (const m of html.matchAll(block)) {
@@ -263,6 +273,7 @@ async function duckLiteSearch(q: string, n: number, signal?: AbortSignal): Promi
 	});
 	if (!res.ok) throw new Error(`DuckDuckGo Lite ${res.status}`);
 	const html = await res.text();
+	if (duckBlocked(res, html)) throw new Error("DuckDuckGo Lite blocked the request (bot check)");
 	const links = [...html.matchAll(/<a[^>]*href="([^"]+)"[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/g)];
 	const snippets = [...html.matchAll(/class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/g)];
 	const out: SearchResult[] = [];
@@ -307,9 +318,10 @@ async function braveHtmlSearch(q: string, n: number, signal?: AbortSignal): Prom
 // the provider includes them. An empty snippet is fine: the agent follows up
 // with web_fetch, exactly as it does for the other backends.
 //
-// A model call can take a while on a phone connection, so these get the same
-// long timeout as the image backend. Any failure (unsupported tool, unknown
-// model, bad key) just falls through to the next backend in webSearch().
+// A model call can take a while on a phone connection, but each backend is
+// only one step of the fallback chain: two slow router calls used to hold one
+// search for four minutes. Any failure (unsupported tool, unknown model, bad
+// key, timeout) just falls through to the next backend in webSearch().
 
 /** Reassemble a plain-JSON-shaped body from an SSE stream (Responses or Messages shape). Returns null when the stream carries nothing usable. */
 function parseSseBody(raw: string, kind: "responses" | "messages"): any | null {
@@ -363,7 +375,7 @@ function parseSseBody(raw: string, kind: "responses" | "messages"): any | null {
 }
 
 async function routerRequest(path: string, key: string, body: unknown, signal?: AbortSignal, extraHeaders?: Record<string, string>, sseKind?: "responses" | "messages") {
-	const timeout = AbortSignal.timeout(120_000);
+	const timeout = AbortSignal.timeout(45_000);
 	const res = await fetch(path, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...(extraHeaders ?? {}) },
@@ -527,7 +539,10 @@ export async function webSearch(q: string, n: number, keys: SearchKeys, signal?:
 			errors.push(`${name}: ${(e as Error).message}`);
 		}
 	}
-	throw new Error(`Search failed (${errors.join("; ")})`);
+	// Every backend failing is not about the query: say so, or the model keeps trying new wordings.
+	throw new Error(
+		`Search failed (${errors.join("; ")}). Web search is unavailable right now; do not retry with other queries. Continue without it and tell the user.`,
+	);
 }
 
 // ---------------------------------------------------------------------------

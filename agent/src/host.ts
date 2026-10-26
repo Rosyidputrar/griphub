@@ -33,6 +33,7 @@ import * as gitops from "./gitops.js";
 import { Guard } from "./guard.js";
 import { Integrations, type Log, run } from "./integrations.js";
 import { installLenientTools } from "./lenient.js";
+import { BASH_TIMEOUT_SECONDS, limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
@@ -145,14 +146,18 @@ function state() {
 }
 
 /** Every session (chat or background run) is built the same way. */
-async function buildSession(sessionManager: SessionManager, opts: { interactive: boolean }) {
+async function buildSession(sessionManager: SessionManager, opts: { interactive: boolean; onLimit: (reason: string) => void }) {
 	const cwd = sessionManager.getCwd();
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
 		settingsManager,
+		// Limits come first, so a call past a limit is refused before it asks for approval.
 		// Approvals and plan mode only make sense with someone watching.
-		extensionFactories: opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : [],
+		extensionFactories: [
+			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
+			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+		],
 	});
 	await resourceLoader.reload();
 	const mcpTools = mcp.toolDefinitions();
@@ -196,7 +201,10 @@ async function openSession(sessionManager: SessionManager) {
 	unsubscribe?.();
 	guard.cancelAll();
 	session?.dispose();
-	const result = await buildSession(sessionManager, { interactive: true });
+	const result = await buildSession(sessionManager, {
+		interactive: true,
+		onLimit: (reason) => send({ type: "notice", message: reason }),
+	});
 	session = result.session;
 	unsubscribe = session.subscribe((event) => {
 		send({ type: "event", event: wireEvent(event) });
@@ -244,6 +252,9 @@ async function tryFallback(error: string) {
 	const next = chain.find((f) => `${f.provider}/${f.model}` !== current);
 	const model = next && modelRuntime.getModel(next.provider, next.model);
 	if (!model) return;
+	// The continuation is a new request, so it needs budget like any other.
+	const overBudget = budgetError();
+	if (overBudget) return send({ type: "notice", message: overBudget });
 	fallbackTried = true;
 	fallbackPending = true;
 	try {
@@ -264,14 +275,19 @@ async function tryFallback(error: string) {
  * The day is the user's day (Asia/Jakarta), not UTC. Models with no known
  * rate are not counted — the same rule as the Usage screen's "—".
  */
-function checkBudget() {
+function budgetError(): string | null {
 	const cap = integrations.settings.dailyBudget ?? 0;
-	if (!cap) return;
+	if (!cap) return null;
 	const today = wibDay(Date.now());
 	const spent = usageSummary(join(agentDir, "sessions"), 1)
 		.filter((r) => r.day === today)
 		.reduce((sum, r) => sum + (estimatedCredits(r.model, r.input, r.output) ?? 0), 0);
-	if (spent >= cap) throw new Error(`Daily budget of ${cap} credits reached (${spent.toFixed(2)} credits spent today). Raise it in Settings → Usage.`);
+	return spent >= cap ? `Daily budget of ${cap} credits reached (${spent.toFixed(2)} credits spent today). Raise it in Settings → Usage.` : null;
+}
+
+function checkBudget() {
+	const error = budgetError();
+	if (error) throw new Error(error);
 }
 
 /** Mirrors pi's interactive warning: subscription OAuth outside Claude's own apps bills extra usage. */
@@ -291,8 +307,11 @@ async function reopenSession() {
 
 /** A headless session for the background runner. */
 async function backgroundSession(cwd: string): Promise<RunSession> {
-	const { session: bg } = await buildSession(SessionManager.create(cwd || workspace), { interactive: false });
 	let error: string | undefined;
+	const { session: bg } = await buildSession(SessionManager.create(cwd || workspace), {
+		interactive: false,
+		onLimit: (reason) => (error = reason),
+	});
 	bg.subscribe((e) => {
 		const m = (e as any).message;
 		if (e.type === "message_end" && m?.role === "assistant" && m.stopReason === "error") error = m.errorMessage;
@@ -357,6 +376,8 @@ You are running inside GripHub AI Agent, an Android app, on the user's phone.
   starting, and keep it current (one step in_progress, each marked completed
   as soon as it is done). The user follows it in the app. In plan mode, write
   the plan as text first; call \`todo_write\` once it is approved.
+- \`bash\` commands stop after ${BASH_TIMEOUT_SECONDS / 60} minutes unless you pass \`timeout\`
+  (in seconds); pass a longer one for slow installs or builds.
 - Dev servers: run them in the background (\`nohup npm run dev > dev.log 2>&1 &\`)
   and print the URL (e.g. http://localhost:5173); the app offers a live
   preview and a public link for any localhost port it sees.
