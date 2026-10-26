@@ -6,6 +6,7 @@ import 'agent_client.dart';
 import 'features.dart';
 import 'integrations.dart';
 import 'models.dart';
+import 'sent_attachments.dart';
 import 'todos.dart';
 
 enum BootStatus { starting, ready, failed }
@@ -441,10 +442,44 @@ class AgentController extends ChangeNotifier {
     _scheduleNotify();
   }
 
+  /// Attachments queued by the composer for the next user message the
+  /// host echoes. The echo may arrive before the send call returns, so the
+  /// composer queues first and retracts on refusal; the queue drains in
+  /// transcript order, so rapid sends still line up. Cleared with the
+  /// transcript on session switch, rewind and fork.
+  final _pendingAttachments = <List<SentAttachment>>[];
+
+  /// Queues [files] to ride along with the next echoed user message.
+  void queueSentAttachments(List<SentAttachment> files) {
+    if (files.isNotEmpty) _pendingAttachments.add(files);
+  }
+
+  /// Drops a queued batch that never reached the transcript (refused send).
+  void retractSentAttachments(List<SentAttachment> files) {
+    for (var i = _pendingAttachments.length - 1; i >= 0; i--) {
+      if (identical(_pendingAttachments[i], files)) {
+        _pendingAttachments.removeAt(i);
+        return;
+      }
+    }
+  }
+
   void _addMessage(Map<String, dynamic> m, {bool fromHistory = false}) {
     switch (m['role']) {
       case 'user':
-        entries.add(UserEntry(contentText(m['content']), images: contentImages(m['content'])));
+        // The ordinal among user messages is assigned here, at append time,
+        // so it always matches the transcript order — including history
+        // reloads and rewind-and-resend (which reuses the index).
+        final ordinal = entries.whereType<UserEntry>().length;
+        final attached = fromHistory
+            ? SentAttachments.instance.forMessage(sessionId, ordinal)
+            : (_pendingAttachments.isNotEmpty ? _pendingAttachments.removeAt(0) : const <SentAttachment>[]);
+        if (!fromHistory && attached.isNotEmpty) {
+          SentAttachments.instance.record(sessionId, ordinal, attached);
+        }
+        entries.add(
+          UserEntry(contentText(m['content']), images: contentImages(m['content']), attachments: attached),
+        );
       case 'assistant':
         final entry = AssistantEntry();
         if (fromHistory || (m['content'] as List?)?.isNotEmpty == true) entry.applyMessage(m);
@@ -515,6 +550,7 @@ class AgentController extends ChangeNotifier {
     entries.clear();
     tools.clear();
     _streaming = null;
+    _pendingAttachments.clear();
   }
 
   void _setBusy(bool value) {

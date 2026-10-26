@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import '../agent/sent_attachments.dart';
 import 'i18n.dart';
 import 'changes_screen.dart';
 import 'editor_screen.dart';
@@ -47,27 +48,48 @@ class Attachment {
 
 /// Pictures go to the model as images; other files are copied into the
 /// project's `.attachments/` folder and referenced by path in the message.
-Future<({String text, List<Map<String, String>> images})> preparePrompt(
+/// Every attachment is ALSO copied there (with a unique name, so two
+/// same-named attachments never overwrite each other) and returned in
+/// [files], so the sent message can show it later. Unreadable files are
+/// skipped rather than failing the send.
+Future<({String text, List<Map<String, String>> images, List<SentAttachment> files})> preparePrompt(
   String text,
   List<Attachment> attachments,
   String cwd,
 ) async {
   final images = <Map<String, String>>[];
   final paths = <String>[];
-  for (final a in attachments) {
+  final files = <SentAttachment>[];
+  final dir = Directory('$cwd/.attachments')..createSync(recursive: true);
+  final stamp = DateTime.now().microsecondsSinceEpoch;
+  for (var i = 0; i < attachments.length; i++) {
+    final a = attachments[i];
     final file = File(a.path);
     if (!file.existsSync()) continue;
-    if (a.isImage && file.lengthSync() < 8 * 1024 * 1024) {
+    final target = '${dir.path}/${stamp}_${i}_${a.name}';
+    try {
+      await file.copy(target);
+    } catch (_) {
+      continue;
+    }
+    final length = _fileSize(file);
+    files.add((path: target, name: a.name, mime: a.imageMime ?? a.mime, size: length));
+    if (a.isImage && length >= 0 && length < 8 * 1024 * 1024) {
       images.add({'type': 'image', 'data': base64Encode(await file.readAsBytes()), 'mimeType': a.imageMime!});
     } else {
-      final dir = Directory('$cwd/.attachments')..createSync(recursive: true);
-      final target = '${dir.path}/${a.name}';
-      await file.copy(target);
       paths.add(target);
     }
   }
   final note = paths.isEmpty ? '' : '\n\nAttached files:\n${paths.map((p) => '- $p').join('\n')}';
-  return (text: '$text$note'.trim(), images: images);
+  return (text: '$text$note'.trim(), images: images, files: files);
+}
+
+int _fileSize(File file) {
+  try {
+    return file.lengthSync();
+  } catch (_) {
+    return -1;
+  }
 }
 
 Future<List<Attachment>> pickAttachments(BuildContext context) async {

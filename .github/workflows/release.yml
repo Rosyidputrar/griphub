@@ -14,6 +14,10 @@
 # Versions never collide: the patch number and the build number both grow with the run number, and runs are
 # serialized. The base comes from pubspec.yaml (version: X.Y.Z+B), so bump X.Y there for a bigger release.
 #   release = X.Y.(Z + run_number), versionCode = B + run_number
+# A floor also applies: the release patch is never below the latest public
+# release's patch + 1 (fetched from seseegy/griphub-releases), so a release
+# can never come out older than what updaters already offer. If the floor
+# cannot be fetched, the pubspec math stands on its own.
 # Pull request builds use run numbers too, so release numbers can skip; they still only go up.
 #
 # Every APK is signed with the same release key from the repository secrets, so each update installs over the
@@ -84,7 +88,26 @@ jobs:
           build=${base#*+}
           [ "$build" = "$base" ] && build=0
           IFS=. read -r major minor patch <<< "$name"
-          version="$major.$minor.$((patch + GITHUB_RUN_NUMBER))"
+          version_patch=$((patch + GITHUB_RUN_NUMBER))
+          # Floor: never release below the latest public release + 1 patch,
+          # so the updater (which compares dotted versions) always sees an
+          # update. Unauthenticated public API; any failure falls back to
+          # pubspec math instead of failing the build.
+          floor_patch=""
+          tag=$(curl -fsSL --max-time 20 "https://api.github.com/repos/seseegy/griphub-releases/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"v\?\([0-9][0-9.]*\)".*/\1/p' | head -1 || true)
+          if [ -n "$tag" ]; then
+            latest_patch=${tag##*.}
+            case "$latest_patch" in
+              ''|*[!0-9]*) echo "::warning::Could not parse latest public tag '$tag'; ignoring floor" ;;
+              *) floor_patch=$((latest_patch + 1)) ;;
+            esac
+          else
+            echo "::warning::Could not fetch latest public release; ignoring floor"
+          fi
+          if [ -n "$floor_patch" ] && [ "$version_patch" -lt "$floor_patch" ]; then
+            version_patch=$floor_patch
+          fi
+          version="$major.$minor.$version_patch"
           code=$((build + GITHUB_RUN_NUMBER))
           echo "name=$version" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"

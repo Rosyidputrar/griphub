@@ -201,7 +201,11 @@ class _ChatScreenState extends State<ChatScreen> {
       ok = await agent.send(text);
     } else {
       final prompt = await preparePrompt(text, files, agent.cwd);
+      // Queue before the call: the host may echo the message before the
+      // call returns, and the queue drains in transcript order.
+      agent.queueSentAttachments(prompt.files);
       ok = await agent.sendWith(prompt.text, images: prompt.images);
+      if (!ok) agent.retractSentAttachments(prompt.files);
     }
     if (!mounted || !ok) return;
     input.clear();
