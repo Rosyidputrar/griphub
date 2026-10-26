@@ -574,7 +574,7 @@ class _CreateButtonState extends State<_CreateButton> {
               turns: turns,
               duration: const Duration(milliseconds: 420),
               curve: Curves.easeOutBack,
-              child: const Icon(LucideIcons.plus, size: 28, color: Colors.white),
+              child: Icon(LucideIcons.plus, size: 28, color: p.onAccent),
             ),
           ),
         ),
@@ -741,7 +741,7 @@ class _HomeTabState extends State<_HomeTab> {
     final dir = Directory('$ws/$slug-${n.month}${n.day}-${n.hour}${n.minute.toString().padLeft(2, '0')}')
       ..createSync(recursive: true);
     await agent.newSession(dir: dir.path);
-    if (mounted) await openChat(context, agent, prompt: q.prompt);
+    if (mounted) await openChat(context, agent, prompt: tr(q.prompt!));
     // Backed out without sending anything: don't leave an empty project behind.
     if (agent.cwd == dir.path && agent.entries.isEmpty && dir.existsSync() && dir.listSync().isEmpty) {
       dir.deleteSync();
@@ -857,7 +857,7 @@ class _HomeTabState extends State<_HomeTab> {
                     Expanded(child: Text(tr('Recent'), style: text.titleLarge)),
                     TextButton(
                       onPressed: widget.onSeeAll,
-                      style: TextButton.styleFrom(foregroundColor: context.palette.accentAlt),
+                      style: TextButton.styleFrom(foregroundColor: context.palette.accent),
                       child: Text(tr('See all')),
                     ),
                   ],
@@ -1347,7 +1347,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                       ),
                     ),
                   for (final e in groups.entries) ...[
-                    SectionLabel(e.key, padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
+                    SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
                     for (final s in e.value)
                       _SessionRow(
                         session: s,
@@ -1615,7 +1615,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                               Text(pr.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
                               const SizedBox(height: 2),
                               Text(
-                                pr.githubSlug ?? (pr.dirty ? 'uncommitted changes' : 'local folder'),
+                                pr.githubSlug ?? tr(pr.dirty ? 'uncommitted changes' : 'local folder'),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(fontSize: 11.5, color: p.muted),

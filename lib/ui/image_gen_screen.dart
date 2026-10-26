@@ -554,22 +554,28 @@ class _OptionChip extends StatelessWidget {
     final p = context.palette;
     return Material(
       color: selected ? p.accent : p.surface,
-      borderRadius: BorderRadius.circular(Radii.xl),
+      borderRadius: BorderRadius.circular(Radii.pill),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(Radii.xl),
+        borderRadius: BorderRadius.circular(Radii.pill),
+        // Hugs its label: with alignment set, the Container grew to the Wrap's full width and every
+        // option filled a row of its own.
         child: Container(
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: TextStyle(
-              fontFamily: mono,
-              fontSize: 13,
-              color: selected ? Colors.white : p.text,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontFamily: mono,
+                  fontSize: 13,
+                  color: selected ? p.onAccent : p.text,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ],
           ),
         ),
       ),

@@ -209,12 +209,6 @@ class _TasksScreenState extends State<TasksScreen> {
                   trailing: finished > 0
                       ? TextButton.icon(
                           onPressed: () => _guard(f.clearRuns),
-                          // Sized to sit beside a section label, not to compete with it.
-                          style: TextButton.styleFrom(
-                            foregroundColor: p.muted,
-                            textStyle: Theme.of(context).textTheme.labelMedium,
-                            visualDensity: VisualDensity.compact,
-                          ),
                           icon: const Icon(LucideIcons.x, size: 14),
                           label: Text(tr('Clear finished')),
                         )

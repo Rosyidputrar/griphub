@@ -125,8 +125,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     height: 9,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: i == page ? p.accentAlt : Colors.transparent,
-                      border: Border.all(color: i == page ? p.accentAlt : p.faint, width: 1.5),
+                      // The app accent, like every other selected state (accentAlt is for categories).
+                      color: i == page ? p.accent : Colors.transparent,
+                      border: Border.all(color: i == page ? p.accent : p.faint, width: 1.5),
                     ),
                   ),
               ],

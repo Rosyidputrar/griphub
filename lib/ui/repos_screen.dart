@@ -32,7 +32,9 @@ class _ReposScreenState extends State<ReposScreen> {
   Future<void> _open(RepoInfo repo) async {
     final path = await runWithLog<String>(
       context,
-      title: repo.cloned ? 'Opening ${repo.name}' : 'Cloning ${repo.fullName}',
+      title: repo.cloned
+          ? tr('Opening {name}').replaceAll('{name}', repo.name)
+          : tr('Cloning {name}').replaceAll('{name}', repo.fullName),
       task: (log, _) => it.clone(repo.fullName, onLine: log),
     );
     if (path == null || !mounted) return;

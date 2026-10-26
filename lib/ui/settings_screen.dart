@@ -124,7 +124,7 @@ class _InfoRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: text.labelMedium),
+          Text(tr(label), style: text.labelMedium),
           const SizedBox(height: 2),
           SelectableText(
             value,

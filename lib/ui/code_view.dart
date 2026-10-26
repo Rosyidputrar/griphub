@@ -254,7 +254,7 @@ class _CopyButtonState extends State<CopyButton> {
             ),
             if (widget.showLabel) ...[
               const SizedBox(width: 5),
-              Text(copied ? 'Copied' : 'Copy', style: TextStyle(fontSize: 11.5, color: color)),
+              Text(tr(copied ? 'Copied' : 'Copy'), style: TextStyle(fontSize: 11.5, color: color)),
             ],
           ],
         ),

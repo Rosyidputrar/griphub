@@ -269,7 +269,7 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('${tr('Allow')} ${a.toolName}?', style: text.titleSmall),
-                          Text(a.reason, style: text.bodySmall),
+                          Text(tr(a.reason), style: text.bodySmall),
                         ],
                       ),
                     ),

@@ -156,7 +156,8 @@ class _ModelTile extends StatelessWidget {
             tooltip: isFav ? tr('Remove from favorites') : tr('Add to favorites'),
             icon: Icon(LucideIcons.star, size: 18, color: isFav ? p.warning : p.muted),
           ),
-          if (selected) Icon(LucideIcons.check, size: 18, color: p.text),
+          // The check keeps its slot on every row, so the stars line up down the list.
+          SizedBox(width: 22, child: selected ? Icon(LucideIcons.check, size: 18, color: p.text) : null),
         ],
       ),
     );

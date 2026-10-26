@@ -528,7 +528,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
             Text(tr('Terminal')),
             if (s != null)
               Text(
-                s.linux ? 'Linux container' : s.cwd.replaceFirst(RegExp(r'^.*/files/home'), '~'),
+                s.linux ? tr('Linux container') : s.cwd.replaceFirst(RegExp(r'^.*/files/home'), '~'),
                 style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.muted),
               ),
           ],

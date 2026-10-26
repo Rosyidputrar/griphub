@@ -276,7 +276,11 @@ class _DbScreenState extends State<DbScreen> {
                 )
               : r.columns.isEmpty
               ? Center(
-                  child: Pill('${r.changes ?? 0} rows changed', color: p.success, icon: LucideIcons.check),
+                  child: Pill(
+                    tr('{n} rows changed').replaceAll('{n}', '${r.changes ?? 0}'),
+                    color: p.success,
+                    icon: LucideIcons.check,
+                  ),
                 )
               : _Grid(result: r),
         ),

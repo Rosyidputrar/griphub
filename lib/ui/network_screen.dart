@@ -105,7 +105,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
                           icon: SimpleIcons.cloudflare,
                           color: const Color(0xFFF38020),
                           title: tr('Cloudflare'),
-                          subtitle: '1.1.1.1 over HTTPS · recommended',
+                          subtitle: '1.1.1.1 · ${tr('over HTTPS')} · ${tr('recommended')}',
                           selected: s.dns == 'cloudflare' && !pickingCustom,
                           onTap: () {
                             setState(() => pickingCustom = false);
@@ -116,7 +116,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
                           icon: SimpleIcons.google,
                           color: const Color(0xFF4285F4),
                           title: tr('Google'),
-                          subtitle: '8.8.8.8 over HTTPS',
+                          subtitle: '8.8.8.8 · ${tr('over HTTPS')}',
                           selected: s.dns == 'google' && !pickingCustom,
                           onTap: () {
                             setState(() => pickingCustom = false);
@@ -379,7 +379,7 @@ class _DnsOption extends StatelessWidget {
           color: selected ? p.accent : null,
           border: selected ? null : Border.all(color: p.border, width: 2),
         ),
-        child: selected ? const Icon(LucideIcons.check, size: 13, color: Colors.white) : null,
+        child: selected ? Icon(LucideIcons.check, size: 13, color: p.onAccent) : null,
       ),
     );
   }

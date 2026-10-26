@@ -145,7 +145,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                               style: text.bodySmall?.copyWith(fontFamily: mono, color: p.text),
                             ),
                           ),
-                          Expanded(child: Text(meaning, style: text.bodySmall)),
+                          Expanded(child: Text(tr(meaning), style: text.bodySmall)),
                         ],
                       ),
                     ),
@@ -302,7 +302,7 @@ class _TemplateSheetState extends State<_TemplateSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'New template' : 'Edit template', style: text.titleLarge),
+            Text(tr(widget.existing == null ? 'New template' : 'Edit template'), style: text.titleLarge),
             const SizedBox(height: 16),
             TextField(
               controller: _name,

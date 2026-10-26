@@ -206,14 +206,22 @@ class _SearchScreenState extends State<SearchScreen> {
                     children: [Pill('$error', color: p.danger, icon: LucideIcons.circleAlert)],
                   )
                 : list == null || list.isEmpty
-                ? _Empty(message: list == null ? 'Search every file in ${_folder()}' : 'No matches')
+                ? _Empty(
+                    message: list == null
+                        ? tr('Search every file in {folder}').replaceAll('{folder}', _folder())
+                        : tr('No matches'),
+                  )
                 : ListView(
                     padding: const EdgeInsets.fromLTRB(0, 8, 0, 40),
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                         child: Text(
-                          truncated ? 'Showing first 500 matches' : '${list.length} matches in ${groups.length} files',
+                          truncated
+                              ? tr('Showing first 500 matches')
+                              : tr('{n} matches in {files} files')
+                                  .replaceAll('{n}', '${list.length}')
+                                  .replaceAll('{files}', '${groups.length}'),
                           style: text.bodySmall?.copyWith(color: truncated ? p.warning : p.muted),
                         ),
                       ),

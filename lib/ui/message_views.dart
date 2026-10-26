@@ -66,7 +66,7 @@ class UserBubble extends StatelessWidget {
 }
 
 class AssistantMessageView extends StatelessWidget {
-  const AssistantMessageView(this.entry, {super.key, required this.tools, this.cwd, this.live});
+  const AssistantMessageView(this.entry, {super.key, required this.tools, this.cwd, this.live, this.modelLabel});
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
 
@@ -75,6 +75,9 @@ class AssistantMessageView extends StatelessWidget {
 
   /// Fires as the agent streams; live previews re-render on it.
   final Listenable? live;
+
+  /// Display name for the model id saved with the reply.
+  final String Function(String id)? modelLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +112,10 @@ class AssistantMessageView extends StatelessWidget {
       for (final b in blocks)
         if (b.kind == BlockKind.text && b.text.trim().isNotEmpty) b.text.trim(),
     ].join('\n\n');
-    if (!entry.streaming && reply.isNotEmpty) children.add(_MessageFooter(text: reply, model: entry.model));
+    final model = entry.model;
+    if (!entry.streaming && reply.isNotEmpty) {
+      children.add(_MessageFooter(text: reply, model: model == null ? null : (modelLabel?.call(model) ?? model)));
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -214,7 +220,8 @@ class _MessageFooter extends StatelessWidget {
               model!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontFamily: mono, fontSize: 11, color: p.faint),
+              // The model's name, as in the composer chip, not a code-styled id.
+              style: TextStyle(fontSize: 11.5, color: p.faint),
             ),
           ),
       ],
@@ -325,7 +332,7 @@ class _ThinkingViewState extends State<ThinkingView> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(widget.live ? 'Thinking' : 'Thought process', style: label),
+                Text(tr(widget.live ? 'Thinking' : 'Thought process'), style: label),
                 const SizedBox(width: 4),
                 AnimatedRotation(
                   turns: open ? 0.25 : 0,
@@ -498,10 +505,11 @@ class _ToolCallViewState extends State<ToolCallView> {
                         foregroundColor: p.text,
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                        // From the theme: a bare TextStyle here drops the app font (Roboto on Android).
+                        textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(fontSize: 12),
                       ),
                       icon: const Icon(LucideIcons.play, size: 16),
-                      label: Text(writing ? 'Live' : 'Preview'),
+                      label: Text(tr(writing ? 'Live' : 'Preview')),
                     ),
                   Icon(open ? LucideIcons.chevronUp : LucideIcons.chevronDown, size: 18, color: p.faint),
                   const SizedBox(width: 4),
@@ -544,7 +552,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                   if (run != null && run.output.isNotEmpty) ...[
                     const SizedBox(height: 10),
                     _Section(
-                      label: status == ToolStatus.failed ? 'Error' : 'Output',
+                      label: tr(status == ToolStatus.failed ? 'Error' : 'Output'),
                       child: CodeBox(text: run.output.trimRight(), label: 'output', lineNumbers: false, maxHeight: 320),
                     ),
                   ],

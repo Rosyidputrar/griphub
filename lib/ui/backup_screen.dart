@@ -74,9 +74,11 @@ class _BackupScreenState extends State<BackupScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Restore backup?')),
-        content: const Text(
-          'Sessions, skills, templates and settings are overwritten with the backup\'s copies. '
-          'This cannot be undone.',
+        content: Text(
+          tr(
+            'Sessions, skills, templates and settings are overwritten with the backup\'s copies. '
+            'This cannot be undone.',
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
@@ -93,7 +95,10 @@ class _BackupScreenState extends State<BackupScreen> {
     try {
       final r = await agent.features.restoreBackup(path);
       _snack(
-        'Restored ${r.restored} ${r.restored == 1 ? 'file' : 'files'}${r.skipped > 0 ? ' · ${r.skipped} blocked ${r.skipped == 1 ? 'entry' : 'entries'} skipped' : ''}',
+        [
+          tr('Restored {n} files').replaceAll('{n}', '${r.restored}'),
+          if (r.skipped > 0) tr('{n} blocked entries skipped').replaceAll('{n}', '${r.skipped}'),
+        ].join(' · '),
       );
     } catch (e) {
       _snack('$e');
