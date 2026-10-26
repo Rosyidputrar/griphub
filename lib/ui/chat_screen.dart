@@ -436,14 +436,41 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// The line under the transcript while the agent works, or null when something on screen
+  /// already shows it: the first-token dots, text typing in, thinking streaming, an approval card.
+  String? _activity() {
+    if (!agent.busy || agent.features.approvals.isNotEmpty) return null;
+    final last = agent.entries.lastOrNull;
+    if (last is AssistantEntry) {
+      final blocks = last.orderedBlocks;
+      if (last.streaming && (blocks.isEmpty || blocks.last.kind != BlockKind.toolCall)) return null;
+      for (final b in blocks.reversed) {
+        if (b.kind != BlockKind.toolCall) continue;
+        final run = agent.tools[b.toolCallId];
+        // Arguments still streaming: the tool row says "preparing…" itself.
+        if (run == null && last.streaming) return null;
+        if (run?.status == ToolStatus.running) {
+          return tr('Running {tool}…').replaceAll('{tool}', b.toolName ?? 'tool');
+        }
+        break;
+      }
+    }
+    // Between steps: a tool finished, the model hasn't answered yet.
+    return tr('Thinking…');
+  }
+
   Widget _transcript() {
     final entries = agent.entries;
     final retry = agent.endsInError;
+    final activity = _activity();
     return ListView.builder(
       controller: scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: entries.length + (retry ? 1 : 0),
+      itemCount: entries.length + (retry ? 1 : 0) + (activity != null ? 1 : 0),
       itemBuilder: (context, i) {
+        if (activity != null && i == entries.length) {
+          return Padding(padding: const EdgeInsets.only(top: 14), child: AgentActivity(label: activity));
+        }
         if (i == entries.length) {
           return Padding(
             padding: const EdgeInsets.only(top: 10),

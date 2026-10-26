@@ -336,7 +336,7 @@ class _ThinkingViewState extends State<ThinkingView> {
                 const SizedBox(width: 4),
                 AnimatedRotation(
                   turns: open ? 0.25 : 0,
-                  duration: const Duration(milliseconds: 150),
+                  duration: Motion.of(context, Motion.fast),
                   child: Icon(LucideIcons.chevronRight, size: 16, color: p.muted),
                 ),
               ],
@@ -344,8 +344,8 @@ class _ThinkingViewState extends State<ThinkingView> {
           ),
         ),
         AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
+          duration: Motion.of(context, Motion.normal),
+          curve: Motion.curve,
           alignment: Alignment.topLeft,
           child: open
               ? Container(
@@ -511,7 +511,12 @@ class _ToolCallViewState extends State<ToolCallView> {
                       icon: const Icon(LucideIcons.play, size: 16),
                       label: Text(tr(writing ? 'Live' : 'Preview')),
                     ),
-                  Icon(open ? LucideIcons.chevronUp : LucideIcons.chevronDown, size: 18, color: p.faint),
+                  AnimatedRotation(
+                    turns: open ? 0.5 : 0,
+                    duration: Motion.of(context, Motion.fast),
+                    curve: Motion.curve,
+                    child: Icon(LucideIcons.chevronDown, size: 18, color: p.faint),
+                  ),
                   const SizedBox(width: 4),
                 ],
               ),
@@ -528,38 +533,61 @@ class _ToolCallViewState extends State<ToolCallView> {
                 followTail: true,
               ),
             ),
-          if (open) ...[
-            Divider(height: 1, color: p.border),
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (b.toolName == 'write' && liveText != null)
-                    _Section(
-                      label: tr('Content'),
-                      child: CodeBox(text: liveText, label: path?.split('/').last, language: ext, maxHeight: 320),
-                    )
-                  else
-                    _Section(
-                      label: tr('Input'),
-                      child: CodeBox(
-                        text: const JsonEncoder.withIndent('  ').convert(args ?? {}),
-                        label: 'json',
-                        maxHeight: 220,
-                      ),
+          // Opens and closes instead of jumping; the header stays put.
+          ClipRect(
+            child: AnimatedSize(
+              duration: Motion.of(context, Motion.normal),
+              curve: Motion.curve,
+              alignment: Alignment.topCenter,
+              child: !open
+                  ? const SizedBox(width: double.infinity)
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Divider(height: 1, color: p.border),
+                        Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (b.toolName == 'write' && liveText != null)
+                                _Section(
+                                  label: tr('Content'),
+                                  child: CodeBox(
+                                    text: liveText,
+                                    label: path?.split('/').last,
+                                    language: ext,
+                                    maxHeight: 320,
+                                  ),
+                                )
+                              else
+                                _Section(
+                                  label: tr('Input'),
+                                  child: CodeBox(
+                                    text: const JsonEncoder.withIndent('  ').convert(args ?? {}),
+                                    label: 'json',
+                                    maxHeight: 220,
+                                  ),
+                                ),
+                              if (run != null && run.output.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                _Section(
+                                  label: tr(status == ToolStatus.failed ? 'Error' : 'Output'),
+                                  child: CodeBox(
+                                    text: run.output.trimRight(),
+                                    label: 'output',
+                                    lineNumbers: false,
+                                    maxHeight: 320,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  if (run != null && run.output.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    _Section(
-                      label: tr(status == ToolStatus.failed ? 'Error' : 'Output'),
-                      child: CodeBox(text: run.output.trimRight(), label: 'output', lineNumbers: false, maxHeight: 320),
-                    ),
-                  ],
-                ],
-              ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -615,15 +643,37 @@ class _ErrorNote extends StatelessWidget {
   }
 }
 
-class _Pending extends StatefulWidget {
+class _Pending extends StatelessWidget {
   const _Pending();
 
   @override
-  State<_Pending> createState() => _PendingState();
+  Widget build(BuildContext context) => const AgentActivity();
 }
 
-class _PendingState extends State<_Pending> with SingleTickerProviderStateMixin {
-  late final controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat();
+/// What the agent is doing when nothing else on screen moves: pulsing dots, and a shimmering
+/// [label] ("Thinking…", "Running bash…") that cross-fades as the step changes.
+class AgentActivity extends StatefulWidget {
+  const AgentActivity({super.key, this.label});
+  final String? label;
+
+  @override
+  State<AgentActivity> createState() => _AgentActivityState();
+}
+
+class _AgentActivityState extends State<AgentActivity> with SingleTickerProviderStateMixin {
+  late final controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Still dots when animations are off; the label alone says what is happening.
+    if (Motion.reduced(context)) {
+      controller.stop();
+      controller.value = 0.5;
+    } else if (!controller.isAnimating) {
+      controller.repeat();
+    }
+  }
 
   @override
   void dispose() {
@@ -637,6 +687,8 @@ class _PendingState extends State<_Pending> with SingleTickerProviderStateMixin 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final label = widget.label;
+    final style = Theme.of(context).textTheme.labelMedium?.copyWith(color: p.muted);
     return Align(
       alignment: Alignment.centerLeft,
       child: AnimatedBuilder(
@@ -654,6 +706,29 @@ class _PendingState extends State<_Pending> with SingleTickerProviderStateMixin 
                   color: p.muted.withValues(alpha: _pulse(controller.value - i * 0.18)),
                 ),
               ),
+            if (label != null) ...[
+              const SizedBox(width: 5),
+              Flexible(
+                child: AnimatedSwitcher(
+                  duration: Motion.of(context, Motion.normal),
+                  switchInCurve: Motion.curve,
+                  layoutBuilder: (current, previous) =>
+                      Stack(alignment: Alignment.centerLeft, children: [...previous, ?current]),
+                  child: ShaderMask(
+                    key: ValueKey(label),
+                    blendMode: BlendMode.srcIn,
+                    // A highlight sweeping across the text, in step with the dots.
+                    shaderCallback: (rect) => LinearGradient(
+                      colors: [p.muted, p.text, p.muted],
+                      stops: const [0, 0.5, 1],
+                      begin: Alignment(-2.5 + 4 * controller.value, 0),
+                      end: Alignment(-0.5 + 4 * controller.value, 0),
+                    ).createShader(rect),
+                    child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
