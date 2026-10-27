@@ -7,6 +7,8 @@ import 'features.dart';
 import 'integrations.dart';
 import 'models.dart';
 import 'sent_attachments.dart';
+import 'subagent_notifications.dart';
+import 'subagents.dart';
 import 'todos.dart';
 
 enum BootStatus { starting, ready, failed }
@@ -45,6 +47,78 @@ class AgentController extends ChangeNotifier {
 
   final entries = <ChatEntry>[];
   final tools = <String, ToolRun>{};
+
+  /// Live subagents, mirrored from the host's subagent_* records. They are
+  /// never transcript entries: the card list is rendered from here.
+  final subagentStore = SubagentStore();
+
+  late final subagentNotifier = SubagentNotifier(notify: client.notify, cancel: client.cancelNotification);
+
+  /// Whether [s] belongs to the open chat (its card is already visible).
+  bool _subagentIsOpen(SubagentState s) => s.parentSessionFile == sessionFile || s.parentSessionFile == sessionId;
+
+  /// Drives notifications from a subagent record. Only subagents of other
+  /// chats notify; the open chat's card already shows everything.
+  void _syncSubagentNotifications(Map<String, dynamic> record) {
+    final elsewhere = subagentsElsewhere;
+    switch (record['type']) {
+      // Membership changes only: tool events stream far too often to
+      // re-post a notification for, and they never change the set.
+      case 'subagent_started' || 'subagent_status' || 'subagent_queued':
+        unawaited(subagentNotifier.syncRunning(elsewhere));
+      case 'subagent_finished':
+        final s = subagentStore[(record['subagent'] as Map)['id'] as String? ?? ''];
+        unawaited(subagentNotifier.syncRunning(elsewhere));
+        if (s != null && !_subagentIsOpen(s)) {
+          final settings = integrations.settings;
+          unawaited(
+            subagentNotifier.notifyFinished(
+              s,
+              notifyDone: settings?.subagentNotifyDone ?? true,
+              notifyFailed: settings?.subagentNotifyFailed ?? true,
+            ),
+          );
+        }
+      case 'subagent_approval_request':
+        final s = subagentStore[record['subagentId'] as String? ?? ''];
+        if (s != null && s.approval != null && !_subagentIsOpen(s)) {
+          unawaited(
+            subagentNotifier.notifyApproval(
+              s,
+              s.approval!,
+              enabled: integrations.settings?.subagentNotifyApproval ?? true,
+            ),
+          );
+        }
+      case 'subagent_approval_dismiss':
+        unawaited(subagentNotifier.cancelApproval(record['approvalId'] as String? ?? ''));
+    }
+  }
+
+  /// Subagents of the open chat, oldest first.
+  List<SubagentState> get subagentsForCurrent => subagentStore.forParent(file: sessionFile, id: sessionId);
+
+  /// Active subagents of other chats (for the cross-chat banner).
+  List<SubagentState> get subagentsElsewhere => subagentStore.runningElsewhere(file: sessionFile, id: sessionId);
+
+  /// Stops a subagent gracefully ([force] aborts it immediately instead).
+  Future<void> stopSubagent(String id, {bool force = false}) =>
+      client.call('subagent_stop', {'subagentId': id, 'force': force});
+
+  /// Queues a message for a running subagent; it is sent at the next safe boundary.
+  Future<void> queueSubagentMessage(String id, String text) =>
+      client.call('subagent_queue', {'subagentId': id, 'text': text});
+
+  Future<void> removeQueuedSubagentMessage(String id, String queueId) =>
+      client.call('subagent_queue_remove', {'subagentId': id, 'queueId': queueId});
+
+  Future<void> moveQueuedSubagentMessage(String id, String queueId, String direction) =>
+      client.call('subagent_queue_move', {'subagentId': id, 'queueId': queueId, 'direction': direction});
+
+  Future<void> replySubagentApproval(String id, String approvalId, bool allow) => client.call(
+    'subagent_approval_reply',
+    {'subagentId': id, 'approvalId': approvalId, 'allow': allow},
+  );
 
   /// Plans the user closed (todo_write call ids); kept for the app's lifetime.
   final _dismissedPlans = <String>{};
@@ -377,6 +451,16 @@ class AgentController extends ChangeNotifier {
     switch (record['type']) {
       case 'event':
         _onEvent((record['event'] as Map).cast<String, dynamic>());
+      case 'subagent_started' ||
+          'subagent_finished' ||
+          'subagent_event' ||
+          'subagent_status' ||
+          'subagent_queued' ||
+          'subagent_approval_request' ||
+          'subagent_approval_dismiss':
+        subagentStore.applyRecord(record);
+        _syncSubagentNotifications(record);
+        _scheduleNotify();
       case 'auth_prompt' || 'auth_event' || 'auth_dismiss':
         authRecords.add(record);
       case 'notice':

@@ -150,6 +150,14 @@ class AppSettings {
   bool get tinyfishSearch => json['tinyfishSearch'] != false;
   String get approvalMode => json['approvalMode'] as String? ?? 'ask_risky';
 
+  /// Subagent limits (global for all subagents); credit 0 = no limit.
+  double get subagentCreditLimit => (json['subagentCreditLimit'] as num?)?.toDouble() ?? 50;
+  double get subagentMinutesLimit => (json['subagentMinutesLimit'] as num?)?.toDouble() ?? 30;
+  String get subagentApprovalMode => json['subagentApprovalMode'] as String? ?? approvalMode;
+  bool get subagentNotifyDone => json['subagentNotifyDone'] != false;
+  bool get subagentNotifyFailed => json['subagentNotifyFailed'] != false;
+  bool get subagentNotifyApproval => json['subagentNotifyApproval'] != false;
+
   /// GitHub OAuth App Client ID for the device flow, entered in Settings.
   /// Null means GitHub login is not configured (no fallback).
   String? get githubClientId => json['githubClientId'] as String?;
