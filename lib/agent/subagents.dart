@@ -105,7 +105,27 @@ class SubagentState {
   final List<QueuedSubagentMessage> queue = [];
   int inputTokens = 0;
   int outputTokens = 0;
+  int cacheReadTokens = 0;
+  int cacheWriteTokens = 0;
+
+  /// Estimated GripHub credits, summed per model request by the router's rule
+  /// (rate × all tokens incl. cache, or the model's floor when higher).
   double? credits;
+
+  /// Model requests so far, and how many were billed at the model's minimum.
+  int requests = 0;
+  int flooredRequests = 0;
+
+  /// The model doing the work, its name, and the thinking (reasoning) level.
+  String? model;
+  String? modelName;
+  String? thinkingLevel;
+
+  /// The model's rate (credits per 1M tokens).
+  double? rate;
+
+  /// All tokens billed: input, output and cache.
+  int get totalTokens => inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens;
   String? report;
   String? error;
   String? stopReason;
@@ -169,9 +189,7 @@ class SubagentState {
     currentTool = r['currentTool'] as String?;
     currentArgs = r['currentArgs'] as String?;
     currentActivity = r['currentActivity'] as String?;
-    inputTokens = (r['inputTokens'] as num?)?.toInt() ?? inputTokens;
-    outputTokens = (r['outputTokens'] as num?)?.toInt() ?? outputTokens;
-    credits = (r['credits'] as num?)?.toDouble();
+    _applyCost(r, replace: true);
     report = r['report'] as String? ?? report;
     error = r['error'] as String? ?? error;
     stopReason = r['stopReason'] as String? ?? stopReason;
@@ -267,9 +285,25 @@ class SubagentState {
     currentTool = r['currentTool'] as String?;
     currentArgs = r['currentArgs'] as String?;
     currentActivity = r['currentActivity'] as String?;
-    inputTokens = (r['inputTokens'] as num?)?.toInt() ?? inputTokens;
-    outputTokens = (r['outputTokens'] as num?)?.toInt() ?? outputTokens;
-    credits = (r['credits'] as num?)?.toDouble() ?? credits;
+    _applyCost(r, replace: false);
+  }
+
+  /// Tokens, cost, model and thinking level from a full record ([replace]:
+  /// a missing cost means unknown) or a status update (missing keeps the last).
+  void _applyCost(Map<String, dynamic> r, {required bool replace}) {
+    int i(String k, int old) => (r[k] as num?)?.toInt() ?? old;
+    inputTokens = i('inputTokens', inputTokens);
+    outputTokens = i('outputTokens', outputTokens);
+    cacheReadTokens = i('cacheReadTokens', cacheReadTokens);
+    cacheWriteTokens = i('cacheWriteTokens', cacheWriteTokens);
+    requests = i('requests', requests);
+    flooredRequests = i('flooredRequests', flooredRequests);
+    final c = (r['credits'] as num?)?.toDouble();
+    credits = replace ? c : (c ?? credits);
+    model = r['model'] as String? ?? model;
+    modelName = r['modelName'] as String? ?? modelName;
+    thinkingLevel = r['thinkingLevel'] as String? ?? thinkingLevel;
+    rate = (r['rate'] as num?)?.toDouble() ?? rate;
   }
 }
 

@@ -38,7 +38,7 @@ import type {
 import { Type } from "typebox";
 
 import { Guard, type ApprovalMode } from "./guard.js";
-import { estimatedCredits } from "./pricing.js";
+import { rateForModel, requestEstimate, usageOf } from "./pricing.js";
 
 /** Read-only work: research, read files, search the web. Never changes anything. */
 export const READ_TOOLS = ["read", "grep", "find", "ls", "web_search", "web_fetch"];
@@ -111,8 +111,24 @@ export interface SubagentRecord {
 	queue: QueuedMessage[];
 	inputTokens: number;
 	outputTokens: number;
-	/** Estimated spend in GripHub credits, or null when the model has no known rate. */
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	/**
+	 * Estimated spend in GripHub credits by the router's rule, summed per model
+	 * request as each one ends (rate × all tokens incl. cache, or the model's
+	 * per-request floor when higher); null when the model has no known rate.
+	 */
 	credits: number | null;
+	/** Model requests made so far, and how many of them were billed at the floor. */
+	requests: number;
+	flooredRequests: number;
+	/** The model doing the work ("provider/id" split), its display name, and its thinking level. */
+	provider?: string;
+	model?: string;
+	modelName?: string;
+	thinkingLevel?: string;
+	/** The model's rate, for the detail view (credits per 1M tokens, or per image). */
+	rate?: number | null;
 	/** Final assistant text (full report when done, partial report when stopped). */
 	report?: string;
 	error?: string;
@@ -134,7 +150,7 @@ export interface SubagentParent {
 	sessionFile: string;
 	title: string;
 	cwd: string;
-	/** "provider/model" of the parent's model, for credit estimates; "" when unknown. */
+	/** The parent's model id, for credit estimates; "" when unknown. */
 	modelId: string;
 }
 
@@ -355,7 +371,12 @@ export class SubagentManager {
 			queue: [],
 			inputTokens: 0,
 			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
 			credits: null,
+			requests: 0,
+			flooredRequests: 0,
+			...(parent.modelId ? { model: parent.modelId } : {}),
 		};
 		// Declared before the guard so its send closure can reference it.
 		let rt!: Runtime;
@@ -520,6 +541,18 @@ export class SubagentManager {
 				parent: rt.parent,
 			});
 			rt.session = session;
+			// The model and thinking level actually in use (the parent's, unless unavailable).
+			const m = (session as any).model;
+			if (m?.id) {
+				rec.provider = m.provider;
+				rec.model = m.id;
+				rec.modelName = m.name ?? m.id;
+				const r = rateForModel(m.id);
+				rec.rate = r ? r.credits : null;
+			}
+			const level = (session as any).thinkingLevel;
+			if (typeof level === "string") rec.thinkingLevel = level;
+			this.emitStatus(rt);
 			rt.unsubscribe = session.subscribe((event) => this.onEvent(rt, event));
 			session.prompt(`${rt.brief}${SUBAGENT_SUFFIX}`).catch((e: unknown) => {
 				this.finish(rt, "failed", String((e as any)?.message ?? e));
@@ -578,8 +611,9 @@ export class SubagentManager {
 			}
 			case "message_end": {
 				const m = e.message;
-				if (m?.role === "assistant" && m.stopReason === "error") {
-					rt.lastError = String(m.errorMessage ?? "Model error");
+				if (m?.role === "assistant") {
+					if (m.stopReason === "error") rt.lastError = String(m.errorMessage ?? "Model error");
+					this.chargeRequest(rt, m);
 				}
 				break;
 			}
@@ -627,6 +661,34 @@ export class SubagentManager {
 		return null;
 	}
 
+	/**
+	 * Adds one finished model request to the running cost, the router's way:
+	 * max(floor, rate × all tokens), nothing for a failed request. Called per
+	 * request, so the card's credits move with every step instead of at the end.
+	 */
+	private chargeRequest(rt: Runtime, m: any) {
+		const rec = rt.record;
+		const model = String(m.model ?? rec.model ?? rt.parent.modelId ?? "");
+		if (!model || !m.usage) return;
+		// A failed request with no output is not billed by the router.
+		const ok = !(m.stopReason === "error" && !(m.usage.output > 0));
+		const u = usageOf(m.usage);
+		const cost = requestEstimate(model, u, ok);
+		rec.requests += 1;
+		// One request of unknown price makes the total unknown (never a made-up number).
+		const unknown = cost === null || (rec.requests > 1 && rec.credits === null);
+		rec.credits = unknown ? null : (rec.credits ?? 0) + cost;
+		if (ok && cost !== null) {
+			const rate = rateForModel(model);
+			const tokens = u.input + u.output + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+			if (rate && !rate.perImage && cost > (rate.credits * tokens) / 1_000_000 + 1e-9) rec.flooredRequests += 1;
+		}
+		rt.cachedCredits = rec.credits;
+		this.refreshUsage(rt);
+		this.emitStatus(rt);
+	}
+
+	/** Token totals from the session (credits are summed per request in chargeRequest). */
 	private refreshUsage(rt: Runtime) {
 		const s = rt.session;
 		if (!s) return;
@@ -634,9 +696,8 @@ export class SubagentManager {
 			const stats = s.getSessionStats();
 			rt.record.inputTokens = stats.tokens.input;
 			rt.record.outputTokens = stats.tokens.output;
-			const modelId = (s as any).model?.id ?? rt.parent.modelId;
-			rt.record.credits = modelId ? (estimatedCredits(modelId, stats.tokens.input, stats.tokens.output) ?? null) : null;
-			rt.cachedCredits = rt.record.credits;
+			rt.record.cacheReadTokens = stats.tokens.cacheRead ?? 0;
+			rt.record.cacheWriteTokens = stats.tokens.cacheWrite ?? 0;
 		} catch {
 			// Stats are best-effort; a failure here must not kill the run.
 		}
@@ -702,7 +763,16 @@ export class SubagentManager {
 			queueCount: rec.queue.length,
 			inputTokens: rec.inputTokens,
 			outputTokens: rec.outputTokens,
+			cacheReadTokens: rec.cacheReadTokens,
+			cacheWriteTokens: rec.cacheWriteTokens,
 			credits: rec.credits,
+			requests: rec.requests,
+			flooredRequests: rec.flooredRequests,
+			provider: rec.provider ?? null,
+			model: rec.model ?? null,
+			modelName: rec.modelName ?? null,
+			thinkingLevel: rec.thinkingLevel ?? null,
+			rate: rec.rate ?? null,
 		});
 	}
 }

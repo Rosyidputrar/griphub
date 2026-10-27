@@ -182,7 +182,11 @@ export interface UsageRow {
 	input: number;
 	output: number;
 	cacheRead: number;
+	cacheWrite: number;
+	/** pi's own cost (other providers that report one). */
 	cost: number;
+	/** Estimated GripHub credits by the router's rule, summed per request; null when the price is unknown. */
+	credits: number | null;
 	requests: number;
 }
 
@@ -196,9 +200,37 @@ export function wibDay(ts: number): string {
 	}).format(new Date(ts));
 }
 
-export function usageSummary(sessionsDir: string, days = 30) {
-	const since = Date.now() - days * 86400_000;
+/**
+ * Usage per day and model from the chat files, for the chart and as the
+ * offline fallback. Every billed request counts: assistant replies, and the
+ * requests pi makes on its own (cache warming, compaction and branch
+ * summaries), which used to be skipped. Each request is priced on its own,
+ * so the router's per-request floor applies.
+ */
+export function usageSummary(
+	sessionsDir: string,
+	days = 30,
+	estimate: (model: string, u: any) => number | null = () => null,
+	/** Only requests at or after this instant (ms). */
+	fromTs?: number,
+) {
+	const since = Math.max(Date.now() - days * 86400_000, fromTs ?? 0);
 	const rows = new Map<string, UsageRow>();
+	const add = (ts: number, provider: string, model: string, u: any) => {
+		if (!u || ts < since) return;
+		const day = wibDay(ts);
+		const key = `${day}|${provider}|${model}`;
+		const r = rows.get(key) ?? { day, provider, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, credits: 0, requests: 0 };
+		r.input += u.input ?? 0;
+		r.output += u.output ?? 0;
+		r.cacheRead += u.cacheRead ?? 0;
+		r.cacheWrite += u.cacheWrite ?? 0;
+		r.cost += u.cost?.total ?? 0;
+		const c = estimate(model, u);
+		r.credits = c === null || r.credits === null ? null : r.credits + c;
+		r.requests += 1;
+		rows.set(key, r);
+	};
 	const walk = (dir: string) => {
 		if (!existsSync(dir)) return;
 		for (const name of readdirSync(dir)) {
@@ -206,23 +238,23 @@ export function usageSummary(sessionsDir: string, days = 30) {
 			const st = statSync(p);
 			if (st.isDirectory()) walk(p);
 			else if (name.endsWith(".jsonl") && st.mtimeMs >= since) {
+				let last: { provider: string; model: string } | undefined;
 				for (const line of readFileSync(p, "utf8").split("\n")) {
 					if (!line.includes('"usage"')) continue;
 					try {
 						const e = JSON.parse(line);
-						const m = e.message;
-						if (m?.role !== "assistant" || !m.usage) continue;
-						const ts = typeof m.timestamp === "number" ? m.timestamp : Date.parse(e.timestamp);
-						if (ts < since) continue;
-						const day = wibDay(ts);
-						const key = `${day}|${m.provider}|${m.model}`;
-						const r = rows.get(key) ?? { day, provider: m.provider, model: m.model, input: 0, output: 0, cacheRead: 0, cost: 0, requests: 0 };
-						r.input += m.usage.input ?? 0;
-						r.output += m.usage.output ?? 0;
-						r.cacheRead += m.usage.cacheRead ?? 0;
-						r.cost += m.usage.cost?.total ?? 0;
-						r.requests += 1;
-						rows.set(key, r);
+						const ts = typeof e.message?.timestamp === "number" ? e.message.timestamp : Date.parse(e.timestamp);
+						if (e.type === "message" && e.message?.role === "assistant" && e.message.usage) {
+							const m = e.message;
+							// Failed requests are not billed by the router.
+							if (m.stopReason === "error" && !(m.usage.output > 0)) continue;
+							last = { provider: m.provider, model: m.model };
+							add(ts, m.provider, m.model, m.usage);
+						} else if (e.type === "usage" && e.usage && e.model) {
+							add(ts, e.provider, e.model, e.usage);
+						} else if ((e.type === "compaction" || e.type === "branch_summary") && e.usage && last) {
+							add(ts, last.provider, last.model, e.usage);
+						}
 					} catch {}
 				}
 			}

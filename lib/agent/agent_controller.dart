@@ -552,6 +552,9 @@ class AgentController extends ChangeNotifier {
         _scheduleNotify();
       case 'auth_prompt' || 'auth_event' || 'auth_dismiss':
         authRecords.add(record);
+      // GripHub's model list changed on its daily refresh: reload the picker.
+      case 'models_changed':
+        unawaited(refreshProviders().catchError((_) {}));
       case 'notice':
         // Startup hints ("no models") are covered by the empty state; the rest
         // (model fallback, triggers) are worth showing.

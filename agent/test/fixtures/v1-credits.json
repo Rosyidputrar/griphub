@@ -1,0 +1,153 @@
+{
+ "object": "credits",
+ "mode": "credits",
+ "key": {
+  "name": "Test key",
+  "creditLimit": null,
+  "creditsUsed": 1087.812873
+ },
+ "balance": {
+  "remaining": 21.573843,
+  "used": 1087.812873,
+  "limit": 1109.386716
+ },
+ "account": {
+  "creditsBalance": 21.573843,
+  "creditsGranted": 1109.386716,
+  "creditsUsed": 1087.812873,
+  "suspended": false,
+  "suspendedUntil": null,
+  "suspensions": [],
+  "batches": [
+   {
+    "credits": 100,
+    "receivedAt": "2026-10-18T15:00:49.053Z",
+    "expiresAt": "2026-11-17T15:00:48.857Z",
+    "reason": "gopay_qris_topup"
+   },
+   {
+    "credits": 50,
+    "receivedAt": "2026-10-17T15:11:17.450Z",
+    "expiresAt": "2026-11-16T15:11:17.414Z",
+    "reason": "autogopay_shopeepay_topup"
+   },
+   {
+    "credits": 50,
+    "receivedAt": "2026-10-14T19:09:00.474Z",
+    "expiresAt": "2026-11-13T19:09:00.445Z",
+    "reason": "autogopay_shopeepay_topup"
+   },
+   {
+    "credits": 50,
+    "receivedAt": "2026-10-10T15:43:34.218Z",
+    "expiresAt": "2026-11-09T15:43:34.194Z",
+    "reason": "autogopay_shopeepay_topup"
+   },
+   {
+    "credits": 6.553381,
+    "receivedAt": "2026-09-29T18:26:35.250Z",
+    "expiresAt": "2026-10-29T18:26:35.250Z",
+    "reason": "billing_correction_cache_double_count"
+   }
+  ]
+ },
+ "usage": {
+  "since": null,
+  "requests": 12544,
+  "inputTokens": 41190905,
+  "outputTokens": 6558507,
+  "cacheReadTokens": 514997655,
+  "totalTokens": 620200875,
+  "lastUsedAt": "2026-10-27T07:51:33.583Z"
+ },
+ "byModel": [
+  {
+   "model": "claude-sonnet-5",
+   "creditsUsed": 658.68802
+  },
+  {
+   "model": "deepseek-v4-pro",
+   "creditsUsed": 118.400857
+  },
+  {
+   "model": "claude-sonnet-5-alt",
+   "creditsUsed": 76.310172
+  },
+  {
+   "model": "gpt-5.3-codex",
+   "creditsUsed": 58.623352
+  },
+  {
+   "model": "claude-haiku-4.5",
+   "creditsUsed": 55.113522
+  },
+  {
+   "model": "claude-opus-5.5",
+   "creditsUsed": 49.2123
+  },
+  {
+   "model": "claude-sonnet-5.5",
+   "creditsUsed": 48.760588
+  },
+  {
+   "model": "glm-5.3-flash",
+   "creditsUsed": 5.859664
+  },
+  {
+   "model": "claude-fable-5-alt",
+   "creditsUsed": 5.290448
+  },
+  {
+   "model": "deepseek-v4.1-flash",
+   "creditsUsed": 4.125995
+  },
+  {
+   "model": "gemini-3.1-flash-image",
+   "creditsUsed": 2.5
+  },
+  {
+   "model": "deepseek-v4.1-flash-sg",
+   "creditsUsed": 1.716242
+  },
+  {
+   "model": "qwen-3.8-flash",
+   "creditsUsed": 0.840509
+  },
+  {
+   "model": "claude-haiku-5.5",
+   "creditsUsed": 0.638754
+  },
+  {
+   "model": "gpt-5.6-sol",
+   "creditsUsed": 0.6
+  },
+  {
+   "model": "claude-fable-5",
+   "creditsUsed": 0.5
+  },
+  {
+   "model": "gpt-5.6-luna",
+   "creditsUsed": 0.44245
+  },
+  {
+   "model": "muse-wonder-1.0",
+   "creditsUsed": 0.15
+  },
+  {
+   "model": "deepseek-v4-flash",
+   "creditsUsed": 0.01
+  },
+  {
+   "model": "gemini-3.8-flash",
+   "creditsUsed": 0.01
+  },
+  {
+   "model": "hy3",
+   "creditsUsed": 0.01
+  },
+  {
+   "model": "kimi-k2.6",
+   "creditsUsed": 0.01
+  }
+ ]
+}

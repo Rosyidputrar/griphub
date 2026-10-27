@@ -350,6 +350,10 @@ export async function fetchModels(api: ProviderApi, baseUrl: string, apiKey: str
 		}
 		const id = typeof m === "string" ? m : String(m.id ?? m.name ?? "");
 		if (!id) continue;
+		// Image (and other non-chat) models are not chat models: pi would offer
+		// them in the model picker and the chat would fail. GripHub marks them
+		// with kind; listImageModels returns them for the image screen.
+		if (typeof m === "object" && isNonChat(m)) continue;
 		if (typeof m === "string") {
 			models.push({ id });
 			continue;
@@ -358,6 +362,25 @@ export async function fetchModels(api: ProviderApi, baseUrl: string, apiKey: str
 	}
 	if (!models.length) throw new Error("The endpoint returned no models");
 	return models.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function isNonChat(m: any) {
+	const kind = typeof m?.kind === "string" ? m.kind.toLowerCase() : "";
+	return kind === "image" || kind === "video" || kind === "embedding" || kind === "audio";
+}
+
+/** The endpoint's image models (`kind: "image"` on GripHub), id and name. */
+export async function listImageModels(baseUrl: string, apiKey: string): Promise<{ id: string; name: string }[]> {
+	const res = await fetch(`${cleanUrl(baseUrl)}/models`, {
+		headers: { accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+		signal: AbortSignal.timeout(20_000),
+	});
+	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+	const json: any = await res.json();
+	const items: any[] = Array.isArray(json) ? json : (json.data ?? json.models ?? []);
+	return items
+		.filter((m) => m && typeof m === "object" && String(m.kind ?? "").toLowerCase() === "image" && m.id)
+		.map((m) => ({ id: String(m.id), name: String(m.name ?? m.id) }));
 }
 
 /** Generates an image through an OpenAI-compatible Images API (`POST …/images/generations`). */

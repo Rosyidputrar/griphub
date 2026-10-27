@@ -5,7 +5,9 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import '../agent/pricing.dart';
+import '../agent/router_account.dart';
 import 'kit.dart';
+import 'subagent_card.dart' show thinkingLabel;
 import 'i18n.dart';
 import 'theme.dart';
 
@@ -41,15 +43,24 @@ String _rp(num v) {
 }
 
 /// Local date in short form, months in the app's language (30 Okt 2026 / 30 Oct 2026).
-String _dateId(String iso) {
+String _dateId(DateTime t) {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthsId = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
-  final d = DateTime.parse(iso).toLocal();
+  final d = t.toLocal();
   return '${d.day} ${(Appearance.instance.language == 'id' ? monthsId : months)[d.month - 1]} ${d.year}';
 }
 
-/// Token and cost usage across sessions, per day and per model, plus the
-/// daily budget that stops runaway spend.
+/// Time of day, 24 h (08.29 / 08:29).
+String _clock(DateTime t) {
+  final d = t.toLocal();
+  final sep = Appearance.instance.language == 'id' ? '.' : ':';
+  return '${d.hour.toString().padLeft(2, '0')}$sep${d.minute.toString().padLeft(2, '0')}';
+}
+
+/// GripHub credit and usage. The account card, today's spend and the
+/// per-model and per-request lists are the router's own figures (what was
+/// charged); the per-day chart is estimated from this phone's chats (the
+/// router has no per-day history), and says so.
 class UsageScreen extends StatefulWidget {
   const UsageScreen({super.key, required this.agent});
   final AgentController agent;
@@ -63,16 +74,19 @@ class _UsageScreenState extends State<UsageScreen> {
   List<UsageRow>? _rows;
   Map<String, dynamic>? _session;
   Object? _error;
-  Map<String, dynamic>? _credits;
-  Object? _creditsError;
+  RouterAccount? _account;
+  Object? _accountError;
+  bool _loadingAccount = false;
+  bool _allRequests = false;
 
   AgentController get agent => widget.agent;
 
   @override
   void initState() {
     super.initState();
+    _account = agent.integrations.router;
     _load();
-    _loadCredits();
+    _loadAccount();
     agent.features.sessionStats().then((s) {
       if (mounted) setState(() => _session = s);
     }, onError: (_) {});
@@ -91,13 +105,18 @@ class _UsageScreenState extends State<UsageScreen> {
     }
   }
 
-  Future<void> _loadCredits() async {
-    setState(() => _creditsError = null);
+  Future<void> _loadAccount({bool force = false}) async {
+    setState(() {
+      _accountError = null;
+      _loadingAccount = true;
+    });
     try {
-      final c = await agent.integrations.griphubCredits();
-      if (mounted) setState(() => _credits = c);
+      final a = await agent.integrations.routerAccount(force: force);
+      if (mounted) setState(() => _account = a);
     } catch (e) {
-      if (mounted) setState(() => _creditsError = e);
+      if (mounted) setState(() => _accountError = e);
+    } finally {
+      if (mounted) setState(() => _loadingAccount = false);
     }
   }
 
@@ -114,115 +133,63 @@ class _UsageScreenState extends State<UsageScreen> {
     }
   }
 
-  Widget _creditCard(BuildContext context) {
-    final p = context.palette;
-    final text = Theme.of(context).textTheme;
-    if (_creditsError != null) {
-      return SurfaceCard(child: Text('$_creditsError', style: text.bodySmall?.copyWith(color: p.danger)));
-    }
-    final c = _credits;
-    if (c == null) {
-      return const SurfaceCard(
-        child: Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))),
-      );
-    }
-    final remaining = _num(c['remaining']);
-    final used = _num(c['used']);
-    final limit = _num(c['limit']);
-    final suspended = c['suspended'] == true;
-    final suspendedUntil = c['suspendedUntil'] as String?;
-    final nearest = c['nearestExpiry'] as Map?;
-    final top = (c['topModels'] as List? ?? const []).cast<Map>();
-    final usedFraction = limit > 0 ? (used / limit).toDouble() : 0.0;
-    return SurfaceCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              IconTile(icon: LucideIcons.wallet, color: p.accent),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(_creditText(remaining), style: text.titleMedium),
-                    Text('≈ ${_rp(remaining * kRupiahPerCredit)}', style: text.bodySmall?.copyWith(fontFeatures: _figures)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text('${tr('Used')} ${_creditsFmt(used)} ${tr('of')} ${_creditText(limit)}', style: text.bodySmall),
-          if (limit > 0) ...[
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(Radii.pill),
-              child: LinearProgressIndicator(
-                value: usedFraction.clamp(0, 1).toDouble(),
-                minHeight: 8,
-                backgroundColor: p.border,
-                color: usedFraction > 0.85 ? p.danger : (usedFraction > 0.6 ? p.warning : p.accent),
-              ),
-            ),
-          ],
-          if (suspended) ...[
-            const SizedBox(height: 8),
-            Text(
-              suspendedUntil != null ? '${tr('Account suspended')} · ${_dateId(suspendedUntil)}' : tr('Account suspended'),
-              style: text.bodySmall?.copyWith(color: p.danger),
-            ),
-          ],
-          if (nearest != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              tr('Earliest batch expires {date} ({n})')
-                  .replaceAll('{date}', _dateId(nearest['expiresAt'] as String))
-                  .replaceAll('{n}', _creditText(_num(nearest['credits']))),
-              style: text.bodySmall,
-            ),
-          ],
-          if (top.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(tr('Top usage'), style: text.titleSmall),
-            const SizedBox(height: 4),
-            for (final m in top)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  children: [
-                    Expanded(child: Text('${m['model']}', style: text.bodySmall, overflow: TextOverflow.ellipsis)),
-                    Text(
-                      _creditText(_num(m['creditsUsed'])),
-                      style: text.bodySmall?.copyWith(fontFeatures: _figures),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-          const SizedBox(height: 12),
-          Text(tr('1 credit = Rp 300 · prices as of Oct 2026'), style: text.bodySmall),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final rows = _rows;
+    final a = _account;
     return Scaffold(
-      appBar: AppBar(title: Text(tr('Usage'))),
+      appBar: AppBar(
+        title: Text(tr('Usage')),
+        actions: [
+          IconButton(
+            tooltip: tr('Refresh'),
+            onPressed: _loadingAccount
+                ? null
+                : () {
+                    _loadAccount(force: true);
+                    _load();
+                  },
+            icon: _loadingAccount
+                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(LucideIcons.refreshCw),
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
-          await _load();
-          await _loadCredits();
+          await Future.wait([_load(), _loadAccount(force: true)]);
         },
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
+            SectionLabel(tr('GripHub account'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
+            AccountCard(account: a, error: _accountError, budget: _budget.toDouble()),
+            if (a != null && a.byModel.isNotEmpty) ...[
+              SectionLabel(tr('Charged by model')),
+              _byModelReal(context, a),
+            ],
+            if (a != null && a.requests.isNotEmpty) ...[
+              SectionLabel(
+                tr('Recent requests'),
+                trailing: a.requests.length > 8
+                    ? TextButton(
+                        onPressed: () => setState(() => _allRequests = !_allRequests),
+                        child: Text(tr(_allRequests ? 'Show less' : 'Show all')),
+                      )
+                    : null,
+              ),
+              RequestList(requests: _allRequests ? a.requests : a.requests.take(8).toList()),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                child: Text(
+                  tr('Each request costs at least its model\'s minimum (floor). Failed requests are not charged.'),
+                  style: text.bodySmall,
+                ),
+              ),
+            ],
+            SectionLabel(tr('This phone')),
             Align(
               alignment: Alignment.centerLeft,
               child: PillSegments<int>(
@@ -235,19 +202,11 @@ class _UsageScreenState extends State<UsageScreen> {
                 expand: false,
               ),
             ),
-            const SizedBox(height: 14),
-            SectionLabel(tr('GripHub credit')),
-            _creditCard(context),
             const SizedBox(height: 10),
             if (_error != null)
-              SurfaceCard(
-                child: Text('$_error', style: text.bodySmall?.copyWith(color: p.danger)),
-              )
+              SurfaceCard(child: Text('$_error', style: text.bodySmall?.copyWith(color: p.danger)))
             else if (rows == null)
-              const Padding(
-                padding: EdgeInsets.all(40),
-                child: Center(child: CircularProgressIndicator()),
-              )
+              const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
             else
               ..._summary(context, rows),
             SectionLabel(tr('This chat')),
@@ -266,34 +225,52 @@ class _UsageScreenState extends State<UsageScreen> {
                 ),
               ],
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+              child: Text(
+                tr('The budget counts what GripHub charged your account today (WIB), plus work still running.'),
+                style: text.bodySmall,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
+  Widget _byModelReal(BuildContext context, RouterAccount a) {
+    final text = Theme.of(context).textTheme;
+    final models = a.byModel.where((m) => m.credits > 0 || m.requests > 0).take(8).toList();
+    return SettingsGroup(
+      children: [
+        for (final m in models)
+          SettingsRow(
+            leading: BrandTile(id: m.model, size: 30),
+            title: m.model,
+            subtitle: [
+              m.requests == 1 ? tr('1 request') : tr('{n} requests').replaceAll('{n}', _compact(m.requests)),
+              if (m.images > 0) tr('{n} images').replaceAll('{n}', '${m.images}') else '${_compact(m.tokens)} ${tr('tokens')}',
+            ].join(' · '),
+            trailing: Text(_creditText(m.credits, precise: true), style: text.titleSmall?.copyWith(fontFeatures: _figures)),
+          ),
+      ],
+    );
+  }
+
   List<Widget> _summary(BuildContext context, List<UsageRow> rows) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    // pi's own cost is 0 for GripHub (the router reports no prices), so
-    // estimate from the hardcoded rate table instead. pi costs still win
-    // when present (other providers); a model with no known rate shows "—",
-    // never an invented number.
+    // GripHub credits by the router's rule, per request (host-side); pi's own
+    // cost only for other providers that report one. Unknown prices show "—".
     final piCost = rows.fold<double>(0, (a, r) => a + r.cost);
-    double estimatedTotal = 0;
-    var hasEstimate = false;
-    for (final r in rows) {
-      final e = estimatedCredits(model: r.model, inputTokens: r.input, outputTokens: r.output);
-      if (e != null) {
-        hasEstimate = true;
-        estimatedTotal += e;
-      }
-    }
-    final showPiCost = piCost > 0;
-    final showEstimate = !showPiCost && hasEstimate;
+    final priced = rows.where((r) => r.credits != null);
+    final estimatedTotal = priced.fold<double>(0, (a, r) => a + r.credits!);
+    final hasEstimate = priced.isNotEmpty;
+    final showPiCost = piCost > 0 && !hasEstimate;
+    final showEstimate = hasEstimate;
 
-    final input = rows.fold<int>(0, (a, r) => a + r.input);
-    final output = rows.fold<int>(0, (a, r) => a + r.output);
+    final tokens = rows.fold<int>(0, (a, r) => a + r.tokens);
+    final cached = rows.fold<int>(0, (a, r) => a + r.cacheRead + r.cacheWrite);
     final requests = rows.fold<int>(0, (a, r) => a + r.requests);
 
     final today = DateTime.now();
@@ -304,35 +281,26 @@ class _UsageScreenState extends State<UsageScreen> {
     final perDay = {for (final d in days) d: 0.0};
     for (final r in rows) {
       if (perDay.containsKey(r.day)) {
-        final v = showPiCost
-            ? r.cost
-            : showEstimate
-                ? (estimatedCredits(model: r.model, inputTokens: r.input, outputTokens: r.output) ?? 0)
-                : (r.input + r.output).toDouble();
+        final v = showEstimate ? (r.credits ?? 0) : showPiCost ? r.cost : r.tokens.toDouble();
         perDay[r.day] = perDay[r.day]! + v;
       }
     }
 
-    final byModel = <String, ({String provider, String model, int tokens, double cost, double estCost, bool hasRate})>{};
+    final byModel = <String, ({String provider, String model, int tokens, double cost, double? credits})>{};
     for (final r in rows) {
       final k = '${r.provider}/${r.model}';
       final prev = byModel[k];
-      final e = estimatedCredits(model: r.model, inputTokens: r.input, outputTokens: r.output);
+      final prevCredits = prev == null ? 0.0 : prev.credits;
       byModel[k] = (
         provider: r.provider,
         model: r.model,
-        tokens: (prev?.tokens ?? 0) + r.input + r.output,
+        tokens: (prev?.tokens ?? 0) + r.tokens,
         cost: (prev?.cost ?? 0) + r.cost,
-        estCost: (prev?.estCost ?? 0) + (e ?? 0),
-        hasRate: (prev?.hasRate ?? false) || e != null,
+        credits: prevCredits == null || r.credits == null ? null : prevCredits + r.credits!,
       );
     }
     final models = byModel.values.toList()
-      ..sort((a, b) {
-        if (showPiCost) return b.cost.compareTo(a.cost);
-        if (showEstimate) return b.estCost.compareTo(a.estCost);
-        return b.tokens.compareTo(a.tokens);
-      });
+      ..sort((a, b) => showEstimate ? (b.credits ?? -1).compareTo(a.credits ?? -1) : b.tokens.compareTo(a.tokens));
 
     return [
       Row(
@@ -341,22 +309,17 @@ class _UsageScreenState extends State<UsageScreen> {
             child: _StatCard(
               icon: LucideIcons.coins,
               color: p.accent,
-              label: tr('Cost'),
-              value: showPiCost
+              label: tr(showEstimate ? 'Estimated cost' : 'Cost'),
+              value: showEstimate
+                  ? _creditText(estimatedTotal, precise: true)
+                  : showPiCost
                   ? _money(piCost)
-                  : showEstimate
-                      ? _creditText(estimatedTotal, precise: true)
-                      : '—',
+                  : '—',
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: _StatCard(
-              icon: LucideIcons.activity,
-              color: p.accentAlt,
-              label: tr('Requests'),
-              value: _compact(requests),
-            ),
+            child: _StatCard(icon: LucideIcons.activity, color: p.accentAlt, label: tr('Requests'), value: _compact(requests)),
           ),
         ],
       ),
@@ -364,20 +327,15 @@ class _UsageScreenState extends State<UsageScreen> {
       Row(
         children: [
           Expanded(
-            child: _StatCard(
-              icon: LucideIcons.arrowUpFromLine,
-              color: p.success,
-              label: tr('Input tokens'),
-              value: _compact(input),
-            ),
+            child: _StatCard(icon: LucideIcons.layers, color: p.success, label: tr('Tokens billed'), value: _compact(tokens)),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: _StatCard(
-              icon: LucideIcons.arrowDownToLine,
+              icon: LucideIcons.databaseZap,
               color: p.warning,
-              label: tr('Output tokens'),
-              value: _compact(output),
+              label: tr('From cache'),
+              value: tokens == 0 ? '—' : '${(cached / tokens * 100).round()}%',
             ),
           ),
         ],
@@ -387,7 +345,7 @@ class _UsageScreenState extends State<UsageScreen> {
         child: _BarChart(
           values: [for (final d in days) perDay[d]!],
           labels: days,
-          format: showPiCost ? _money : showEstimate ? (v) => _creditText(v, precise: true) : _compact,
+          format: showEstimate ? (v) => _creditText(v, precise: true) : showPiCost ? _money : _compact,
         ),
       ),
       if (showEstimate)
@@ -395,7 +353,7 @@ class _UsageScreenState extends State<UsageScreen> {
           padding: const EdgeInsets.only(top: 6),
           child: Text(
             tr(
-              'Estimated from the rates of 25 Oct 2026 · total ≈ {rp} · the exact figure is on the GripHub credit card above',
+              'Estimated from this phone\'s chats at GripHub\'s live rates and minimums · total ≈ {rp}. What was actually charged is in the account card above.',
             ).replaceAll('{rp}', _rp(estimatedTotal * kRupiahPerCredit)),
             style: text.bodySmall,
           ),
@@ -412,7 +370,11 @@ class _UsageScreenState extends State<UsageScreen> {
                 title: m.model.isEmpty ? 'unknown' : m.model,
                 subtitle: '${m.provider} · ${_compact(m.tokens)} ${tr('tokens')}',
                 trailing: Text(
-                  showPiCost ? _money(m.cost) : m.hasRate ? _creditText(m.estCost, precise: true) : '—',
+                  showEstimate
+                      ? (m.credits == null ? '—' : '~${_creditText(m.credits!, precise: true)}')
+                      : showPiCost
+                      ? _money(m.cost)
+                      : '—',
                   style: text.titleSmall?.copyWith(fontFeatures: _figures),
                 ),
               ),
@@ -482,6 +444,259 @@ class _UsageScreenState extends State<UsageScreen> {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// The account: balance, today's spend against the budget, credit expiring
+/// next, and a low-balance warning. Every figure is the router's own.
+class AccountCard extends StatelessWidget {
+  const AccountCard({super.key, required this.account, this.error, this.budget = 0});
+  final RouterAccount? account;
+  final Object? error;
+  final double budget;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final a = account;
+    if (a == null) {
+      return SurfaceCard(
+        child: error != null
+            ? Text(tr(error.toString()), style: text.bodySmall?.copyWith(color: p.danger))
+            : const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    final low = a.lowBalance;
+    final next = a.nextExpiry;
+    final left = a.daysLeft();
+    final usedFraction = a.granted > 0 ? (a.used / a.granted).clamp(0, 1).toDouble() : 0.0;
+    final soon = next?.expiresAt != null && next!.expiresAt!.difference(DateTime.now()).inDays < 7;
+    return SurfaceCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              IconTile(icon: LucideIcons.wallet, color: low ? p.danger : p.accent),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_creditText(a.balance, precise: true), style: text.titleLarge?.copyWith(fontFeatures: _figures)),
+                    Text(
+                      '≈ ${_rp(a.balance * kRupiahPerCredit)}${left == null ? '' : ' · ${tr('about {n} days at your pace').replaceAll('{n}', left < 1 ? '<1' : '${left.round()}')}'}',
+                      style: text.bodySmall?.copyWith(fontFeatures: _figures),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (low) ...[
+            const SizedBox(height: 10),
+            _Banner(icon: LucideIcons.triangleAlert, color: p.danger, text: tr('Credit is running low. Top up at griphubrouter.web.id to keep the agent working.')),
+          ],
+          if (a.suspended) ...[
+            const SizedBox(height: 10),
+            _Banner(
+              icon: LucideIcons.ban,
+              color: p.danger,
+              text: a.suspendedUntil != null ? '${tr('Account suspended')} · ${_dateId(a.suspendedUntil!)}' : tr('Account suspended'),
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _Figure(
+                  label: tr('Today'),
+                  value: _creditText(a.spentToday, precise: true),
+                  note: a.spentTodayReal ? null : tr('estimate'),
+                ),
+              ),
+              Expanded(child: _Figure(label: tr('Used in total'), value: _creditText(a.used))),
+            ],
+          ),
+          if (budget > 0) ...[
+            const SizedBox(height: 10),
+            Text(
+              tr('{a} of the {b} daily budget').replaceAll('{a}', _creditText(a.spentToday, precise: true)).replaceAll('{b}', _creditText(budget, precise: true)),
+              style: text.bodySmall,
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.pill),
+              child: LinearProgressIndicator(
+                value: (a.spentToday / budget).clamp(0, 1).toDouble(),
+                minHeight: 6,
+                backgroundColor: p.border,
+                color: a.spentToday >= budget ? p.danger : (a.spentToday > budget * 0.8 ? p.warning : p.accent),
+              ),
+            ),
+          ] else if (a.granted > 0) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(Radii.pill),
+              child: LinearProgressIndicator(
+                value: usedFraction,
+                minHeight: 6,
+                backgroundColor: p.border,
+                color: low ? p.danger : p.accent,
+              ),
+            ),
+          ],
+          if (next?.expiresAt != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Icon(LucideIcons.clock, size: 14, color: soon ? p.warning : p.muted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    tr('{n} expire {date}').replaceAll('{n}', _creditText(next!.credits, precise: true)).replaceAll('{date}', _dateId(next.expiresAt!)),
+                    style: text.bodySmall?.copyWith(color: soon ? p.warning : null),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 10),
+          Text(
+            [
+              tr('Updated {time}').replaceAll('{time}', formatAgo(a.fetchedAt)),
+              if (a.source != 'user-usage') tr('limited data'),
+              if (error != null) tr('offline, showing the last figures'),
+              tr('1 credit = Rp 300'),
+            ].join(' · '),
+            style: text.bodySmall?.copyWith(color: error != null ? p.warning : null),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Figure extends StatelessWidget {
+  const _Figure({required this.label, required this.value, this.note});
+  final String label;
+  final String value;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(note == null ? label : '$label · $note', style: text.bodySmall),
+        const SizedBox(height: 2),
+        Text(value, style: text.titleMedium?.copyWith(fontFeatures: _figures)),
+      ],
+    );
+  }
+}
+
+class _Banner extends StatelessWidget {
+  const _Banner({required this.icon, required this.color, required this.text});
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(Radii.md),
+      border: Border.all(color: color.withValues(alpha: 0.35)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(padding: const EdgeInsets.only(top: 1), child: Icon(icon, size: 16, color: color)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color))),
+      ],
+    ),
+  );
+}
+
+/// The router's request log: model, time, tokens, what it cost, and whether
+/// the model's minimum (floor) applied or the request failed (not charged).
+class RequestList extends StatelessWidget {
+  const RequestList({super.key, required this.requests});
+  final List<RouterRequest> requests;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return SettingsGroup(
+      children: [
+        for (final r in requests)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(
+                    !r.ok
+                        ? LucideIcons.circleX
+                        : r.isSearch
+                        ? LucideIcons.search
+                        : r.isImage
+                        ? LucideIcons.image
+                        : LucideIcons.messageSquare,
+                    size: 16,
+                    color: r.ok ? p.muted : p.danger,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(r.model, style: text.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          _clock(r.at),
+                          if (r.isSearch) tr('web search'),
+                          if (!r.isImage) '${_compact(r.inputTokens + r.outputTokens)} ${tr('tokens')}',
+                          if (r.inputTokens > 0 && r.cacheReadTokens > 0)
+                            tr('{n}% cache').replaceAll('{n}', '${(r.cacheReadTokens / r.inputTokens * 100).round()}'),
+                          if (r.thinkingEffort case final e?) thinkingLabel(e),
+                        ].join(' · '),
+                        style: text.bodySmall?.copyWith(fontFeatures: _figures),
+                      ),
+                      if (!r.ok && r.error != null)
+                        Text(r.error!, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall?.copyWith(color: p.danger)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      r.ok ? _creditText(r.credits ?? 0, precise: true) : tr('Not charged'),
+                      style: text.titleSmall?.copyWith(fontFeatures: _figures, color: r.ok ? null : p.muted),
+                    ),
+                    if (r.ok && r.floor != null) ...[
+                      const SizedBox(height: 4),
+                      Pill(tr('Minimum'), color: p.warning),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
