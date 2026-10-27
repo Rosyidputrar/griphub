@@ -23,6 +23,7 @@ import 'tasks_screen.dart';
 import 'terminal_screen.dart';
 import 'settings_screen.dart';
 import 'folder_picker.dart';
+import 'subagent_card.dart';
 import 'theme.dart';
 import 'todo_views.dart';
 
@@ -419,6 +420,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
                 ),
               ),
+            CrossChatBanner(agent: agent),
             _Composer(
               controller: input,
               focus: focus,
@@ -465,41 +467,49 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _transcript() {
     final entries = agent.entries;
+    final subs = agent.subagentsForCurrent;
     final retry = agent.endsInError;
     final activity = _activity();
     return ListView.builder(
       controller: scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: entries.length + (retry ? 1 : 0) + (activity != null ? 1 : 0),
+      itemCount: entries.length + subs.length + (retry ? 1 : 0) + (activity != null ? 1 : 0),
       itemBuilder: (context, i) {
-        if (activity != null && i == entries.length) {
-          return Padding(padding: const EdgeInsets.only(top: 14), child: AgentActivity(label: activity));
-        }
-        if (i == entries.length) {
+        if (i < entries.length) {
+          final e = entries[i];
+          final child = switch (e) {
+            UserEntry() => UserMessageView(
+              e,
+              onLongPress: (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
+            ),
+            AssistantEntry() => AssistantMessageView(
+              e,
+              tools: agent.tools,
+              cwd: agent.cwd,
+              live: agent,
+              modelLabel: agent.modelLabel,
+            ),
+            NoticeEntry() => NoticeView(e),
+          };
+          final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
           return Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: _RetryBar(onRetry: agent.retry, onPickModel: () => showModelSheet(context, agent)),
+            padding: EdgeInsets.only(top: gap),
+            child: child,
           );
         }
-        final e = entries[i];
-        final child = switch (e) {
-          UserEntry() => UserMessageView(
-            e,
-            onLongPress: (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
-          ),
-          AssistantEntry() => AssistantMessageView(
-            e,
-            tools: agent.tools,
-            cwd: agent.cwd,
-            live: agent,
-            modelLabel: agent.modelLabel,
-          ),
-          NoticeEntry() => NoticeView(e),
-        };
-        final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
+        final si = i - entries.length;
+        if (si < subs.length) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: SubagentCard(state: subs[si], agent: agent),
+          );
+        }
+        if (activity != null && si == subs.length) {
+          return Padding(padding: const EdgeInsets.only(top: 14), child: AgentActivity(label: activity));
+        }
         return Padding(
-          padding: EdgeInsets.only(top: gap),
-          child: child,
+          padding: const EdgeInsets.only(top: 10),
+          child: _RetryBar(onRetry: agent.retry, onPickModel: () => showModelSheet(context, agent)),
         );
       },
     );
