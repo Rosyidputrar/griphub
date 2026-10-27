@@ -110,7 +110,7 @@ class SubagentCard extends StatelessWidget {
     final parts = <String>['${s.tools.length} tools'];
     final e = s.elapsed;
     if (e != null) parts.add(_fmtDuration(e));
-    if (s.credits != null) parts.add('~${s.credits!.toStringAsFixed(2)} credit');
+    if (s.credits != null) parts.add('~${s.credits!.toStringAsFixed(2)} kredit');
     return parts.join(' • ');
   }
 }
@@ -261,7 +261,7 @@ class _SubagentSheetState extends State<SubagentSheet> {
                     Text(
                       '${s.tools.length} tools'
                       '${s.elapsed == null ? '' : ' • ${_fmtDuration(s.elapsed!)}'}'
-                      '${s.credits == null ? '' : ' • ~${s.credits!.toStringAsFixed(2)} credit (perkiraan)'}',
+                      '${s.credits == null ? '' : ' • ~${s.credits!.toStringAsFixed(2)} kredit (perkiraan)'}',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.faint),
                     ),
                     if (s.isActive) ...[

@@ -177,7 +177,9 @@ async function buildSession(sessionManager: SessionManager, opts: { interactive:
 		settingsManager,
 		sessionManager,
 		resourceLoader,
-		tools: [...TOOLS, ...mcpTools.map((t) => t.name)],
+		// "subagent" must be named here: the SDK drops custom tools whose
+		// name is not in this allow-list (that is why 1.0.42 never showed it).
+		tools: [...TOOLS, ...(opts.interactive ? ["subagent"] : []), ...mcpTools.map((t) => t.name)],
 		customTools: [
 			...webTools(
 				() => ({
