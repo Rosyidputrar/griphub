@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/clock.dart';
 import '../agent/features.dart';
 import '../agent/pricing.dart';
 import '../agent/router_account.dart';
@@ -273,7 +274,7 @@ class _UsageScreenState extends State<UsageScreen> {
     final cached = rows.fold<int>(0, (a, r) => a + r.cacheRead + r.cacheWrite);
     final requests = rows.fold<int>(0, (a, r) => a + r.requests);
 
-    final today = DateTime.now();
+    final today = clock();
     final days = [
       for (var i = _days - 1; i >= 0; i--)
         DateTime(today.year, today.month, today.day - i).toIso8601String().substring(0, 10),
@@ -472,7 +473,7 @@ class AccountCard extends StatelessWidget {
     final next = a.nextExpiry;
     final left = a.daysLeft();
     final usedFraction = a.granted > 0 ? (a.used / a.granted).clamp(0, 1).toDouble() : 0.0;
-    final soon = next?.expiresAt != null && next!.expiresAt!.difference(DateTime.now()).inDays < 7;
+    final soon = next?.expiresAt != null && next!.expiresAt!.difference(clock()).inDays < 7;
     return SurfaceCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

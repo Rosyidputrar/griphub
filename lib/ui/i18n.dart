@@ -1,3 +1,4 @@
+import '../agent/clock.dart';
 import 'theme.dart';
 
 /// Translates an English UI string into the chosen language. English text is the key, so a
@@ -28,7 +29,7 @@ double? parseLocalNumber(String text) {
 /// five screens, each with slightly different thresholds and only one of them
 /// localized). Old dates show months/years, like git history did.
 String formatAgo(DateTime t) {
-  final d = DateTime.now().difference(t);
+  final d = clock().difference(t);
   final id = Appearance.instance.language == 'id';
   if (d.inMinutes < 1) return id ? 'baru saja' : 'just now';
   if (d.inHours < 1) return id ? '${d.inMinutes} mnt lalu' : '${d.inMinutes}m ago';
@@ -451,6 +452,8 @@ const _id = <String, String>{
   'Open in a new chat': 'Buka di chat baru',
   'Pull latest changes': 'Tarik perubahan terbaru',
   'Switch branch': 'Ganti branch',
+  '1 line': '1 baris',
+  '{n} lines': '{n} baris',
   "Couldn't reach the remote; showing the branches on this phone.":
       'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
   'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':

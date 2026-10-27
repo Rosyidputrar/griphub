@@ -6,13 +6,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/clock.dart';
 import 'package:griphub_agent/agent/subagents.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
 /// Every golden renders at this instant, so live durations are stable.
 final goldenNow = DateTime(2026, 10, 27, 12);
 
-void pinClock() => SubagentState.clock = () => goldenNow;
+void pinClock() {
+  SubagentState.clock = () => goldenNow;
+  clock = () => goldenNow;
+}
 
 /// Loads every font in the test FontManifest (Geist, GeistMono, Lucide, ...)
 /// so goldens show real text and icons instead of Ahem boxes.
