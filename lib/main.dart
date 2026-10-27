@@ -12,7 +12,9 @@ import 'ui/theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized().addObserver(PredictiveBack.instance);
-  final agent = AgentController(AgentClient())..boot();
+  final agent = AgentController(AgentClient())
+    ..translate = tr
+    ..boot();
   runApp(GripHubApp(agent: agent));
 }
 

@@ -64,3 +64,6 @@ hs_err_pid*.log
 android/key.properties
 *.keystore
 *.jks
+
+# Host test bundles (agent/test)
+/agent/build/

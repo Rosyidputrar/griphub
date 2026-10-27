@@ -138,10 +138,27 @@ export class Checkpoints {
 	}
 
 	/**
-	 * Puts the folder back as it was at a checkpoint. The current state is
-	 * saved first, so a restore can itself be undone.
+	 * What a restore would delete: files that did not exist at the checkpoint.
+	 * Some may be the user's own (made after the agent's run), so the app
+	 * lists them and lets the user keep any of them.
 	 */
-	async restore(cwd: string, id: string) {
+	async restorePlan(cwd: string, id: string) {
+		const env = await this.ensure(cwd);
+		const known = await git(["rev-parse", "--verify", "-q", id], env, cwd);
+		if (known.code !== 0) throw new Error(`Unknown checkpoint ${id}`);
+		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
+		const added = await git(["diff", "-z", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
+		return { checkpoint: id, removes: added.out.split("\0").filter(Boolean) };
+	}
+
+	/**
+	 * Puts the folder back as it was at a checkpoint. The current state is
+	 * saved first, so a restore can itself be undone. Files added since the
+	 * checkpoint are deleted, except those in [keep] (relative paths), which
+	 * stay as they are now.
+	 */
+	async restore(cwd: string, id: string, keep: string[] = []) {
 		const env = await this.ensure(cwd);
 		await this.snapshot(cwd, "Before restoring a checkpoint");
 		// Verify the checkpoint exists BEFORE deleting anything: the old
@@ -153,10 +170,13 @@ export class Checkpoints {
 		await this.addEnv(env, cwd);
 		// Files that did not exist at the checkpoint are removed.
 		const added = await git(["diff", "-z", "--cached", "--name-only", "--diff-filter=A", id], env, cwd);
-		for (const f of added.out.split("\0").filter(Boolean)) rmSync(join(cwd, f), { force: true });
+		const kept = new Set(keep);
+		for (const f of added.out.split("\0").filter(Boolean)) {
+			if (!kept.has(f)) rmSync(join(cwd, f), { force: true });
+		}
 		const r = await git(["checkout", "-f", id, "--", "."], env, cwd);
 		if (r.code !== 0) throw new Error(r.err.trim() || "restore failed");
 		await git(["add", "-A"], env, cwd);
-		return { restored: id };
+		return { restored: id, kept: keep.length };
 	}
 }

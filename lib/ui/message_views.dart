@@ -184,7 +184,15 @@ class UserBubble extends StatelessWidget {
 }
 
 class AssistantMessageView extends StatelessWidget {
-  const AssistantMessageView(this.entry, {super.key, required this.tools, this.cwd, this.live, this.modelLabel});
+  const AssistantMessageView(
+    this.entry, {
+    super.key,
+    required this.tools,
+    this.cwd,
+    this.live,
+    this.modelLabel,
+    this.subagentCard,
+  });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
 
@@ -196,6 +204,11 @@ class AssistantMessageView extends StatelessWidget {
 
   /// Display name for the model id saved with the reply.
   final String Function(String id)? modelLabel;
+
+  /// The live subagent card for a `subagent` tool call, or null when the app
+  /// knows no subagent for it (a chat from before a restart): then the call
+  /// shows as a plain tool card with the report as its output.
+  final Widget? Function(String toolCallId)? subagentCard;
 
   @override
   Widget build(BuildContext context) {
@@ -213,15 +226,14 @@ class AssistantMessageView extends StatelessWidget {
             children.add(ThinkingView(text: b.text, live: entry.streaming && identical(b, blocks.last)));
           }
         case BlockKind.toolCall:
-          // The subagent's own call is not a tool card: its progress lives
-          // in the subagent card below the transcript.
-          if (b.toolName != 'subagent') {
-            children.add(
-              b.toolName == 'todo_write'
-                  ? TodoCard(block: b, run: tools[b.toolCallId])
-                  : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, live: live),
-            );
-          }
+          // The subagent's own call is not a tool card: its live card sits here instead.
+          final card = b.toolName == 'subagent' && b.toolCallId != null ? subagentCard?.call(b.toolCallId!) : null;
+          children.add(
+            card ??
+                (b.toolName == 'todo_write'
+                    ? TodoCard(block: b, run: tools[b.toolCallId])
+                    : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, live: live)),
+          );
       }
     }
     if (entry.streaming && children.isEmpty) children.add(const _Pending());

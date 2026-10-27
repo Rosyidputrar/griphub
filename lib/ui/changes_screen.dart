@@ -114,26 +114,25 @@ class _ChangesScreenState extends State<ChangesScreen> {
   Future<void> _undo() async {
     final cp = _current;
     if (cp == null) return;
-    final ok = await showDialog<bool>(
+    setState(() => _busy = true);
+    List<String> removes;
+    try {
+      removes = await _f.restorePlan(cp.id);
+    } catch (e) {
+      _error(e);
+      if (mounted) setState(() => _busy = false);
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    final keep = await showDialog<List<String>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(tr('Undo these changes?')),
-        content: Text(
-          tr(
-            'Files will be put back the way they were at "{label}". '
-            'The current state is saved as a checkpoint first, so you can undo this again.',
-          ).replaceAll('{label}', cp.label),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Undo changes'))),
-        ],
-      ),
+      builder: (_) => UndoCheckpointDialog(label: cp.label, removes: removes),
     );
-    if (ok != true) return;
+    if (keep == null) return;
     setState(() => _busy = true);
     try {
-      await _f.restore(cp.id);
+      await _f.restore(cp.id, keep: keep);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Restored')} "${cp.label}"')));
       setState(() => _selected = null);
@@ -428,6 +427,122 @@ class _CheckpointChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Confirms an undo, listing the files it deletes (they did not exist at the
+/// checkpoint). Some may be the user's own, made after the agent's run: each
+/// can be kept. Pops the paths to keep, or null when cancelled.
+class UndoCheckpointDialog extends StatefulWidget {
+  const UndoCheckpointDialog({super.key, required this.label, required this.removes});
+  final String label;
+  final List<String> removes;
+
+  @override
+  State<UndoCheckpointDialog> createState() => _UndoCheckpointDialogState();
+}
+
+class _UndoCheckpointDialogState extends State<UndoCheckpointDialog> {
+  final _keep = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final removes = widget.removes;
+    final deleting = removes.length - _keep.length;
+    return AlertDialog(
+      title: Text(tr('Undo these changes?')),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              tr(
+                'Files will be put back the way they were at "{label}". '
+                'The current state is saved as a checkpoint first, so you can undo this again.',
+              ).replaceAll('{label}', widget.label),
+            ),
+            if (removes.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                tr('These files did not exist then and will be deleted. Tick any you made yourself to keep them.'),
+                style: text.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                // Material, not a decorated box: the tiles' ink must paint on it.
+                child: Material(
+                  color: p.surface,
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 240),
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      children: [
+                        for (final f in removes)
+                          CheckboxListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            value: _keep.contains(f),
+                            onChanged: (v) => setState(() => v == true ? _keep.add(f) : _keep.remove(f)),
+                            title: Text(
+                              f.split('/').last,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: mono,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: _keep.contains(f) ? p.text : p.danger,
+                                decoration: _keep.contains(f) ? null : TextDecoration.lineThrough,
+                                decorationColor: p.danger,
+                              ),
+                            ),
+                            // Name first (what the user recognises), its folder below.
+                            subtitle: f.contains('/')
+                                ? Text(
+                                    f.substring(0, f.lastIndexOf('/')),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(fontFamily: mono, fontSize: 11, color: p.muted),
+                                  )
+                                : null,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                deleting == 0
+                    ? tr('No files will be deleted.')
+                    : (deleting == 1
+                          ? tr('1 file will be deleted.')
+                          : tr('{n} files will be deleted.').replaceAll('{n}', '$deleting')),
+                style: text.bodySmall?.copyWith(color: deleting == 0 ? p.muted : p.danger),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+        FilledButton(
+          style: removes.isEmpty || deleting == 0
+              ? null
+              : FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white),
+          onPressed: () => Navigator.pop(context, _keep.toList()),
+          child: Text(tr('Undo changes')),
+        ),
+      ],
     );
   }
 }

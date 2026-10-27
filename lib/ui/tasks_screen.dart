@@ -88,8 +88,7 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Future<void> _openRun(RunInfo run) async {
     try {
-      await agent.openSession(run.sessionFile!);
-      if (!mounted) return;
+      if (!await agent.openSession(run.sessionFile!) || !mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
     } catch (e) {
       _error(e);

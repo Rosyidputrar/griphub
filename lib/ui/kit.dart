@@ -194,16 +194,49 @@ class PillSegments<T> extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
-      child: Row(
-        mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-        children: [
-          for (final e in options.entries)
-            if (expand) Expanded(child: segment(e.key, e.value)) else segment(e.key, e.value),
-        ],
-      ),
+    // Natural width of one segment: label, icon and padding, at the user's text size.
+    final scaler = MediaQuery.textScalerOf(context);
+    double natural(T key, String label) {
+      final painter = TextPainter(
+        text: TextSpan(text: label, style: style),
+        textScaler: scaler,
+        maxLines: 1,
+        textDirection: Directionality.of(context),
+      )..layout();
+      final w = painter.width + 28 + (icons[key] != null ? 22 : 0);
+      painter.dispose();
+      return w;
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final widths = [for (final e in options.entries) natural(e.key, e.value)];
+        final needed =
+            8 + (expand ? widths.fold<double>(0, (m, w) => w > m ? w : m) * widths.length : widths.fold<double>(0, (a, w) => a + w));
+        // Labels that don't fit side by side (a narrow phone, large text, a long
+        // translation) stack instead of clipping or overflowing.
+        if (constraints.hasBoundedWidth && needed > constraints.maxWidth) {
+          return Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.lg)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [for (final e in options.entries) segment(e.key, e.value)],
+            ),
+          );
+        }
+        return Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
+          child: Row(
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+            children: [
+              for (final e in options.entries)
+                if (expand) Expanded(child: segment(e.key, e.value)) else segment(e.key, e.value),
+            ],
+          ),
+        );
+      },
     );
   }
 }

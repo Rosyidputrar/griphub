@@ -90,6 +90,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       );
     f.addListener(_onFeatures);
     agent.addListener(_onAgent);
+    // Switching chats mid-turn would drop the reply: ask first (see AgentController.readyToSwitch).
+    agent.confirmStopToSwitch = () => confirmStopToSwitch(context);
     agent.integrations.addListener(_onSync);
     f.refreshRuns().catchError((_) {});
     agent.integrations.refreshSync().catchError((_) {});
@@ -140,6 +142,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    agent.confirmStopToSwitch = null;
     WidgetsBinding.instance.removeObserver(this);
     agent.features.removeListener(_onFeatures);
     agent.removeListener(_onAgent);
@@ -153,6 +156,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     lifecycle = state;
+    // Subagent notifications cover the open chat too while nothing is on screen
+    // (not for "inactive": the shade pulled down still shows the app).
+    agent.inBackground = state == AppLifecycleState.paused || state == AppLifecycleState.hidden;
     if (state == AppLifecycleState.resumed) {
       Updater.instance.onResume().catchError((_) {});
       // Back in the app: "pi is done" has served its purpose.
@@ -261,7 +267,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Future<void> _openChatAt(String? path) async {
     if (path != null && path != agent.sessionFile) {
       final known = (await agent.listSessions()).any((s) => s.path == path);
-      if (known) await agent.openSession(path);
+      if (known && !await agent.openSession(path)) return;
     }
     if (mounted) await openChat(context, agent);
   }
@@ -286,7 +292,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         await _openChatAt(launch['path'] as String?);
       case 'retry':
         final path = launch['path'] as String?;
-        if (path != null && path != agent.sessionFile) await agent.openSession(path);
+        if (path != null && path != agent.sessionFile && !await agent.openSession(path)) return;
         await agent.retry();
         if (mounted) await openChat(context, agent);
       case 'open_tasks':
@@ -294,14 +300,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       case 'open_sync':
         if (mounted) await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SyncScreen(agent: agent)));
       case 'voice':
-        await agent.newSession();
+        if (!await agent.newSession()) return;
         if (mounted) await openChat(context, agent, listen: true);
       case 'share':
         final files = [
           for (final f in (launch['files'] as List? ?? const []).cast<Map>())
             Attachment(f['path'] as String, f['name'] as String, mime: f['mime'] as String?),
         ];
-        await agent.newSession();
+        if (!await agent.newSession()) return;
         if (mounted) await openChat(context, agent, prompt: launch['text'] as String?, attachments: files);
     }
   }
@@ -740,7 +746,10 @@ class _HomeTabState extends State<_HomeTab> {
     final n = DateTime.now();
     final dir = Directory('$ws/$slug-${n.month}${n.day}-${n.hour}${n.minute.toString().padLeft(2, '0')}')
       ..createSync(recursive: true);
-    await agent.newSession(dir: dir.path);
+    if (!await agent.newSession(dir: dir.path)) {
+      dir.deleteSync();
+      return;
+    }
     if (mounted) await openChat(context, agent, prompt: tr(q.prompt!));
     // Backed out without sending anything: don't leave an empty project behind.
     if (agent.cwd == dir.path && agent.entries.isEmpty && dir.existsSync() && dir.listSync().isEmpty) {
@@ -884,7 +893,7 @@ class _HomeTabState extends State<_HomeTab> {
                             session: s,
                             workspace: agent.info['workspace'] as String? ?? '',
                             onTap: () async {
-                              if (s.id != agent.sessionId) await agent.openSession(s.path);
+                              if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
                               if (context.mounted) await openChat(context, agent);
                               _refresh();
                             },
@@ -1356,7 +1365,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                         onLongPress: () => selecting ? _toggle(s) : _menu(s),
                         onTap: () async {
                           if (selecting) return _toggle(s);
-                          if (s.id != agent.sessionId) await agent.openSession(s.path);
+                          if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
                           if (context.mounted) await openChat(context, agent);
                           _reload();
                         },
@@ -1409,9 +1418,9 @@ class _ProjectsTabState extends State<_ProjectsTab> {
     final sessions = await agent.listSessions();
     final latest = sessions.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
     if (latest != null) {
-      if (latest.id != agent.sessionId) await agent.openSession(latest.path);
+      if (latest.id != agent.sessionId && !await agent.openSession(latest.path)) return;
     } else {
-      await agent.newSession(dir: project.path);
+      if (!await agent.newSession(dir: project.path)) return;
     }
     if (mounted) await openChat(context, agent);
   }
@@ -1507,7 +1516,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                               onPressed: () async {
                                 final dir = await FolderPicker.pick(context, agent);
                                 if (dir == null) return;
-                                await agent.newSession(dir: dir);
+                                if (!await agent.newSession(dir: dir)) return;
                                 if (context.mounted) await openChat(context, agent);
                               },
                               icon: const Icon(LucideIcons.folderOpen, size: 16),

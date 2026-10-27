@@ -157,6 +157,12 @@ class AppSettings {
   bool get subagentNotifyDone => json['subagentNotifyDone'] != false;
   bool get subagentNotifyFailed => json['subagentNotifyFailed'] != false;
   bool get subagentNotifyApproval => json['subagentNotifyApproval'] != false;
+  bool get subagentNotifyRunning => json['subagentNotifyRunning'] != false;
+
+  /// Whether subagents have their own approval mode; false = they follow [approvalMode].
+  /// Older hosts don't send it: then any explicit subagent mode counts as an override.
+  bool get subagentApprovalOverride =>
+      json['subagentApprovalOverride'] as bool? ?? json.containsKey('subagentApprovalMode') && json['subagentApprovalMode'] != approvalMode;
 
   /// GitHub OAuth App Client ID for the device flow, entered in Settings.
   /// Null means GitHub login is not configured (no fallback).

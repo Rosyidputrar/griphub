@@ -73,6 +73,8 @@ export interface AppSettings {
 	subagentNotifyDone?: boolean;
 	subagentNotifyFailed?: boolean;
 	subagentNotifyApproval?: boolean;
+	/** Ongoing "subagent running" notification while subagents of other chats work; unset = on. */
+	subagentNotifyRunning?: boolean;
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
@@ -144,7 +146,7 @@ export class Integrations {
 
 	/** Keys are write-only from the app's point of view: it only sees their last four characters. */
 	publicSettings() {
-		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget, subagentCreditLimit, subagentMinutesLimit, subagentApprovalMode, subagentNotifyDone, subagentNotifyFailed, subagentNotifyApproval } = this.settings;
+		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget, subagentCreditLimit, subagentMinutesLimit, subagentApprovalMode, subagentNotifyDone, subagentNotifyFailed, subagentNotifyApproval, subagentNotifyRunning } = this.settings;
 		const masked = (text?: string) => parseKeys(text).map(maskKey);
 		return {
 			dns,
@@ -169,9 +171,12 @@ export class Integrations {
 			subagentCreditLimit: subagentCreditLimit ?? 50,
 			subagentMinutesLimit: subagentMinutesLimit ?? 30,
 			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",
+			// False while subagents follow the chat's approval mode (no override saved).
+			subagentApprovalOverride: subagentApprovalMode != null,
 			subagentNotifyDone: subagentNotifyDone ?? true,
 			subagentNotifyFailed: subagentNotifyFailed ?? true,
 			subagentNotifyApproval: subagentNotifyApproval ?? true,
+			subagentNotifyRunning: subagentNotifyRunning ?? true,
 		};
 	}
 
@@ -189,6 +194,16 @@ export class Integrations {
 				const err = validateCustomDohUrl(next.dnsUrl ?? "");
 				if (err) throw new Error(`Invalid custom DoH URL: ${err}`);
 			}
+		}
+		// Subagent limits: 0 means no limit; anything else must be a positive number
+		// (whole minutes). A bad value would otherwise stop every subagent at once.
+		const limit = (v: unknown, whole: boolean) =>
+			typeof v === "number" && Number.isFinite(v) && v >= 0 && (!whole || Number.isInteger(v));
+		if (next.subagentCreditLimit !== undefined && !limit(next.subagentCreditLimit, false)) {
+			throw new Error("The subagent cost limit must be 0 (no limit) or a positive number");
+		}
+		if (next.subagentMinutesLimit !== undefined && !limit(next.subagentMinutesLimit, true)) {
+			throw new Error("The subagent time limit must be 0 (no limit) or a whole number of minutes");
 		}
 		this.store.settings = next;
 		this.save();
@@ -927,6 +942,20 @@ export class Integrations {
 				preview: options.preview === true,
 			};
 		}
+		if (target === "ssh") {
+			const h = this.host(options.hostId);
+			const remoteDir = (options.remotePath || h.path || "").trim();
+			const files = walk(dir);
+			return {
+				target,
+				dir,
+				server: `${h.user}@${h.host}`,
+				remoteDir,
+				files: files.length,
+				// What stays home, so the dialog can name it (.env above all).
+				skipped: skippedEntries(dir),
+			};
+		}
 		return { target, dir };
 	}
 
@@ -1007,27 +1036,48 @@ export class Integrations {
 		}
 	}
 
+	/**
+	 * SSH deploy of exactly the files every other target uploads (see walk):
+	 * no dotfiles (.env), no .git or node_modules, no symlinks. It used to
+	 * rsync/scp the whole folder minus .git and node_modules, so a project's
+	 * .env landed on the server, often inside the web root.
+	 */
 	private async deploySsh(dir: string, options: Record<string, any>, log: Log) {
+		if (options.confirmed !== true) throw new Error("Confirm the deploy target (server + folder) before deploying.");
 		const h = this.host(options.hostId);
 		const remoteDir = (options.remotePath || h.path || "").trim();
 		if (!remoteDir) throw new Error("Choose a remote folder to deploy into");
+		const files = walk(dir);
+		if (!files.length) throw new Error("Nothing to deploy: the folder has no files (dotfiles are never uploaded)");
 		const config = join(this.home, ".ssh", "config");
 		const target = `${h.name}:${remoteDir.replace(/\/?$/, "/")}`;
-		log(`Syncing to ${h.user}@${h.host}:${remoteDir}…`);
+		log(`Syncing ${files.length} files to ${h.user}@${h.host}:${remoteDir}…`);
 		await run("ssh", ["-F", config, "-o", "BatchMode=yes", h.name, `mkdir -p '${remoteDir.replace(/'/g, "'\\''")}'`], {
 			cwd: dir,
 			log,
 		});
-		const exclude = ["--exclude=.git", "--exclude=node_modules"];
+		const tmp = mkdtempSync(join(tmpdir(), "griphub-ssh-"));
 		try {
-			await run("rsync", ["-az", "--stats", ...exclude, "-e", `ssh -F ${config} -o BatchMode=yes`, `${dir}/`, target], {
-				cwd: dir,
-				log,
-			});
-		} catch (e) {
-			if (!/rsync.*(not found|No such file)|protocol/i.test(String((e as Error).message))) throw e;
-			log("rsync unavailable on the server, falling back to scp");
-			await run("scp", ["-F", config, "-S", "ssh", "-o", "BatchMode=yes", "-r", `${dir}/.`, target], { cwd: dir, log });
+			const list = join(tmp, "files.txt");
+			writeFileSync(list, `${files.join("\n")}\n`);
+			try {
+				await run("rsync", ["-az", "--stats", `--files-from=${list}`, "-e", `ssh -F ${config} -o BatchMode=yes`, `${dir}/`, target], {
+					cwd: dir,
+					log,
+				});
+			} catch (e) {
+				if (!/rsync.*(not found|No such file)|protocol/i.test(String((e as Error).message))) throw e;
+				log("rsync unavailable on the server, falling back to scp");
+				// scp copies trees, not lists: stage the filtered files first.
+				const stage = join(tmp, "stage");
+				for (const f of files) {
+					mkdirSync(dirname(join(stage, f)), { recursive: true });
+					copyFileSync(join(dir, f), join(stage, f));
+				}
+				await run("scp", ["-F", config, "-S", "ssh", "-o", "BatchMode=yes", "-r", `${stage}/.`, target], { cwd: dir, log });
+			}
+		} finally {
+			rmSync(tmp, { recursive: true, force: true });
 		}
 		log("Done");
 		return { url: null };
@@ -1093,7 +1143,14 @@ const SKIP_DIRS = new Set([".git", "node_modules", ".vercel", ".next", ".DS_Stor
  * /etc), and dotfiles are where secrets live. statSync follows symlinks,
  * so lstatSync is what makes the symlink check real.
  */
-function walk(root: string, dir = root, out: string[] = []): string[] {
+/** Top-level names a deploy leaves out (dotfiles and SKIP_DIRS), for the confirm dialog. */
+export function skippedEntries(root: string): string[] {
+	return readdirSync(root)
+		.filter((name) => SKIP_DIRS.has(name) || name.startsWith("."))
+		.sort();
+}
+
+export function walk(root: string, dir = root, out: string[] = []): string[] {
 	for (const name of readdirSync(dir)) {
 		if (SKIP_DIRS.has(name) || name.startsWith(".")) continue;
 		const path = join(dir, name);

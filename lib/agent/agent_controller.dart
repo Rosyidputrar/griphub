@@ -52,47 +52,90 @@ class AgentController extends ChangeNotifier {
   /// never transcript entries: the card list is rendered from here.
   final subagentStore = SubagentStore();
 
-  late final subagentNotifier = SubagentNotifier(notify: client.notify, cancel: client.cancelNotification);
+  /// The UI language for texts the controller produces (notifications). The
+  /// app sets it to `tr`; tests and the default keep English.
+  String Function(String) translate = (s) => s;
 
-  /// Whether [s] belongs to the open chat (its card is already visible).
+  late final subagentNotifier = SubagentNotifier(
+    notify: client.notify,
+    cancel: client.cancelNotification,
+    translate: (s) => translate(s),
+  );
+
+  /// Set by the home shell from the app lifecycle. While the app is in the
+  /// background nothing is on screen, so the open chat's subagents notify too.
+  bool get inBackground => _inBackground;
+  bool _inBackground = false;
+  set inBackground(bool v) {
+    if (v == _inBackground) return;
+    _inBackground = v;
+    unawaited(_syncRunningNotification());
+  }
+
+  /// Whether [s] belongs to the open chat.
   bool _subagentIsOpen(SubagentState s) => s.parentSessionFile == sessionFile || s.parentSessionFile == sessionId;
 
-  /// Drives notifications from a subagent record. Only subagents of other
-  /// chats notify; the open chat's card already shows everything.
-  void _syncSubagentNotifications(Map<String, dynamic> record) {
-    final elsewhere = subagentsElsewhere;
+  /// Whether nobody is looking at [s]'s card right now.
+  bool _subagentUnseen(SubagentState s) => _inBackground || !_subagentIsOpen(s);
+
+  /// Settings drive the notification toggles. They are loaded at boot, but a
+  /// record can arrive first; then they are fetched before deciding.
+  Future<AppSettings?> _subagentSettings() async =>
+      integrations.settings ?? await integrations.refreshSettings().then<AppSettings?>((s) => s).catchError((_) => null);
+
+  Future<void> _syncRunningNotification() async {
+    final settings = await _subagentSettings();
+    await subagentNotifier.syncRunning(
+      subagentStore.all.where((s) => s.isActive && _subagentUnseen(s)).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt)),
+      enabled: settings?.subagentNotifyRunning ?? true,
+    );
+  }
+
+  /// Drives notifications from a subagent record. Only subagents nobody is
+  /// looking at notify; an open chat in the foreground already shows its cards.
+  /// [answeredApproval] is the request the record ended (if any).
+  Future<void> _syncSubagentNotifications(Map<String, dynamic> record, String? answeredApproval) async {
+    if (answeredApproval != null) unawaited(subagentNotifier.cancelApproval(answeredApproval));
     switch (record['type']) {
       // Membership changes only: tool events stream far too often to
       // re-post a notification for, and they never change the set.
       case 'subagent_started' || 'subagent_status' || 'subagent_queued':
-        unawaited(subagentNotifier.syncRunning(elsewhere));
+        await _syncRunningNotification();
       case 'subagent_finished':
         final s = subagentStore[(record['subagent'] as Map)['id'] as String? ?? ''];
-        unawaited(subagentNotifier.syncRunning(elsewhere));
-        if (s != null && !_subagentIsOpen(s)) {
-          final settings = integrations.settings;
-          unawaited(
-            subagentNotifier.notifyFinished(
-              s,
-              notifyDone: settings?.subagentNotifyDone ?? true,
-              notifyFailed: settings?.subagentNotifyFailed ?? true,
-            ),
+        await _syncRunningNotification();
+        if (s != null && _subagentUnseen(s)) {
+          final settings = await _subagentSettings();
+          await subagentNotifier.notifyFinished(
+            s,
+            notifyDone: settings?.subagentNotifyDone ?? true,
+            notifyFailed: settings?.subagentNotifyFailed ?? true,
           );
         }
       case 'subagent_approval_request':
         final s = subagentStore[record['subagentId'] as String? ?? ''];
-        if (s != null && s.approval != null && !_subagentIsOpen(s)) {
-          unawaited(
-            subagentNotifier.notifyApproval(
-              s,
-              s.approval!,
-              enabled: integrations.settings?.subagentNotifyApproval ?? true,
-            ),
-          );
+        final ap = s?.approval;
+        if (s != null && ap != null && _subagentUnseen(s)) {
+          final settings = await _subagentSettings();
+          // Still pending after the settings round-trip?
+          if (s.approval?.approvalId != ap.approvalId) return;
+          await subagentNotifier.notifyApproval(s, ap, enabled: settings?.subagentNotifyApproval ?? true);
         }
-      case 'subagent_approval_dismiss':
-        unawaited(subagentNotifier.cancelApproval(record['approvalId'] as String? ?? ''));
     }
+  }
+
+  /// Re-reads the host's live subagents (after a reconnect or restart of the app side).
+  Future<void> refreshSubagents() async {
+    final list = await client.call<List>('subagent_list');
+    for (final r in list.whereType<Map>()) {
+      final rec = r.cast<String, dynamic>();
+      subagentStore.applyRecord({'type': 'subagent_started', 'subagent': rec});
+      if (rec['status'] != 'queued' && rec['status'] != 'running' && rec['status'] != 'waiting_approval' && rec['status'] != 'stopping') {
+        subagentStore.applyRecord({'type': 'subagent_finished', 'subagent': rec});
+      }
+    }
+    notifyListeners();
   }
 
   /// Subagents of the open chat, oldest first.
@@ -115,10 +158,16 @@ class AgentController extends ChangeNotifier {
   Future<void> moveQueuedSubagentMessage(String id, String queueId, String direction) =>
       client.call('subagent_queue_move', {'subagentId': id, 'queueId': queueId, 'direction': direction});
 
-  Future<void> replySubagentApproval(String id, String approvalId, bool allow) => client.call(
-    'subagent_approval_reply',
-    {'subagentId': id, 'approvalId': approvalId, 'allow': allow},
-  );
+  /// Answers a subagent's approval request; [always] also allows the same
+  /// action ([key]) for the rest of this app run, like the chat's approvals.
+  Future<void> replySubagentApproval(String id, String approvalId, bool allow, {bool always = false, String? key}) =>
+      client.call('subagent_approval_reply', {
+        'subagentId': id,
+        'approvalId': approvalId,
+        'allow': allow,
+        'always': always,
+        'key': ?key,
+      });
 
   /// Plans the user closed (todo_write call ids); kept for the app's lifetime.
   final _dismissedPlans = <String>{};
@@ -188,6 +237,9 @@ class AgentController extends ChangeNotifier {
       _applyState(info);
       await Future.wait([loadHistory(), refreshProviders()]);
       unawaited(integrations.refresh().then((_) => integrations.refreshProjects()).catchError((_) {}));
+      // Notification toggles and limits must be known before the first subagent record.
+      unawaited(integrations.refreshSettings().then((_) {}).catchError((_) {}));
+      unawaited(refreshSubagents().catchError((_) {}));
       status = BootStatus.ready;
     } catch (e) {
       status = BootStatus.failed;
@@ -229,16 +281,45 @@ class AgentController extends ChangeNotifier {
 
   Future<void> abort() => client.call('abort');
 
-  /// Starts a session, in [dir] when given (a project folder), else the workspace.
-  Future<void> newSession({String? dir}) async {
+  /// The host refuses to switch chats mid-turn with this message (host.ts BUSY_SWITCH).
+  static const busySwitchError = 'The agent is still working in this chat. Stop it before switching chats.';
+
+  /// Asks the user whether to stop the running turn to switch chats; set by
+  /// the home shell (it owns a navigator). Null or false keeps the turn.
+  Future<bool> Function()? confirmStopToSwitch;
+
+  /// Whether a chat switch may go ahead: always when idle; while the agent
+  /// works only if the user agrees to stop it, then once it has stopped.
+  Future<bool> readyToSwitch() async {
+    if (!busy) return true;
+    final ask = confirmStopToSwitch;
+    if (ask == null || !await ask()) return false;
+    await abort();
+    // The turn ends on the host's agent_end; wait for it (a stuck tool gets 10 s).
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (busy && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    return !busy;
+  }
+
+  /// Starts a session, in [dir] when given (a project folder), else the
+  /// workspace. False when the user kept the running turn instead.
+  Future<bool> newSession({String? dir}) async {
+    if (!await readyToSwitch()) return false;
     _applyState(await client.call<Map<String, dynamic>>('new_session', {'cwd': ?dir}));
     _resetTranscript();
     notifyListeners();
+    return true;
   }
 
-  Future<void> openSession(String path) async {
+  /// Opens another chat. False when the user kept the running turn instead.
+  Future<bool> openSession(String path) async {
+    if (path == sessionFile) return true;
+    if (!await readyToSwitch()) return false;
     _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
     await loadHistory();
+    return true;
   }
 
   Future<void> renameSession(String path, String name) async {
@@ -373,6 +454,7 @@ class AgentController extends ChangeNotifier {
 
   /// Copies this chat into a new one, rewound to just before [entryId].
   Future<String> forkAt(String? entryId) async {
+    if (!await readyToSwitch()) throw AgentError(busySwitchError);
     final r = (await client.call<Map>('fork_session', {'entryId': ?entryId})).cast<String, dynamic>();
     _applyState(r);
     await loadHistory();
@@ -458,8 +540,15 @@ class AgentController extends ChangeNotifier {
           'subagent_queued' ||
           'subagent_approval_request' ||
           'subagent_approval_dismiss':
+        // The request this record ends, read before the store forgets it.
+        final subId = record['subagentId'] as String? ?? ((record['subagent'] as Map?)?['id'] as String?);
+        final before = subagentStore[subId ?? '']?.approval?.approvalId;
         subagentStore.applyRecord(record);
-        _syncSubagentNotifications(record);
+        final after = subagentStore[subId ?? '']?.approval?.approvalId;
+        final answered = record['type'] == 'subagent_approval_dismiss'
+            ? record['approvalId'] as String? ?? before
+            : (before != null && before != after ? before : null);
+        unawaited(_syncSubagentNotifications(record, answered));
         _scheduleNotify();
       case 'auth_prompt' || 'auth_event' || 'auth_dismiss':
         authRecords.add(record);
@@ -547,6 +636,10 @@ class AgentController extends ChangeNotifier {
       }
     }
   }
+
+  /// Adds a saved message as history would (for widget tests and goldens).
+  @visibleForTesting
+  void addHistoryMessage(Map<String, dynamic> m) => _addMessage(m, fromHistory: true);
 
   void _addMessage(Map<String, dynamic> m, {bool fromHistory = false}) {
     switch (m['role']) {
@@ -657,6 +750,8 @@ class AgentController extends ChangeNotifier {
     planMode = s['planMode'] == true;
     approvalMode = s['approvalMode'] as String? ?? approvalMode;
     if (s['isStreaming'] is bool) _setBusy(s['isStreaming'] as bool);
+    // Another chat may now be on screen: its subagents stop (or start) needing the running notification.
+    if (subagentStore.all.isNotEmpty) unawaited(_syncRunningNotification());
   }
 
   /// Re-reads session state after something outside the chat changed it (the shell).

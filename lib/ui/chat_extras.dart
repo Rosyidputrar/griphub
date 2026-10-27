@@ -216,6 +216,30 @@ class AttachmentStrip extends StatelessWidget {
 // Approvals
 
 /// Asks once before turning every approval off, since pi can then delete files or push without asking.
+/// The agent is mid-turn and the user picked another chat: stop it and
+/// switch, or stay. Switching without stopping would drop the reply.
+Future<bool> confirmStopToSwitch(BuildContext context) async {
+  final p = context.palette;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(tr('Stop the agent and switch?')),
+      content: Text(
+        tr('The agent is still working in this chat. Switching stops it; what it has done so far stays in the chat.'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white),
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(tr('Stop and switch')),
+        ),
+      ],
+    ),
+  );
+  return ok == true;
+}
+
 Future<bool> confirmBypass(BuildContext context) async =>
     await showDialog<bool>(
       context: context,

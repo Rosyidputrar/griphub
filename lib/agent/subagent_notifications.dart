@@ -8,12 +8,11 @@ import 'subagents.dart';
 /// They only say a subagent finished/failed/needs approval/is running, and
 /// tapping one always opens the parent chat — never a new chat.
 ///
-/// Only subagents of OTHER chats notify. When the parent chat is open, the
-/// card and modal already show everything, so notifying would double-report.
-/// The "running" notification is persistent in the shade sense: it stays
-/// until the subagent finishes (then it is cancelled and, for done/failed,
-/// replaced by a terminal notification). Parallel subagents share one
-/// summary notification instead of one per subagent.
+/// The controller decides WHICH subagents are worth a notification: those
+/// whose chat is not on screen (another chat, or the app is in the
+/// background). The "running" notification stays until those subagents
+/// finish; parallel subagents share one summary notification instead of one
+/// per subagent. Texts are English keys passed through [translate].
 typedef SubagentNotifyFn =
     Future<void> Function(
       int id,
@@ -26,10 +25,16 @@ typedef SubagentNotifyFn =
 
 typedef SubagentCancelFn = Future<void> Function(int id);
 
+String _same(String s) => s;
+
 class SubagentNotifier {
-  SubagentNotifier({required this.notify, required this.cancel});
+  SubagentNotifier({required this.notify, required this.cancel, String Function(String)? translate})
+    : translate = translate ?? _same;
   final SubagentNotifyFn notify;
   final SubagentCancelFn cancel;
+
+  /// UI language for the notification texts (the app passes its `tr`).
+  String Function(String) translate;
 
   /// Fixed ids: a single running subagent, and the parallel summary.
   static const runningId = 910001;
@@ -38,65 +43,74 @@ class SubagentNotifier {
   final _approvalIds = <String, int>{};
   int _nextId = 930000;
 
+  /// What the running notification currently shows, so identical syncs post nothing.
+  String? _runningShown;
+
   int _freshId() => _nextId++;
 
-  Map<String, Object?> _launch(SubagentState s) => {
-    'action': 'open_chat',
-    'path': s.parentSessionFile,
-  };
+  Map<String, Object?> _launch(SubagentState s) => {'action': 'open_chat', 'path': s.parentSessionFile};
 
-  /// Keeps the running notification in step with active subagents of other
-  /// chats: one running, a summary when several, none when zero.
-  Future<void> syncRunning(List<SubagentState> elsewhere) async {
-    if (elsewhere.isEmpty) {
+  String get _tapBody => translate('Tap to open the parent chat.');
+
+  /// Keeps the running notification in step with [unseen] active subagents:
+  /// one running, a summary when several, none when zero or when [enabled]
+  /// is off.
+  Future<void> syncRunning(List<SubagentState> unseen, {bool enabled = true}) async {
+    final active = enabled ? unseen.where((s) => s.isActive).toList() : const <SubagentState>[];
+    final shown = active.isEmpty
+        ? null
+        : '${active.length}|${active.first.parentSessionFile}|${translate('Subagent running')}';
+    if (shown == _runningShown) return;
+    _runningShown = shown;
+    if (active.isEmpty) {
       await cancel(runningId).catchError((_) {});
       await cancel(summaryId).catchError((_) {});
       return;
     }
-    if (elsewhere.length == 1) {
+    if (active.length == 1) {
       await cancel(summaryId).catchError((_) {});
       await notify(
         runningId,
-        'Subagent berjalan',
-        'Ketuk untuk membuka chat induk.',
+        translate('Subagent running'),
+        _tapBody,
         channel: 'chats',
-        launch: _launch(elsewhere.first),
+        launch: _launch(active.first),
       ).catchError((_) {});
       return;
     }
     await cancel(runningId).catchError((_) {});
     await notify(
       summaryId,
-      '${elsewhere.length} subagent berjalan',
-      'Ketuk untuk membuka chat induk.',
+      translate('{n} subagents running').replaceAll('{n}', '${active.length}'),
+      _tapBody,
       channel: 'chats',
-      launch: _launch(elsewhere.first),
+      launch: _launch(active.first),
     ).catchError((_) {});
   }
 
-  /// Terminal notification for a subagent of another chat. Stopped ones
-  /// never notify: the user stopped them on purpose.
+  /// Terminal notification. Stopped ones never notify: the user (or a limit
+  /// they set) stopped them, and the card says why.
   Future<void> notifyFinished(SubagentState s, {required bool notifyDone, required bool notifyFailed}) async {
     if (s.status == SubagentStatus.done && !notifyDone) return;
     if (s.status == SubagentStatus.failed && !notifyFailed) return;
     if (s.status != SubagentStatus.done && s.status != SubagentStatus.failed) return;
     await notify(
       _freshId(),
-      s.status == SubagentStatus.done ? 'Subagent selesai' : 'Subagent gagal',
-      'Ketuk untuk membuka chat induk.',
+      translate(s.status == SubagentStatus.done ? 'Subagent finished' : 'Subagent failed'),
+      _tapBody,
       channel: 'chats',
       launch: _launch(s),
     ).catchError((_) {});
   }
 
   Future<void> notifyApproval(SubagentState s, SubagentApproval ap, {required bool enabled}) async {
-    if (!enabled) return;
+    if (!enabled || _approvalIds.containsKey(ap.approvalId)) return;
     final id = _freshId();
     _approvalIds[ap.approvalId] = id;
     await notify(
       id,
-      'Subagent minta persetujuan',
-      'Ketuk untuk membuka chat induk dan menjawab.',
+      translate('Subagent needs approval'),
+      translate('Tap to open the parent chat and answer.'),
       channel: 'approvals',
       launch: _launch(s),
     ).catchError((_) {});

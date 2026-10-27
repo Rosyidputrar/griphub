@@ -59,7 +59,7 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> {
+class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver {
   final _controller = CodeLineEditingController();
   late final _find = CodeFindController(_controller);
   final _scroll = CodeScrollController();
@@ -82,6 +82,12 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _crlf = false;
   int _size = 0;
 
+  /// The file's bytes as last read or written here. The agent (or a
+  /// background run) may write the same file while it is open; saving then
+  /// used to overwrite its changes silently. Saving now compares the disk
+  /// with this first.
+  List<int>? _diskBytes;
+
   String get _name => widget.path.split('/').last;
   String get _ext => _name.contains('.') ? _name.split('.').last.toLowerCase() : '';
   bool get _previewable => const {'html', 'htm', 'svg'}.contains(_ext);
@@ -89,11 +95,48 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  /// Back from another app or screen: an unedited buffer quietly follows the disk.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_dirty && !_loading && !_binary) _reloadIfChanged();
+  }
+
+  Future<bool> _changedOnDisk() async {
+    final known = _diskBytes;
+    if (known == null) return false;
+    try {
+      final now = await File(widget.path).readAsBytes();
+      if (now.length != known.length) return true;
+      for (var i = 0; i < now.length; i++) {
+        if (now[i] != known[i]) return true;
+      }
+      return false;
+    } on FileSystemException {
+      // Deleted or moved away: saving recreates it, which is what the user asked for.
+      return false;
+    }
+  }
+
+  Future<void> _reloadIfChanged() async {
+    if (await _changedOnDisk() && mounted) await _reload();
+  }
+
+  Future<void> _reload() async {
+    _controller.removeListener(_onChanged);
+    setState(() {
+      _loading = true;
+      _dirty = false;
+    });
+    await _load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onChanged);
     _find.dispose();
     _controller.dispose();
@@ -106,6 +149,7 @@ class _EditorScreenState extends State<EditorScreen> {
       final file = File(widget.path);
       final bytes = await file.readAsBytes();
       _size = bytes.length;
+      _diskBytes = bytes;
       final head = bytes.length > 8192 ? bytes.sublist(0, 8192) : bytes;
       if (head.contains(0)) {
         setState(() {
@@ -159,10 +203,22 @@ class _EditorScreenState extends State<EditorScreen> {
 
   Future<bool> _save() async {
     if (_readOnly || _saving) return false;
+    if (await _changedOnDisk()) {
+      if (!mounted) return false;
+      final choice = await _confirmOverwrite();
+      if (choice == 'reload') {
+        await _reload();
+        return false;
+      }
+      if (choice != 'overwrite') return false;
+    }
+    if (!mounted) return false;
     setState(() => _saving = true);
     try {
       final text = _controller.text;
-      await File(widget.path).writeAsString(_crlf ? text.replaceAll('\n', '\r\n') : text);
+      final bytes = utf8.encode(_crlf ? text.replaceAll('\n', '\r\n') : text);
+      await File(widget.path).writeAsBytes(bytes, flush: true);
+      _diskBytes = bytes;
       _saved = text;
       if (!mounted) return true;
       setState(() {
@@ -180,6 +236,27 @@ class _EditorScreenState extends State<EditorScreen> {
       return false;
     }
   }
+
+  /// The file changed on disk since it was opened (usually the agent wrote it).
+  Future<String?> _confirmOverwrite() => showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(tr('File changed on disk')),
+      content: Text(
+        tr('{name} was changed outside the editor, probably by the agent. Overwrite replaces those changes with yours; Reload drops your edits and shows the new file.')
+            .replaceAll('{name}', _name),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
+        TextButton(onPressed: () => Navigator.pop(ctx, 'reload'), child: Text(tr('Reload'))),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, 'overwrite'),
+          style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+          child: Text(tr('Overwrite')),
+        ),
+      ],
+    ),
+  );
 
   Future<void> _confirmLeave() async {
     final choice = await showDialog<String>(
