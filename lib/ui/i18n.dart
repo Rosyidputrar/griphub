@@ -459,6 +459,10 @@ const _id = <String, String>{
   'Sent with your message as a file the agent reads, so a long log or document does not fill the chat.':
       'Dikirim bersama pesanmu sebagai file yang dibaca agent, jadi log atau dokumen panjang tidak memenuhi chat.',
   'Paste as text': 'Tempel sebagai teks',
+  'This turn': 'Giliran ini',
+  'subagent': 'subagent',
+  'No GripHub price is known for this model, so only its tokens are shown.':
+      'Harga GripHub untuk model ini tidak diketahui, jadi hanya tokennya yang ditampilkan.',
   "Couldn't reach the remote; showing the branches on this phone.":
       'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
   'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':

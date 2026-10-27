@@ -535,6 +535,10 @@ class _ChatScreenState extends State<ChatScreen> {
               live: agent,
               modelLabel: agent.modelLabel,
               subagentCard: placed.cardFor,
+              subagentCost: (id) => switch (agent.subagentStore.all.where((s) => s.toolCallId == id).firstOrNull) {
+                final s? => (credits: s.credits),
+                null => null,
+              },
               footer: footers[i],
             ),
             NoticeEntry() => NoticeView(e),

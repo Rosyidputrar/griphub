@@ -62,7 +62,7 @@ import {
 	wibDay,
 	writeZip,
 } from "./workbench.js";
-import { FALLBACK_RATES, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
+import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { Router } from "./router.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
@@ -110,8 +110,17 @@ function log(...args: unknown[]) {
 	process.stderr.write(`${args.map(String).join(" ")}\n`);
 }
 
+/**
+ * An assistant message as the app gets it: a copy with `griphubCost`, the estimate for that model request
+ * (pricing.ts), so the chat can total a turn. A copy, because pi persists the original to the session file.
+ */
+function withCost(m: any) {
+	return m?.role === "assistant" ? { ...m, griphubCost: messageCost(m) } : m;
+}
+
 /** Drop cumulative snapshots from streaming updates, like pi's JSON mode. */
 function wireEvent(event: AgentSessionEvent): object {
+	if (event.type === "message_end") return { ...event, message: withCost((event as any).message) };
 	if (event.type === "message_update") {
 		const { message: _message, assistantMessageEvent, ...rest } = event as any;
 		const { partial, ...delta } = assistantMessageEvent ?? {};
@@ -1035,7 +1044,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "delete_project":
 			return deleteProject(cmd.path, !!cmd.deleteChats);
 		case "messages":
-			return s.messages;
+			return s.messages.map(withCost);
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":

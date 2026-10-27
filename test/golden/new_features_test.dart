@@ -9,6 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/integrations.dart';
+import 'package:griphub_agent/agent/models.dart';
+import 'package:griphub_agent/ui/message_views.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/repos_screen.dart';
 import 'package:griphub_agent/ui/tasks_screen.dart';
@@ -304,6 +306,123 @@ void main() {
         await tester.tap(find.text(look.language == 'id' ? 'Konten yang ditempel' : 'Pasted content').first);
         await settle(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('paste_preview_${look.name}')));
+      });
+    }
+  });
+
+  group('chat: what a turn cost', () {
+    /// A finished assistant message as the host sends it (message_end / messages), with its usage and estimate.
+    AssistantEntry reply(
+      String? text, {
+      int input = 0,
+      int output = 0,
+      int cacheRead = 0,
+      double? credits,
+      bool floored = false,
+      bool withCost = true,
+      String? subagentCall,
+      String model = 'deepseek-v4-flash',
+    }) => AssistantEntry()
+      ..applyMessage({
+        'role': 'assistant',
+        'model': model,
+        'stopReason': 'stop',
+        'content': [
+          if (text != null) {'type': 'text', 'text': text},
+          if (subagentCall != null) {'type': 'toolCall', 'id': subagentCall, 'name': 'subagent', 'arguments': {'task': 'riset'}},
+        ],
+        'usage': {'input': input, 'output': output, 'cacheRead': cacheRead, 'cacheWrite': 0, 'totalTokens': input + output + cacheRead},
+        if (withCost) 'griphubCost': {'credits': credits, 'floored': floored},
+      });
+
+    final turn = <ChatEntry>[
+      UserEntry('riset saham'),
+      reply(null, input: 2000, output: 300, cacheRead: 40000, credits: 0.0127, subagentCall: 'call-sub'),
+      reply(null, input: 900, output: 100, credits: 0.01, floored: true),
+      reply('Ini laporannya.', input: 1200, output: 2400, cacheRead: 45000, credits: 0.0146),
+    ];
+
+    test('every request of the turn adds up; subagents are listed apart', () {
+      final cost = turnFooters(turn, busy: false)[3]!.cost!;
+      expect(cost.requests, 3);
+      expect(cost.floored, 1);
+      expect(cost.tokens, 2000 + 300 + 40000 + 900 + 100 + 1200 + 2400 + 45000);
+      expect(cost.cached, 85000);
+      expect(cost.credits, closeTo(0.0373, 1e-9));
+      expect(cost.subagentCalls, ['call-sub']);
+    });
+
+    test('one request without a price makes the total unknown, tokens still count', () {
+      final cost = turnFooters([
+        UserEntry('a'),
+        reply(null, input: 10, output: 5, credits: 0.1),
+        reply('b', input: 10, output: 5, credits: null),
+      ], busy: false)[2]!.cost!;
+      expect(cost.credits, isNull);
+      expect(cost.tokens, 30);
+    });
+
+    test('an older host without estimates: tokens only; no usage at all: no cost', () {
+      expect(turnFooters([UserEntry('a'), reply('b', input: 7, output: 3, withCost: false)], busy: false)[1]!.cost!.credits, isNull);
+      final bare = AssistantEntry()
+        ..applyMessage({'role': 'assistant', 'model': 'm', 'stopReason': 'stop', 'content': [{'type': 'text', 'text': 'x'}]});
+      expect(turnFooters([UserEntry('a'), bare], busy: false)[1]!.cost, isNull);
+    });
+
+    test('turns are counted separately', () {
+      final two = [...turn, UserEntry('lanjut'), reply('Oke.', input: 100, output: 10, credits: 0.002)];
+      final f = turnFooters(two, busy: false);
+      expect(f[5]!.cost!.requests, 1);
+      expect(f[5]!.cost!.credits, 0.002);
+    });
+
+    Widget view(List<ChatEntry> entries, {double? subagentCredits = 0.208}) {
+      final footers = turnFooters(entries, busy: false);
+      final last = entries.length - 1;
+      return Scaffold(
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: AssistantMessageView(
+            entries[last] as AssistantEntry,
+            tools: const {},
+            modelLabel: (id) => id == 'deepseek-v4-flash' ? 'DeepSeek V4 Flash' : id,
+            subagentCost: (id) => id == 'call-sub' ? (credits: subagentCredits) : null,
+            footer: footers[last],
+          ),
+        ),
+      );
+    }
+
+    testWidgets('the footer shows tokens, credits and the subagent apart', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      await pumpLook(tester, const Look(), view(turn));
+      expect(find.text('92k tokens · ~0.037 credits · (+0.208 subagent)'), findsOneWidget);
+      await tester.tap(find.text('DeepSeek V4 Flash · '));
+      await settle(tester);
+      expect(find.text('3 (1 at the minimum)'), findsOneWidget);
+      expect(find.text('92k (92% cache)'), findsOneWidget);
+      expect(find.text('~0.037 credits · Rp 11'), findsOneWidget);
+      expect(find.text('~0.208 credits · Rp 62'), findsOneWidget);
+    });
+
+    testWidgets('an unknown price shows tokens only, and the sheet says why', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      await pumpLook(tester, const Look(), view([UserEntry('a'), reply('b', input: 1200, output: 300, credits: null, model: 'my-llm')]));
+      expect(find.text('2k tokens'), findsOneWidget);
+      await tester.tap(find.text('my-llm · '));
+      await settle(tester);
+      expect(find.text('No GripHub price is known for this model, so only its tokens are shown.'), findsOneWidget);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {
+      testWidgets('golden: turn cost footer and sheet ${look.name}', (tester) async {
+        host = FakeHost(); // inside the fake-async zone, or replies never arrive
+        await pumpLook(tester, look, view(turn));
+        expect(layoutErrors.where((e) => e.contains(look.name)), isEmpty, reason: 'nothing overflows');
+        await expectLater(find.byType(AssistantMessageView), matchesGoldenFile(golden('turn_cost_footer_${look.name}')));
+        await tester.tap(find.byType(GestureDetector).last);
+        await settle(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('turn_cost_sheet_${look.name}')));
       });
     }
   });

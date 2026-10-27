@@ -195,6 +195,9 @@ class AssistantEntry extends ChatEntry {
   bool aborted = false;
   String? model;
 
+  /// This model request's usage, once the message is final (null while streaming, or for a message without it).
+  RequestUsage? usage;
+
   List<Block> get orderedBlocks {
     final keys = blocks.keys.toList()..sort();
     return [for (final k in keys) blocks[k]!];
@@ -222,6 +225,7 @@ class AssistantEntry extends ChatEntry {
     }
     streaming = false;
     model = message['model'] as String?;
+    usage = RequestUsage.fromMessage(message);
     final stop = message['stopReason'];
     aborted = stop == 'aborted';
     if (stop == 'error') error = readableError(message['errorMessage'] as String? ?? 'The model returned an error.');
@@ -391,8 +395,83 @@ class PartialJsonReader {
   }
 }
 
+/// One model request: its tokens as pi reports them, and the host's GripHub estimate for it
+/// (agent/src/pricing.ts messageCost; [credits] null when the price is unknown or it went to another provider).
+class RequestUsage {
+  const RequestUsage({
+    this.input = 0,
+    this.output = 0,
+    this.cacheRead = 0,
+    this.cacheWrite = 0,
+    this.credits,
+    this.floored = false,
+  });
+
+  final int input;
+  final int output;
+  final int cacheRead;
+  final int cacheWrite;
+  final double? credits;
+
+  /// Billed at the model's per-request minimum.
+  final bool floored;
+
+  static RequestUsage? fromMessage(Map<String, dynamic> message) {
+    final u = message['usage'];
+    if (u is! Map) return null;
+    int n(Object? v) => (v as num?)?.toInt() ?? 0;
+    final cost = message['griphubCost'];
+    return RequestUsage(
+      input: n(u['input']),
+      output: n(u['output']),
+      cacheRead: n(u['cacheRead']),
+      cacheWrite: n(u['cacheWrite']),
+      credits: cost is Map ? (cost['credits'] as num?)?.toDouble() : null,
+      floored: cost is Map && cost['floored'] == true,
+    );
+  }
+}
+
+/// What a whole turn cost: every model request from the user's message to the final answer, summed.
+/// Subagents the turn started are counted apart (their cards carry their own cost).
+class TurnCost {
+  TurnCost(Iterable<RequestUsage> requests, {this.subagentCalls = const []}) {
+    var unknown = false;
+    var credits = 0.0;
+    for (final r in requests) {
+      this.requests++;
+      if (r.floored) floored++;
+      input += r.input;
+      output += r.output;
+      cacheRead += r.cacheRead;
+      cacheWrite += r.cacheWrite;
+      if (r.credits == null) {
+        unknown = true;
+      } else {
+        credits += r.credits!;
+      }
+    }
+    // One request of unknown price makes the total unknown: never a made-up number.
+    this.credits = unknown || this.requests == 0 ? null : credits;
+  }
+
+  int requests = 0;
+  int floored = 0;
+  int input = 0;
+  int output = 0;
+  int cacheRead = 0;
+  int cacheWrite = 0;
+  late final double? credits;
+
+  /// Tool call ids of the subagents this turn started.
+  final List<String> subagentCalls;
+
+  int get tokens => input + output + cacheRead + cacheWrite;
+  int get cached => cacheRead + cacheWrite;
+}
+
 /// What the copy-and-model footer under an assistant reply shows.
-typedef TurnFooter = ({String text, String? model});
+typedef TurnFooter = ({String text, String? model, TurnCost? cost});
 
 /// Footers for a transcript, keyed by entry index. One turn (from a user
 /// message to the next) is several assistant messages — text, tools, more
@@ -420,7 +499,22 @@ Map<int, TurnFooter> turnFooters(List<ChatEntry> entries, {required bool busy}) 
     }
     if (tail == null || answer == null) return;
     final lastEntry = entries[tail] as AssistantEntry;
-    out[tail] = (text: _replyText(answer), model: lastEntry.model ?? answer.model);
+    final turn = entries.sublist(start, end).whereType<AssistantEntry>();
+    final requests = [for (final e in turn) ?e.usage];
+    out[tail] = (
+      text: _replyText(answer),
+      model: lastEntry.model ?? answer.model,
+      cost: requests.isEmpty
+          ? null
+          : TurnCost(
+              requests,
+              subagentCalls: [
+                for (final e in turn)
+                  for (final b in e.orderedBlocks)
+                    if (b.kind == BlockKind.toolCall && b.toolName == 'subagent' && b.toolCallId != null) b.toolCallId!,
+              ],
+            ),
+    );
   }
 
   for (var i = 0; i < entries.length; i++) {
