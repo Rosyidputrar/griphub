@@ -127,6 +127,69 @@ void main() {
     expect(store.runningElsewhere(file: 'chat-2.jsonl').map((s) => s.id), ['sub-1']);
   });
 
+  test('host status names map exactly; unknown names keep the current status', () {
+    final store = SubagentStore();
+    store.applyRecord(started());
+    store.applyRecord({'type': 'subagent_status', 'subagentId': 'sub-1', 'status': 'waiting_approval'});
+    expect(store['sub-1']!.status, SubagentStatus.waitingApproval);
+    store.applyRecord({'type': 'subagent_status', 'subagentId': 'sub-1', 'status': 'mystery'});
+    expect(store['sub-1']!.status, SubagentStatus.waitingApproval);
+    store.applyRecord({'type': 'subagent_status', 'subagentId': 'sub-1', 'status': 'stopping'});
+    expect(store['sub-1']!.status, SubagentStatus.stopping);
+  });
+
+  test('a late status never revives a finished subagent; finishing drops its approval', () {
+    final store = SubagentStore();
+    store.applyRecord(started());
+    store.applyRecord({
+      'type': 'subagent_approval_request',
+      'subagentId': 'sub-1',
+      'approvalId': 'a1',
+      'toolName': 'bash',
+      'summary': 's',
+      'reason': 'r',
+      'key': 'k',
+    });
+    final fin = (started()['subagent'] as Map<String, dynamic>)..addAll({'status': 'stopped', 'stopCode': 'credit', 'finishedAt': 3000});
+    store.applyRecord({'type': 'subagent_finished', 'subagent': fin});
+    expect(store['sub-1']!.approval, isNull);
+    expect(store['sub-1']!.stopCode, SubagentStopCode.credit);
+    store.applyRecord({'type': 'subagent_status', 'subagentId': 'sub-1', 'status': 'running'});
+    expect(store['sub-1']!.status, SubagentStatus.stopped);
+  });
+
+  test('a dismiss only clears the request it names', () {
+    final store = SubagentStore();
+    store.applyRecord(started());
+    Map<String, dynamic> req(String id) => {
+      'type': 'subagent_approval_request',
+      'subagentId': 'sub-1',
+      'approvalId': id,
+      'toolName': 'bash',
+      'summary': 's',
+      'reason': 'r',
+      'key': 'k',
+    };
+    store.applyRecord(req('a1'));
+    store.applyRecord(req('a2'));
+    store.applyRecord({'type': 'subagent_approval_dismiss', 'subagentId': 'sub-1', 'approvalId': 'a1'});
+    expect(store['sub-1']!.approval?.approvalId, 'a2');
+  });
+
+  test('toolCallId and the current tool argument come through', () {
+    final store = SubagentStore();
+    final r = started();
+    (r['subagent'] as Map)['toolCallId'] = 'call-9';
+    store.applyRecord(r);
+    store.applyRecord({
+      'type': 'subagent_event',
+      'subagentId': 'sub-1',
+      'event': {'type': 'tool_execution_start', 'toolCallId': 't1', 'toolName': 'read', 'args': {'path': 'a.dart'}},
+    });
+    expect(store['sub-1']!.toolCallId, 'call-9');
+    expect(store['sub-1']!.currentArgs, 'a.dart');
+  });
+
   test('unknown records and unknown subagents are ignored, not crashes', () {
     final store = SubagentStore();
     store.applyRecord({'type': 'subagent_event', 'subagentId': 'nope', 'event': {'type': 'agent_settled'}});
@@ -169,7 +232,7 @@ void main() {
       await notifier.syncRunning([state(id: 'sub-1', parent: 'a.jsonl', status: SubagentStatus.running)]);
       expect(posted, hasLength(1));
       expect(posted.first['id'], SubagentNotifier.runningId);
-      expect(posted.first['title'], 'Subagent berjalan');
+      expect(posted.first['title'], 'Subagent running');
       // No chat title, brief, or report content in the notification body.
       expect(posted.first['body'], isNot(contains('halo')));
       expect((posted.first['launch'] as Map)['path'], 'a.jsonl');
@@ -184,7 +247,35 @@ void main() {
       ]);
       expect(posted, hasLength(1));
       expect(posted.first['id'], SubagentNotifier.summaryId);
-      expect(posted.first['title'], '2 subagent berjalan');
+      expect(posted.first['title'], '2 subagents running');
+    });
+
+    test('texts follow the UI language through translate', () async {
+      notifier.translate = (en) => const {
+        'Subagent running': 'Subagent berjalan',
+        'Tap to open the parent chat.': 'Ketuk untuk membuka chat induk.',
+      }[en] ?? en;
+      await notifier.syncRunning([state(id: 'sub-1', parent: 'a.jsonl', status: SubagentStatus.running)]);
+      expect(posted.single['title'], 'Subagent berjalan');
+      expect(posted.single['body'], 'Ketuk untuk membuka chat induk.');
+    });
+
+    test('running notification: off when disabled, and identical syncs post once', () async {
+      final running = [state(id: 'sub-1', parent: 'a.jsonl', status: SubagentStatus.running)];
+      await notifier.syncRunning(running);
+      await notifier.syncRunning(running);
+      expect(posted, hasLength(1));
+      await notifier.syncRunning(running, enabled: false);
+      expect(cancelled, containsAll([SubagentNotifier.runningId, SubagentNotifier.summaryId]));
+      expect(posted, hasLength(1));
+    });
+
+    test('one approval request notifies once', () async {
+      final s = state(id: 'sub-1', parent: 'a.jsonl', status: SubagentStatus.waitingApproval);
+      final ap = SubagentApproval(approvalId: 'a1', toolName: 'bash', summary: 'x', reason: 'r', key: 'k');
+      await notifier.notifyApproval(s, ap, enabled: true);
+      await notifier.notifyApproval(s, ap, enabled: true);
+      expect(posted, hasLength(1));
     });
 
     test('finished notifies only when enabled; stopped never notifies', () async {
@@ -199,7 +290,7 @@ void main() {
         notifyDone: true,
         notifyFailed: true,
       );
-      expect(posted.first['title'], 'Subagent selesai');
+      expect(posted.first['title'], 'Subagent finished');
       await notifier.notifyFinished(
         state(id: 'sub-2', parent: 'a.jsonl', status: SubagentStatus.stopped),
         notifyDone: true,

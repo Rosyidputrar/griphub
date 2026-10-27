@@ -82,9 +82,17 @@ export interface SubagentToolCall {
 	finishedAt?: number;
 }
 
+/**
+ * Why a subagent stopped, as a stable code the app localizes. `stopReason`
+ * carries the same thing as English text for the parent model.
+ */
+export type SubagentStopCode = "user" | "force" | "time" | "credit" | "before_start" | "limit";
+
 /** Everything Dart needs to render the card, the modal and the history view. */
 export interface SubagentRecord {
 	id: string;
+	/** The parent's `subagent` tool call that created this subagent, so the app can draw the card at that call. */
+	toolCallId?: string;
 	parentSessionFile: string;
 	parentTitle: string;
 	/** The brief the parent wrote; shown verbatim in the detail modal. */
@@ -95,6 +103,9 @@ export interface SubagentRecord {
 	startedAt?: number;
 	finishedAt?: number;
 	currentTool?: string;
+	/** One-line argument summary of the current tool (path, query, command). */
+	currentArgs?: string;
+	/** English activity line, kept for older app builds; the app builds its own from currentTool/currentArgs. */
 	currentActivity?: string;
 	toolCalls: SubagentToolCall[];
 	queue: QueuedMessage[];
@@ -106,6 +117,7 @@ export interface SubagentRecord {
 	report?: string;
 	error?: string;
 	stopReason?: string;
+	stopCode?: SubagentStopCode;
 }
 
 /** How many subagents may run at once; the rest wait for a slot. */
@@ -195,29 +207,29 @@ export function subagentBudgetExtension(probe: SubagentBudgetProbe) {
 	};
 }
 
-/** Short activity line for the progress card, from a tool call. */
+/** Short English activity line, from a tool call (the app localizes its own from currentTool/currentArgs). */
 function activityFor(toolName: string, args: any): string {
 	const a = (args ?? {}) as Record<string, unknown>;
 	switch (toolName) {
 		case "read":
-			return `Membaca ${String(a.path ?? "")}`;
+			return `Reading ${String(a.path ?? "")}`;
 		case "grep":
-			return `Mencari "${String(a.pattern ?? "")}"`;
+			return `Searching for "${String(a.pattern ?? "")}"`;
 		case "find":
-			return `Mencari file ${String(a.pattern ?? "")}`;
+			return `Finding files ${String(a.pattern ?? "")}`;
 		case "ls":
-			return `Melihat ${String(a.path ?? "")}`;
+			return `Looking at ${String(a.path ?? "")}`;
 		case "web_search":
-			return `Mencari web "${String(a.query ?? "")}"`;
+			return `Searching the web for "${String(a.query ?? "")}"`;
 		case "web_fetch":
-			return `Membuka ${String(a.url ?? "")}`;
+			return `Opening ${String(a.url ?? "")}`;
 		case "edit":
 		case "write":
-			return `Mengubah ${String(a.path ?? "")}`;
+			return `Changing ${String(a.path ?? "")}`;
 		case "bash":
-			return `Menjalankan ${String(a.command ?? "").slice(0, 80)}`;
+			return `Running ${String(a.command ?? "").slice(0, 80)}`;
 		default:
-			return `Memakai ${toolName}`;
+			return `Using ${toolName}`;
 	}
 }
 
@@ -252,14 +264,14 @@ function contentText(content: unknown): string {
 }
 
 function capText(text: string): string {
-	return text.length > TOOL_OUTPUT_CAP ? `${text.slice(0, TOOL_OUTPUT_CAP)}… (dipotong)` : text;
+	return text.length > TOOL_OUTPUT_CAP ? `${text.slice(0, TOOL_OUTPUT_CAP)}… (truncated)` : text;
 }
 
 function formatDuration(ms: number): string {
 	const s = Math.max(0, Math.round(ms / 1000));
-	if (s < 60) return `${s} dtk`;
+	if (s < 60) return `${s}s`;
 	const m = Math.floor(s / 60);
-	return `${m} mnt ${s % 60} dtk`;
+	return `${m}m ${s % 60}s`;
 }
 
 /** The suffix appended to the brief when it is sent (the stored brief stays clean). */
@@ -307,7 +319,7 @@ export class SubagentManager {
 	/** Resolves when the subagent reaches a terminal status. */
 	waitFor(id: string): Promise<SubagentRecord> {
 		const rt = this.runtimes.get(id);
-		if (!rt) return Promise.reject(new Error("Subagent tidak ditemukan"));
+		if (!rt) return Promise.reject(new Error("Subagent not found"));
 		return rt.completion;
 	}
 
@@ -324,14 +336,15 @@ export class SubagentManager {
 	 * waits in line (status "queued") and starts when a slot frees up.
 	 * The parent is responsible for the brief; this only validates it.
 	 */
-	start(parent: SubagentParent, brief: string, profile: SubagentProfile): SubagentRecord {
+	start(parent: SubagentParent, brief: string, profile: SubagentProfile, toolCallId?: string): SubagentRecord {
 		const clean = brief.trim();
-		if (!clean) throw new Error("Tugas subagent kosong");
-		if (clean.length > MAX_TASK_CHARS) throw new Error(`Tugas subagent melebihi ${MAX_TASK_CHARS} karakter`);
+		if (!clean) throw new Error("The subagent task is empty");
+		if (clean.length > MAX_TASK_CHARS) throw new Error(`The subagent task is longer than ${MAX_TASK_CHARS} characters`);
 		const id = `sub-${Date.now().toString(36)}-${this.next++}`;
 		const limits = this.hooks.limits();
 		const record: SubagentRecord = {
 			id,
+			...(toolCallId ? { toolCallId } : {}),
 			parentSessionFile: parent.sessionFile,
 			parentTitle: parent.title,
 			brief: clean,
@@ -403,13 +416,13 @@ export class SubagentManager {
 	/** Graceful stop: finish the current tool, then stop with a partial report. */
 	stop(id: string, force: boolean): SubagentRecord {
 		const rt = this.runtimes.get(id);
-		if (!rt) throw new Error("Subagent tidak ditemukan");
+		if (!rt) throw new Error("Subagent not found");
 		const rec = rt.record;
 		if (rec.status === "done" || rec.status === "failed" || rec.status === "stopped") return rec;
 		if (rec.status === "queued") {
 			const at = this.waiting.indexOf(id);
 			if (at >= 0) this.waiting.splice(at, 1);
-			return this.finish(rt, "stopped", "Dihentikan sebelum mulai.");
+			return this.finish(rt, "stopped", "Stopped before it started.", "before_start");
 		}
 		rt.stopRequested = true;
 		if (force) rt.forceStop = true;
@@ -431,16 +444,16 @@ export class SubagentManager {
 	/** Queues a message for the subagent; it is sent as a new turn at the next settled boundary. */
 	queueMessage(id: string, text: string): SubagentRecord {
 		const rt = this.runtimes.get(id);
-		if (!rt) throw new Error("Subagent tidak ditemukan");
+		if (!rt) throw new Error("Subagent not found");
 		const rec = rt.record;
 		if (rec.status === "done" || rec.status === "failed" || rec.status === "stopped") {
-			throw new Error("Subagent sudah selesai; pesan tidak bisa diantrekan.");
+			throw new Error("The subagent has finished; messages can no longer be queued");
 		}
 		if (rec.status === "stopping") {
-			throw new Error("Subagent sedang dihentikan; pesan tidak bisa diantrekan.");
+			throw new Error("The subagent is stopping; messages can no longer be queued");
 		}
 		const clean = text.trim();
-		if (!clean) throw new Error("Pesan antrean kosong");
+		if (!clean) throw new Error("The message is empty");
 		rec.queue.push({ id: `q-${Date.now().toString(36)}-${this.nextQueue++}`, text: clean, at: Date.now() });
 		this.hooks.send({ type: "subagent_queued", subagentId: id, queue: rec.queue });
 		return rec;
@@ -448,7 +461,7 @@ export class SubagentManager {
 
 	removeQueued(id: string, queueId: string): SubagentRecord {
 		const rt = this.runtimes.get(id);
-		if (!rt) throw new Error("Subagent tidak ditemukan");
+		if (!rt) throw new Error("Subagent not found");
 		const rec = rt.record;
 		rec.queue = rec.queue.filter((q) => q.id !== queueId);
 		this.hooks.send({ type: "subagent_queued", subagentId: id, queue: rec.queue });
@@ -457,7 +470,7 @@ export class SubagentManager {
 
 	moveQueued(id: string, queueId: string, direction: "up" | "down"): SubagentRecord {
 		const rt = this.runtimes.get(id);
-		if (!rt) throw new Error("Subagent tidak ditemukan");
+		if (!rt) throw new Error("Subagent not found");
 		const rec = rt.record;
 		const at = rec.queue.findIndex((q) => q.id === queueId);
 		if (at < 0) return rec;
@@ -471,8 +484,10 @@ export class SubagentManager {
 
 	approvalReply(id: string, approvalId: string, allow: boolean, always: boolean, key?: string): SubagentRecord {
 		const rt = this.runtimes.get(id);
-		if (!rt) throw new Error("Subagent tidak ditemukan");
+		if (!rt) throw new Error("Subagent not found");
 		rt.guard.reply(approvalId, allow, always, key);
+		// Answered: the app drops the request (and its notification) on this, like the guard's own dismiss.
+		this.hooks.send({ type: "subagent_approval_dismiss", subagentId: id, approvalId });
 		if (rt.record.status === "waiting_approval") {
 			rt.record.status = "running";
 			this.emitStatus(rt);
@@ -484,7 +499,7 @@ export class SubagentManager {
 		const rec = rt.record;
 		rec.status = "running";
 		rec.startedAt = Date.now();
-		rec.currentActivity = "Menyiapkan subagent…";
+		rec.currentActivity = "Starting…";
 		rt.deadlineMs = rt.limits.minutesLimit > 0 ? rec.startedAt + rt.limits.minutesLimit * 60_000 : null;
 		this.emitStatus(rt);
 		const probe: SubagentBudgetProbe = {
@@ -522,12 +537,13 @@ export class SubagentManager {
 			case "agent_start":
 				rt.settling = false;
 				if (rec.status === "running") {
-					rec.currentActivity = "Bekerja…";
+					rec.currentActivity = "Working…";
 					this.emitStatus(rt);
 				}
 				break;
 			case "tool_execution_start":
 				rec.currentTool = e.toolName;
+				rec.currentArgs = argsSummary(e.toolName, e.args);
 				rec.currentActivity = activityFor(e.toolName, e.args);
 				rec.toolCalls.push({
 					id: String(e.toolCallId),
@@ -555,6 +571,7 @@ export class SubagentManager {
 					call.finishedAt = Date.now();
 				}
 				rec.currentTool = undefined;
+				rec.currentArgs = undefined;
 				this.refreshUsage(rt);
 				this.emitStatus(rt);
 				break;
@@ -582,11 +599,11 @@ export class SubagentManager {
 	private onSettled(rt: Runtime) {
 		const rec = rt.record;
 		this.refreshUsage(rt);
-		if (rt.forceStop) return this.finish(rt, "stopped", "Dihentikan paksa.");
-		if (rt.stopRequested) return this.finish(rt, "stopped", "Dihentikan.");
-		if (rt.limitReason) return this.finish(rt, "stopped", rt.limitReason);
+		if (rt.forceStop) return this.finish(rt, "stopped", "Force-stopped by the user.", "force");
+		if (rt.stopRequested) return this.finish(rt, "stopped", "Stopped by the user.", "user");
+		if (rt.limitReason) return this.finish(rt, "stopped", rt.limitReason, "limit");
 		const over = this.overLimit(rt);
-		if (over) return this.finish(rt, "stopped", over);
+		if (over) return this.finish(rt, "stopped", over.reason, over.code);
 		if (rec.queue.length > 0) {
 			const next = rec.queue.shift()!;
 			this.hooks.send({ type: "subagent_queued", subagentId: rec.id, queue: rec.queue });
@@ -600,12 +617,12 @@ export class SubagentManager {
 		return this.finish(rt, "done");
 	}
 
-	private overLimit(rt: Runtime): string | null {
+	private overLimit(rt: Runtime): { reason: string; code: SubagentStopCode } | null {
 		if (rt.deadlineMs !== null && Date.now() > rt.deadlineMs) {
-			return `Batas waktu subagent tercapai (${rt.limits.minutesLimit} menit).`;
+			return { reason: `The subagent time limit was reached (${rt.limits.minutesLimit} min).`, code: "time" };
 		}
 		if (rt.limits.creditLimit > 0 && rt.cachedCredits !== null && rt.cachedCredits >= rt.limits.creditLimit) {
-			return `Batas biaya subagent tercapai (${rt.limits.creditLimit} credit).`;
+			return { reason: `The subagent cost limit was reached (${rt.limits.creditLimit} credits).`, code: "credit" };
 		}
 		return null;
 	}
@@ -625,15 +642,19 @@ export class SubagentManager {
 		}
 	}
 
-	private finish(rt: Runtime, status: "done" | "failed" | "stopped", reason?: string): SubagentRecord {
+	private finish(rt: Runtime, status: "done" | "failed" | "stopped", reason?: string, code?: SubagentStopCode): SubagentRecord {
 		const rec = rt.record;
 		if (rec.status === "done" || rec.status === "failed" || rec.status === "stopped") return rec;
 		rec.status = status;
 		rec.finishedAt = Date.now();
 		rec.currentTool = undefined;
+		rec.currentArgs = undefined;
 		rec.currentActivity = undefined;
-		if (status === "failed") rec.error = reason ?? "Gagal.";
-		if (status === "stopped") rec.stopReason = reason ?? "Dihentikan.";
+		if (status === "failed") rec.error = reason ?? "Failed.";
+		if (status === "stopped") {
+			rec.stopReason = reason ?? "Stopped.";
+			rec.stopCode = code ?? "user";
+		}
 		try {
 			const text = rt.session?.getLastAssistantText() ?? "";
 			if (text) rec.report = text;
@@ -676,6 +697,7 @@ export class SubagentManager {
 			subagentId: rec.id,
 			status: rec.status,
 			currentTool: rec.currentTool ?? null,
+			currentArgs: rec.currentArgs ?? null,
 			currentActivity: rec.currentActivity ?? null,
 			queueCount: rec.queue.length,
 			inputTokens: rec.inputTokens,
@@ -714,20 +736,20 @@ export function subagentTool(manager: SubagentManager, getParent: () => Subagent
 				Type.String({ description: "read (default): research only. full: may edit files and run commands." }),
 			),
 		}),
-		async execute(_id: string, params: { task: string; profile?: string }) {
+		async execute(toolCallId: string, params: { task: string; profile?: string }) {
 			const parent = getParent();
 			const profile: SubagentProfile = params.profile === "full" ? "full" : "read";
-			const record = manager.start(parent, params.task, profile);
+			const record = manager.start(parent, params.task, profile, toolCallId);
 			const done = await manager.waitFor(record.id);
 			const elapsed = done.startedAt && done.finishedAt ? formatDuration(done.finishedAt - done.startedAt) : "?";
-			const usage = `(${done.toolCalls.length} tool calls, ${elapsed}${done.credits !== null ? `, ~${done.credits.toFixed(2)} credit (perkiraan)` : ""})`;
+			const usage = `(${done.toolCalls.length} tool calls, ${elapsed}${done.credits !== null ? `, ~${done.credits.toFixed(2)} credits (estimate)` : ""})`;
 			let text: string;
 			if (done.status === "done") {
-				text = `Subagent selesai ${usage}.\n\nLaporan:\n${done.report ?? "(tidak ada laporan)"}`;
+				text = `Subagent finished ${usage}.\n\nReport:\n${done.report ?? "(no report)"}`;
 			} else if (done.status === "stopped") {
-				text = `Subagent dihentikan ${usage}. Alasan: ${done.stopReason ?? "dihentikan"}.\n\nLaporan parsial:\n${done.report ?? "(tidak ada laporan parsial)"}`;
+				text = `Subagent stopped ${usage}. Reason: ${done.stopReason ?? "stopped"}\n\nPartial report:\n${done.report ?? "(no partial report)"}`;
 			} else {
-				text = `Subagent gagal ${usage}. Galat: ${done.error ?? "tidak diketahui"}.\n\nKeluaran parsial:\n${done.report ?? "(tidak ada keluaran parsial)"}`;
+				text = `Subagent failed ${usage}. Error: ${done.error ?? "unknown"}\n\nPartial output:\n${done.report ?? "(no partial output)"}`;
 			}
 			return {
 				content: [{ type: "text" as const, text }],

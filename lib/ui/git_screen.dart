@@ -559,7 +559,7 @@ class _GitScreenState extends State<GitScreen> {
                         color: staged ? p.text : p.muted,
                       ),
                       onPressed: () =>
-                          _apply(() => staged ? _f.gitUnstage([f.path]) : _f.gitStage([f.path]), paths: [f.path]),
+                          _apply(() => staged ? _f.gitUnstage(f.paths) : _f.gitStage(f.paths), paths: [f.path]),
                     ),
             ),
             const SizedBox(width: 6),
@@ -573,9 +573,9 @@ class _GitScreenState extends State<GitScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontFamily: mono, fontSize: 13, fontWeight: FontWeight.w600, color: p.text),
                   ),
-                  if (dir.isNotEmpty)
+                  if (f.from != null || dir.isNotEmpty)
                     Text(
-                      dir,
+                      f.from != null ? '${tr('from')} ${f.from}' : dir,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontFamily: mono, fontSize: 11, color: p.muted),

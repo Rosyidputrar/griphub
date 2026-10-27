@@ -51,9 +51,10 @@ Future<void> showDeploySheet(BuildContext context, AgentController agent) async 
   );
   if (request == null || !context.mounted) return;
   var options = request.options;
-  // Pages and Vercel publish to the public internet: show the resolved
-  // destination and require an explicit confirmation before pushing.
-  if (request.target == 'github_pages' || request.target == 'vercel') {
+  // Pages and Vercel publish to the public internet, SSH to a server that is
+  // often web-facing: show the resolved destination and what stays behind,
+  // and require an explicit confirmation before uploading.
+  if (request.target == 'github_pages' || request.target == 'vercel' || request.target == 'ssh') {
     final plan = await agent.integrations.deployPlan(
       target: request.target,
       dir: request.dir,
@@ -77,12 +78,23 @@ Future<void> showDeploySheet(BuildContext context, AgentController agent) async 
                     : tr('Existing repository ({visibility}).').replaceAll('{visibility}', '${plan['visibility']}'),
               ),
               Text(tr('Branch: gh-pages — your working branch is not touched.')),
+            ] else if (request.target == 'ssh') ...[
+              Text('${tr('Server')}: ${plan['server']}'),
+              Text('${tr('Remote folder')}: ${plan['remoteDir']}'),
+              Text(tr('{n} files are uploaded; files already on the server are kept.').replaceAll('{n}', '${plan['files']}')),
             ] else ...[
               Text('${tr('Project')}: ${plan['project']}'),
               Text(tr(plan['preview'] == true ? 'Preview deployment.' : 'Production deployment.')),
             ],
             Text('${tr('Folder')}: $folder'),
             Text(tr('Only this folder is uploaded (no .env, dotfiles, node_modules, symlinks).')),
+            if ((plan['skipped'] as List?)?.isNotEmpty == true) ...[
+              const SizedBox(height: 6),
+              Text(
+                '${tr('Not uploaded')}: ${(plan['skipped'] as List).join(', ')}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
           ],
         ),
         actions: [

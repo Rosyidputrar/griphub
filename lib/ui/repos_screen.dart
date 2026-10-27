@@ -38,7 +38,7 @@ class _ReposScreenState extends State<ReposScreen> {
       task: (log, _) => it.clone(repo.fullName, onLine: log),
     );
     if (path == null || !mounted) return;
-    await widget.agent.newSession(dir: path);
+    if (!await widget.agent.newSession(dir: path)) return;
     if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
   }
 

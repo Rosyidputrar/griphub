@@ -12,15 +12,32 @@
 /// queued message starts a new turn on the same subagent.
 enum SubagentStatus { queued, running, waitingApproval, stopping, done, failed, stopped }
 
-SubagentStatus _status(String? s) => switch (s) {
+/// The host's status names (agent/src/subagent.ts `SubagentStatus`). The
+/// host writes `waiting_approval`; the camelCase spelling is accepted too.
+/// An unknown name keeps [fallback] instead of pretending the subagent is
+/// waiting for a slot.
+SubagentStatus _status(String? s, [SubagentStatus fallback = SubagentStatus.queued]) => switch (s) {
   'queued' => SubagentStatus.queued,
   'running' => SubagentStatus.running,
-  'waitingApproval' => SubagentStatus.waitingApproval,
+  'waiting_approval' || 'waitingApproval' => SubagentStatus.waitingApproval,
   'stopping' => SubagentStatus.stopping,
   'done' => SubagentStatus.done,
   'failed' => SubagentStatus.failed,
   'stopped' => SubagentStatus.stopped,
-  _ => SubagentStatus.queued,
+  _ => fallback,
+};
+
+/// Why a stopped subagent stopped (host `stopCode`).
+enum SubagentStopCode { user, force, time, credit, beforeStart, limit }
+
+SubagentStopCode? _stopCode(String? s) => switch (s) {
+  'user' => SubagentStopCode.user,
+  'force' => SubagentStopCode.force,
+  'time' => SubagentStopCode.time,
+  'credit' => SubagentStopCode.credit,
+  'before_start' => SubagentStopCode.beforeStart,
+  'limit' => SubagentStopCode.limit,
+  _ => null,
 };
 
 enum SubagentToolStatus { running, done, failed }
@@ -62,9 +79,13 @@ class SubagentState {
     required this.profile,
     required this.status,
     required this.createdAt,
+    this.toolCallId,
   });
 
   final String id;
+
+  /// The parent's `subagent` tool call; the card is drawn at that call in the transcript.
+  final String? toolCallId;
   final String parentSessionFile;
   final String parentTitle;
   final String brief;
@@ -74,6 +95,11 @@ class SubagentState {
   DateTime? startedAt;
   DateTime? finishedAt;
   String? currentTool;
+
+  /// One-line argument summary of [currentTool] (path, query, command).
+  String? currentArgs;
+
+  /// The host's English activity line; only a fallback, the UI builds a localized one.
   String? currentActivity;
   final List<SubagentToolRun> tools = [];
   final List<QueuedSubagentMessage> queue = [];
@@ -83,6 +109,7 @@ class SubagentState {
   String? report;
   String? error;
   String? stopReason;
+  SubagentStopCode? stopCode;
   SubagentApproval? approval;
 
   bool get isActive =>
@@ -93,17 +120,24 @@ class SubagentState {
   bool get isTerminal =>
       status == SubagentStatus.done || status == SubagentStatus.failed || status == SubagentStatus.stopped;
 
+  /// "Now" for live durations; tests pin it so renders are reproducible.
+  static DateTime Function() clock = DateTime.now;
+
   Duration? get elapsed {
     final start = startedAt;
     if (start == null) return null;
-    return (finishedAt ?? DateTime.now()).difference(start);
+    final d = (finishedAt ?? clock()).difference(start);
+    return d.isNegative ? Duration.zero : d;
   }
 
-  String get profileKey => profile == 'full' ? 'Full' : 'Read-only';
+  String get profileKey => profile == 'full' ? 'Full access' : 'Read-only';
 
-  String get statusKey => switch (status) {
+  /// English key of the status label (translated by the UI).
+  String get statusKey => statusKeyOf(status);
+
+  static String statusKeyOf(SubagentStatus status) => switch (status) {
     SubagentStatus.queued => 'Waiting for a slot',
-    SubagentStatus.running => 'Running',
+    SubagentStatus.running => 'In progress',
     SubagentStatus.waitingApproval => 'Needs approval',
     SubagentStatus.stopping => 'Stopping…',
     SubagentStatus.done => 'Finished',
@@ -120,6 +154,7 @@ class SubagentState {
       profile: r['profile'] as String? ?? 'read',
       status: _status(r['status'] as String?),
       createdAt: _date(r['createdAt']) ?? DateTime.now(),
+      toolCallId: r['toolCallId'] as String?,
     );
     s._applyFull(r);
     return s;
@@ -128,10 +163,11 @@ class SubagentState {
   /// Applies a full host record (started/finished): every field, including
   /// the tool list, which replaces the event-built one.
   void _applyFull(Map<String, dynamic> r) {
-    status = _status(r['status'] as String?);
+    status = _status(r['status'] as String?, status);
     startedAt = _date(r['startedAt']) ?? startedAt;
     finishedAt = _date(r['finishedAt']) ?? finishedAt;
     currentTool = r['currentTool'] as String?;
+    currentArgs = r['currentArgs'] as String?;
     currentActivity = r['currentActivity'] as String?;
     inputTokens = (r['inputTokens'] as num?)?.toInt() ?? inputTokens;
     outputTokens = (r['outputTokens'] as num?)?.toInt() ?? outputTokens;
@@ -139,6 +175,9 @@ class SubagentState {
     report = r['report'] as String? ?? report;
     error = r['error'] as String? ?? error;
     stopReason = r['stopReason'] as String? ?? stopReason;
+    stopCode = _stopCode(r['stopCode'] as String?) ?? stopCode;
+    // A finished subagent asks nothing any more (the host cancels pending approvals).
+    if (isTerminal) approval = null;
     final calls = r['toolCalls'] as List?;
     if (calls != null) {
       tools
@@ -185,6 +224,7 @@ class SubagentState {
       case 'tool_execution_start':
         final id = e['toolCallId'] as String? ?? '';
         currentTool = e['toolName'] as String?;
+        currentArgs = _argsSummary(e['toolName'] as String?, e['args']);
         if (tools.every((t) => t.id != id)) {
           tools.add(
             SubagentToolRun(
@@ -208,18 +248,24 @@ class SubagentState {
           t.finishedAt = DateTime.now();
         }
         currentTool = null;
+        currentArgs = null;
       case 'agent_settled':
       case 'agent_end':
         // Not a finish: a queued message starts a new turn on the same
         // subagent. Terminal state arrives only via subagent_finished.
         currentTool = null;
+        currentArgs = null;
         currentActivity = null;
     }
   }
 
   void applyStatus(Map<String, dynamic> r) {
-    status = _status(r['status'] as String?);
+    // Terminal state only ever comes from subagent_finished.
+    if (isTerminal) return;
+    status = _status(r['status'] as String?, status);
+    if (status != SubagentStatus.waitingApproval && status != SubagentStatus.running) approval = null;
     currentTool = r['currentTool'] as String?;
+    currentArgs = r['currentArgs'] as String?;
     currentActivity = r['currentActivity'] as String?;
     inputTokens = (r['inputTokens'] as num?)?.toInt() ?? inputTokens;
     outputTokens = (r['outputTokens'] as num?)?.toInt() ?? outputTokens;
@@ -250,7 +296,7 @@ String _argsSummary(String? toolName, dynamic args) {
     'grep' || 'find' => v('pattern'),
     'web_search' => v('query'),
     'web_fetch' => v('url'),
-    'bash' => v('command'),
+    'bash' => v('command').length > 200 ? v('command').substring(0, 200) : v('command'),
     _ => '',
   };
 }
@@ -283,7 +329,14 @@ class SubagentStore {
     switch (record['type']) {
       case 'subagent_started':
         final r = (record['subagent'] as Map).cast<String, dynamic>();
-        _states[r['id'] as String? ?? ''] = SubagentState.fromRecord(r);
+        final id = r['id'] as String? ?? '';
+        // A re-sent start (subagent_list after a reconnect) refreshes, never resets, a known one.
+        final known = _states[id];
+        if (known != null) {
+          known._applyFull(r);
+        } else {
+          _states[id] = SubagentState.fromRecord(r);
+        }
       case 'subagent_finished':
         final r = (record['subagent'] as Map).cast<String, dynamic>();
         final id = r['id'] as String? ?? '';
@@ -315,7 +368,7 @@ class SubagentStore {
       case 'subagent_approval_request':
         final id = record['subagentId'] as String? ?? '';
         final s = _states[id];
-        if (s != null) {
+        if (s != null && s.isActive) {
           s.approval = SubagentApproval(
             approvalId: record['approvalId'] as String? ?? '',
             toolName: record['toolName'] as String? ?? '',
@@ -323,12 +376,15 @@ class SubagentStore {
             reason: record['reason'] as String? ?? '',
             key: record['key'] as String? ?? '',
           );
-          s.status = SubagentStatus.waitingApproval;
+          // A stop in progress keeps saying so; the approval is about to be cancelled.
+          if (s.status != SubagentStatus.stopping) s.status = SubagentStatus.waitingApproval;
         }
       case 'subagent_approval_dismiss':
         final id = record['subagentId'] as String? ?? '';
         final s = _states[id];
-        if (s != null) {
+        final approvalId = record['approvalId'] as String?;
+        // Only the request it names: a late dismiss must not clear a newer request.
+        if (s != null && (approvalId == null || s.approval?.approvalId == approvalId)) {
           s.approval = null;
           if (s.status == SubagentStatus.waitingApproval) s.status = SubagentStatus.running;
         }

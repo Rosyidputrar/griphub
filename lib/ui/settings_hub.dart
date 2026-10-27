@@ -309,11 +309,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.bot,
                     color: const Color(0xFF7C3AED),
                     title: tr('Subagent'),
-                    subtitle: (it.settings?.subagentCreditLimit ?? 50) == 0
-                        ? tr('No cost limit • {n} min').replaceAll('{n}', '${(it.settings?.subagentMinutesLimit ?? 30).toInt()}')
-                        : tr('{n} credits • {m} min')
-                              .replaceAll('{n}', '${(it.settings?.subagentCreditLimit ?? 50).toInt()}')
-                              .replaceAll('{m}', '${(it.settings?.subagentMinutesLimit ?? 30).toInt()}'),
+                    subtitle: subagentLimitsSummary(it.settings),
                     onTap: () => _open(SubagentSettingsScreen(agent: agent)),
                   ),
                 ],
@@ -364,7 +360,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.archive,
                     color: const Color(0xFF0EA5E9),
                     title: tr('Backup & restore'),
-                    subtitle: tr('Chats, settings and skills in one file'),
+                    subtitle: tr('Chats, skills and schedules in one file'),
                     onTap: () => _open(BackupScreen(agent: agent)),
                   ),
                   SettingsRow(

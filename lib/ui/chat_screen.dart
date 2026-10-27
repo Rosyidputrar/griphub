@@ -455,6 +455,8 @@ class _ChatScreenState extends State<ChatScreen> {
         final run = agent.tools[b.toolCallId];
         // Arguments still streaming: the tool row says "preparing…" itself.
         if (run == null && last.streaming) return null;
+        // A running subagent shows its own progress on its card.
+        if (run?.status == ToolStatus.running && b.toolName == 'subagent') return null;
         if (run?.status == ToolStatus.running) {
           return tr('Running {tool}…').replaceAll('{tool}', b.toolName ?? 'tool');
         }
@@ -467,7 +469,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _transcript() {
     final entries = agent.entries;
-    final subs = agent.subagentsForCurrent;
+    final placed = placeSubagents(agent);
+    final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
     return ListView.builder(
@@ -488,6 +491,7 @@ class _ChatScreenState extends State<ChatScreen> {
               cwd: agent.cwd,
               live: agent,
               modelLabel: agent.modelLabel,
+              subagentCard: placed.cardFor,
             ),
             NoticeEntry() => NoticeView(e),
           };
@@ -501,7 +505,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (si < subs.length) {
           return Padding(
             padding: const EdgeInsets.only(top: 14),
-            child: SubagentCard(state: subs[si], agent: agent),
+            child: SubagentCard(key: ValueKey(subs[si].id), state: subs[si], agent: agent),
           );
         }
         if (activity != null && si == subs.length) {

@@ -22,33 +22,56 @@ async function ok(cwd: string, args: string[]) {
 
 export interface FileStatus {
 	path: string;
-	/** Two-letter porcelain code, e.g. "M ", " M", "??", "A ". */
+	/** For a rename or copy: where it came from. */
+	from?: string;
+	/** Two-letter porcelain code, e.g. "M ", " M", "??", "A ", "R ". */
 	code: string;
 	staged: boolean;
 	unstaged: boolean;
 	untracked: boolean;
 }
 
-export async function status(cwd: string) {
-	const inRepo = await git(cwd, ["rev-parse", "--is-inside-work-tree"]);
-	if (inRepo.code !== 0) return { repo: false as const };
-	const out = await ok(cwd, ["status", "--porcelain=v1", "-b", "-uall"]);
-	const lines = out.split("\n").filter(Boolean);
-	const head = lines.shift() ?? "";
-	// "## main...origin/main [ahead 1, behind 2]"
-	const m = head.match(/^## (?:No commits yet on )?([^.\s]+)(?:\.\.\.(\S+))?(?: \[(.+)\])?/);
-	const ahead = Number(head.match(/ahead (\d+)/)?.[1] ?? 0);
-	const behind = Number(head.match(/behind (\d+)/)?.[1] ?? 0);
-	const files: FileStatus[] = lines.map((l) => {
-		const code = l.slice(0, 2);
-		return {
-			path: l.slice(3).replace(/^"|"$/g, ""),
+/**
+ * Parses `git status --porcelain=v1 -z -b`. NUL-separated, so paths come
+ * unquoted (spaces, quotes, unicode, newlines intact), and a rename is
+ * "R  new\0old" — the line format "R  old -> new" used to be taken as one
+ * path, so staging or diffing a renamed file failed.
+ */
+export function parseStatus(raw: string) {
+	const parts = raw.split("\0");
+	let head = "";
+	const files: FileStatus[] = [];
+	for (let i = 0; i < parts.length; i++) {
+		const entry = parts[i];
+		if (!entry) continue;
+		if (entry.startsWith("## ")) {
+			head = entry;
+			continue;
+		}
+		const code = entry.slice(0, 2);
+		const path = entry.slice(3);
+		// Renames and copies carry their source as the next field.
+		const from = code[0] === "R" || code[0] === "C" || code[1] === "R" || code[1] === "C" ? parts[++i] : undefined;
+		files.push({
+			path,
+			...(from ? { from } : {}),
 			code,
 			staged: code[0] !== " " && code[0] !== "?",
 			unstaged: code[1] !== " ",
 			untracked: code === "??",
-		};
-	});
+		});
+	}
+	return { head, files };
+}
+
+export async function status(cwd: string) {
+	const inRepo = await git(cwd, ["rev-parse", "--is-inside-work-tree"]);
+	if (inRepo.code !== 0) return { repo: false as const };
+	const { head, files } = parseStatus(await ok(cwd, ["status", "--porcelain=v1", "-z", "-b", "-uall"]));
+	// "## main...origin/main [ahead 1, behind 2]"
+	const m = head.match(/^## (?:No commits yet on )?([^.\s]+)(?:\.\.\.(\S+))?(?: \[(.+)\])?/);
+	const ahead = Number(head.match(/ahead (\d+)/)?.[1] ?? 0);
+	const behind = Number(head.match(/behind (\d+)/)?.[1] ?? 0);
 	const remote = (await git(cwd, ["remote", "get-url", "origin"])).out.trim() || null;
 	return { repo: true as const, branch: m?.[1] ?? "HEAD", upstream: m?.[2] ?? null, ahead, behind, remote, files };
 }

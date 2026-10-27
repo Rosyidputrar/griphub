@@ -8,7 +8,7 @@ import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
-/// Back up and restore sessions, skills, templates and settings as a zip.
+/// Back up and restore chats, skills, templates, schedules and project memory as a zip.
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key, required this.agent});
   final AgentController agent;
@@ -76,7 +76,7 @@ class _BackupScreenState extends State<BackupScreen> {
         title: Text(tr('Restore backup?')),
         content: Text(
           tr(
-            'Sessions, skills, templates and settings are overwritten with the backup\'s copies. '
+            'Chats, skills, templates, schedules and project memory are overwritten with the backup\'s copies. '
             'This cannot be undone.',
           ),
         ),
@@ -128,7 +128,7 @@ class _BackupScreenState extends State<BackupScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        tr('Sessions, skills, templates, schedules and settings in one zip.'),
+                        tr('Chats, skills, templates, schedules and project memory in one zip.'),
                         style: text.bodyMedium,
                       ),
                     ),
@@ -179,7 +179,12 @@ class _BackupScreenState extends State<BackupScreen> {
                   children: [
                     Icon(LucideIcons.keyRound, size: 14, color: p.muted),
                     const SizedBox(width: 6),
-                    Expanded(child: Text(tr('Provider keys and tokens are not included.'), style: text.bodySmall)),
+                    Expanded(
+                      child: Text(
+                        tr('Provider keys, tokens and app settings are not included; set them up again after a restore.'),
+                        style: text.bodySmall,
+                      ),
+                    ),
                   ],
                 ),
               ],

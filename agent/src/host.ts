@@ -273,6 +273,18 @@ let fallbackTried = false;
 /** A fallback model is about to continue the failed turn; the turn is not over for the app's purposes. */
 let fallbackPending = false;
 
+/** Said when a chat switch would drop a running turn; the app matches it to offer "Stop and switch". */
+const BUSY_SWITCH = "The agent is still working in this chat. Stop it before switching chats.";
+
+/**
+ * Switching chats disposes the open session. While it streams that silently
+ * killed the running turn (the user tapped another chat, the reply was just
+ * gone), so every switch now refuses until the turn is stopped.
+ */
+function assertIdle() {
+	if (session?.isStreaming || fallbackPending) throw new Error(BUSY_SWITCH);
+}
+
 async function openSession(sessionManager: SessionManager) {
 	unsubscribe?.();
 	guard.cancelAll();
@@ -333,11 +345,16 @@ async function tryFallback(error: string) {
 	if (overBudget) return send({ type: "notice", message: overBudget });
 	fallbackTried = true;
 	fallbackPending = true;
+	// The chat that failed. setModel awaits; if another chat opened meanwhile,
+	// the global `session` is that other chat, and the fallback used to switch
+	// ITS model and send it "Continue where you left off".
+	const failed = session;
 	try {
-		await session.setModel(model, { persist: false });
+		await failed.setModel(model, { persist: false });
+		if (session !== failed) return;
 		send({ type: "notice", message: `Switched to ${model.name ?? model.id} after an error: ${error.slice(0, 120)}` });
 		send({ type: "state", state: state() });
-		session.prompt("Continue where you left off (the previous model failed).").catch(() => {});
+		failed.prompt("Continue where you left off (the previous model failed).").catch(() => {});
 	} finally {
 		fallbackPending = false;
 	}
@@ -577,7 +594,10 @@ async function deleteProject(path: string, deleteChats: boolean) {
 	const dir = check.path;
 	const s = session!;
 	// Leave the project first so nothing keeps working in a folder that is about to vanish.
-	if (within(resolve(s.sessionManager.getCwd()), dir)) await openSession(SessionManager.create(workspace));
+	if (within(resolve(s.sessionManager.getCwd()), dir)) {
+		if (s.isStreaming) throw new Error("Stop the agent before deleting the project it is working in");
+		await openSession(SessionManager.create(workspace));
+	}
 	let deletedChats = 0;
 	if (deleteChats) {
 		const files = (await SessionManager.listAll()).filter((i) => i.cwd && within(resolve(i.cwd), dir)).map((i) => i.path);
@@ -620,7 +640,10 @@ function createBackup(includeWorkspace: boolean) {
 		...collectFiles(join(agentDir, "sessions"), agentDir),
 		...collectFiles(join(agentDir, "skills"), agentDir),
 		...collectFiles(join(agentDir, "prompts"), agentDir),
-		...["settings.json", "AGENTS.md", "griphub/runs.json"]
+		// pi's settings.json is NOT backed up: restore refuses it (a crafted file
+		// could reconfigure the agent on another phone), so including it only
+		// promised something a restore silently dropped.
+		...["AGENTS.md", "griphub/runs.json"]
 			.filter((f) => existsSync(join(agentDir, f)))
 			.map((f) => ({ name: f, data: readFileSync(join(agentDir, f)) })),
 	].map((e) => ({ name: `agent/${e.name}`, data: e.data }));
@@ -785,6 +808,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "fork_session": {
 			const source = s.sessionFile;
 			if (!source) throw new Error("Nothing to fork yet");
+			assertIdle();
 			await openSession(SessionManager.forkFrom(source, s.sessionManager.getCwd()));
 			const r = cmd.entryId ? await session!.navigateTree(cmd.entryId, {}) : { editorText: "" };
 			return { ...state(), text: r.editorText ?? "" };
@@ -870,6 +894,7 @@ async function handle(cmd: Command): Promise<unknown> {
 			};
 
 		case "new_session":
+			assertIdle();
 			return openSession(SessionManager.create(cmd.cwd ?? workspace));
 		case "sessions":
 			return (await SessionManager.listAll()).map((info) => ({
@@ -882,6 +907,8 @@ async function handle(cmd: Command): Promise<unknown> {
 				firstMessage: info.firstMessage,
 			}));
 		case "open_session":
+			if (s.sessionFile && resolve(cmd.path) === resolve(s.sessionFile)) return state();
+			assertIdle();
 			return openSession(SessionManager.open(cmd.path));
 		case "rename_session": {
 			const name = String(cmd.name ?? "").trim();
@@ -1012,9 +1039,15 @@ async function handle(cmd: Command): Promise<unknown> {
 			return checkpoints.snapshot(cwd, cmd.label || "Manual checkpoint");
 		case "checkpoint_diff":
 			return checkpoints.diff(cwd, cmd.checkpoint, cmd.file);
+		case "checkpoint_restore_plan":
+			return checkpoints.restorePlan(cwd, cmd.checkpoint);
 		case "checkpoint_restore":
 			if (s.isStreaming) throw new Error("Stop the agent before restoring");
-			return checkpoints.restore(cwd, cmd.checkpoint);
+			return checkpoints.restore(
+				cwd,
+				cmd.checkpoint,
+				Array.isArray(cmd.keep) ? cmd.keep.filter((k: unknown): k is string => typeof k === "string") : [],
+			);
 
 		// Project tools (workbench.ts).
 		case "search":

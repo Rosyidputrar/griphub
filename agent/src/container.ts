@@ -5,7 +5,7 @@
  * so `apt install nodejs python3` just works.
  */
 
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import { createGunzip } from "node:zlib";
 import { Readable } from "node:stream";
@@ -88,19 +88,41 @@ export class Container {
 	async install(distro: Distro, log: Log, dns: DnsMode = "cloudflare") {
 		const image = IMAGES[distro];
 		if (!image) throw new Error(`Unknown distro: ${distro}`);
-		rmSync(this.rootfs, { recursive: true, force: true });
-		rmSync(this.metaFile, { force: true });
-		mkdirSync(this.rootfs, { recursive: true });
-
-		log(`Pulling ${image.repo.replace("library/", "")}:${image.tag} (${PLATFORM.label})…`);
-		const layers = await this.resolveLayers(image.repo, image.tag);
-		for (const [i, layer] of layers.entries()) {
-			log(`Layer ${i + 1}/${layers.length} · ${(layer.size / 1e6).toFixed(1)} MB`);
-			await this.extractLayer(image.repo, layer, log);
+		// Download and unpack beside the live rootfs, and swap only once the new
+		// one is complete. Wiping first (as before) meant a dropped connection or
+		// a full disk mid-download left the user with no container at all, and
+		// every package they had installed gone.
+		const staging = `${this.rootfs}.new`;
+		const previous = `${this.rootfs}.old`;
+		rmSync(staging, { recursive: true, force: true });
+		rmSync(previous, { recursive: true, force: true });
+		mkdirSync(staging, { recursive: true });
+		try {
+			log(`Pulling ${image.repo.replace("library/", "")}:${image.tag} (${PLATFORM.label})…`);
+			const layers = await this.resolveLayers(image.repo, image.tag);
+			for (const [i, layer] of layers.entries()) {
+				log(`Layer ${i + 1}/${layers.length} · ${(layer.size / 1e6).toFixed(1)} MB`);
+				await this.extractLayer(image.repo, layer, log, staging);
+			}
+			log("Configuring…");
+			this.configure(distro, staging);
+		} catch (e) {
+			rmSync(staging, { recursive: true, force: true });
+			if (existsSync(join(this.rootfs, "etc"))) log("Install failed; your current container is unchanged.");
+			throw e;
 		}
 
-		log("Configuring…");
-		this.configure(distro);
+		// Swap: the old tree moves aside, the new one into place, then the old one goes.
+		const hadOld = existsSync(this.rootfs);
+		if (hadOld) renameSync(this.rootfs, previous);
+		try {
+			renameSync(staging, this.rootfs);
+		} catch (e) {
+			if (hadOld) renameSync(previous, this.rootfs);
+			rmSync(staging, { recursive: true, force: true });
+			throw e;
+		}
+		rmSync(previous, { recursive: true, force: true });
 		this.setNameservers(dns);
 		writeFileSync(
 			this.metaFile,
@@ -114,6 +136,8 @@ export class Container {
 	}
 
 	remove() {
+		rmSync(`${this.rootfs}.new`, { recursive: true, force: true });
+		rmSync(`${this.rootfs}.old`, { recursive: true, force: true });
 		rmSync(this.rootfs, { recursive: true, force: true });
 		rmSync(this.metaFile, { force: true });
 	}
@@ -191,7 +215,7 @@ export class Container {
 		return (manifest.layers as any[]).map((l) => ({ digest: l.digest as string, size: l.size as number }));
 	}
 
-	private async extractLayer(repo: string, layer: { digest: string; size: number }, log: Log) {
+	private async extractLayer(repo: string, layer: { digest: string; size: number }, log: Log, dest: string) {
 		const res = await this.registry(repo, `blobs/${layer.digest}`);
 		let received = 0;
 		let lastPct = -1;
@@ -203,11 +227,11 @@ export class Container {
 				log(`Downloading: ${pct}%`);
 			}
 		});
-		await untar(counted.pipe(createGunzip()), this.rootfs);
+		await untar(counted.pipe(createGunzip()), dest);
 	}
 
-	private configure(distro: Distro) {
-		const etc = join(this.rootfs, "etc");
+	private configure(distro: Distro, root: string) {
+		const etc = join(root, "etc");
 		mkdirSync(etc, { recursive: true });
 		// Replace (not follow) whatever the image ships: often a symlink to /run.
 		for (const [name, body] of [
@@ -217,7 +241,7 @@ export class Container {
 			rmSync(join(etc, name), { force: true });
 			writeFileSync(join(etc, name), body);
 		}
-		const tmp = join(this.rootfs, "tmp");
+		const tmp = join(root, "tmp");
 		mkdirSync(tmp, { recursive: true });
 		chmodSync(tmp, 0o1777);
 		if (distro === "debian") {

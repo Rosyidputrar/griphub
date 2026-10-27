@@ -51,6 +51,12 @@ class GitFile {
   GitFile(this.json);
   final Map<String, dynamic> json;
   String get path => json['path'] as String;
+
+  /// For a rename or copy: the old path.
+  String? get from => json['from'] as String?;
+
+  /// Paths git must be given to act on this entry (a rename has two sides).
+  List<String> get paths => [path, ?from];
   String get code => json['code'] as String;
   bool get staged => json['staged'] == true;
   bool get unstaged => json['unstaged'] == true;
@@ -354,8 +360,15 @@ class Features extends ChangeNotifier {
       client.call('checkpoint_create', {'label': label, 'dir': ?dir});
   Future<ChangeSet> changes({String? checkpoint, String? file, String? dir}) async =>
       ChangeSet(_m(await client.call('checkpoint_diff', {'checkpoint': ?checkpoint, 'file': ?file, 'dir': ?dir})));
-  Future<void> restore(String checkpoint, {String? dir}) =>
-      client.call('checkpoint_restore', {'checkpoint': checkpoint, 'dir': ?dir});
+  /// Files a restore to [checkpoint] would delete (they did not exist then).
+  Future<List<String>> restorePlan(String checkpoint, {String? dir}) async =>
+      ((_m(await client.call('checkpoint_restore_plan', {'checkpoint': checkpoint, 'dir': ?dir})))['removes'] as List? ??
+              const [])
+          .cast<String>();
+
+  /// Restores [checkpoint]; files in [keep] (from [restorePlan]) are left as they are.
+  Future<void> restore(String checkpoint, {String? dir, List<String> keep = const []}) =>
+      client.call('checkpoint_restore', {'checkpoint': checkpoint, 'dir': ?dir, 'keep': keep});
 
   // Git -----------------------------------------------------------------------
   Future<GitStatus> gitStatus({String? dir}) async => GitStatus(_m(await client.call('git_status', {'dir': ?dir})));
