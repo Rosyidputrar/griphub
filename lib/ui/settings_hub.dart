@@ -21,6 +21,7 @@ import 'mesh.dart';
 import 'network_screen.dart';
 import 'settings_screen.dart';
 import 'skills_screen.dart';
+import 'subagent_settings_screen.dart';
 import 'sync_screen.dart';
 import 'tasks_screen.dart';
 import 'templates_screen.dart';
@@ -303,6 +304,17 @@ class _SettingsHubState extends State<SettingsHub> {
                           )
                         : tr('Tokens, cost and a daily limit'),
                     onTap: () => _open(UsageScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.bot,
+                    color: const Color(0xFF7C3AED),
+                    title: tr('Subagent'),
+                    subtitle: (it.settings?.subagentCreditLimit ?? 50) == 0
+                        ? tr('No cost limit • {n} min').replaceAll('{n}', '${(it.settings?.subagentMinutesLimit ?? 30).toInt()}')
+                        : tr('{n} credits • {m} min')
+                              .replaceAll('{n}', '${(it.settings?.subagentCreditLimit ?? 50).toInt()}')
+                              .replaceAll('{m}', '${(it.settings?.subagentMinutesLimit ?? 30).toInt()}'),
+                    onTap: () => _open(SubagentSettingsScreen(agent: agent)),
                   ),
                 ],
               ),

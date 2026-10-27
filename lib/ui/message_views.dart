@@ -213,12 +213,15 @@ class AssistantMessageView extends StatelessWidget {
             children.add(ThinkingView(text: b.text, live: entry.streaming && identical(b, blocks.last)));
           }
         case BlockKind.toolCall:
-          // The agent's plan reads better as a checklist than as a tool call.
-          children.add(
-            b.toolName == 'todo_write'
-                ? TodoCard(block: b, run: tools[b.toolCallId])
-                : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, live: live),
-          );
+          // The subagent's own call is not a tool card: its progress lives
+          // in the subagent card below the transcript.
+          if (b.toolName != 'subagent') {
+            children.add(
+              b.toolName == 'todo_write'
+                  ? TodoCard(block: b, run: tools[b.toolCallId])
+                  : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, live: live),
+            );
+          }
       }
     }
     if (entry.streaming && children.isEmpty) children.add(const _Pending());
