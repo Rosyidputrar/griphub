@@ -442,6 +442,17 @@ const _id = <String, String>{
   'This sign-in expired or was revoked. Sign in again to keep cloning, pushing and publishing.':
       'Login ini sudah kedaluwarsa atau dicabut. Masuk lagi agar bisa clone, push, dan publish lagi.',
   'Sign in again': 'Masuk lagi',
+  'Pulling {name}': 'Menarik {name}',
+  '1 new commit': '1 commit baru',
+  '{n} new commits': '{n} commit baru',
+  'This branch has no remote to pull from': 'Branch ini belum punya remote untuk ditarik',
+  'Checking for changes…': 'Memeriksa perubahan…',
+  'Up to date': 'Sudah terbaru',
+  'Open in a new chat': 'Buka di chat baru',
+  'Pull latest changes': 'Tarik perubahan terbaru',
+  'Switch branch': 'Ganti branch',
+  "Couldn't reach the remote; showing the branches on this phone.":
+      'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
   'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':
       'Login GitHub kedaluwarsa atau dicabut. Masuk lagi ke GitHub di Akun.',
   'Its token is removed from this device. To reconnect you will need to paste a token again.':

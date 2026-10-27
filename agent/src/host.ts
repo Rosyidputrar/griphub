@@ -796,7 +796,7 @@ function restoreBackup(path: string) {
  * GitHub App sign-in expires every 8 hours, so it is refreshed first if due
  * (a no-op otherwise). API calls refresh on their own (Integrations.github).
  */
-const GITHUB_GIT_COMMANDS = new Set(["git_clone", "git_pull", "git_push", "deploy", "sync_now", "ci_watch", "run_enqueue", "schedule_run"]);
+const GITHUB_GIT_COMMANDS = new Set(["git_clone", "git_fetch", "git_pull", "git_push", "deploy", "sync_now", "ci_watch", "run_enqueue", "schedule_run"]);
 
 async function handle(cmd: Command): Promise<unknown> {
 	const s = session!;
@@ -1098,6 +1098,9 @@ async function handle(cmd: Command): Promise<unknown> {
 			return gitops.branches(cwd);
 		case "git_checkout":
 			await gitops.checkout(cwd, cmd.branch, !!cmd.create);
+			return gitops.status(cwd);
+		case "git_fetch":
+			await gitops.fetch(cwd);
 			return gitops.status(cwd);
 		case "git_pull":
 			await gitops.pull(cwd, taskLog(cmd));

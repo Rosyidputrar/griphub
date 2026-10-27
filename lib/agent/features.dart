@@ -395,6 +395,8 @@ class Features extends ChangeNotifier {
       (await client.call<List>('git_branches', {'dir': ?dir})).map((e) => GitBranch(_m(e))).toList();
   Future<GitStatus> gitCheckout(String branch, {bool create = false, String? dir}) async =>
       GitStatus(_m(await client.call('git_checkout', {'branch': branch, 'create': create, 'dir': ?dir})));
+  /// Fetches origin, so branches created on GitHub since the clone show up; returns the status after.
+  Future<GitStatus> gitFetch({String? dir}) async => GitStatus(_m(await client.call('git_fetch', {'dir': ?dir})));
   Future<void> gitPull({String? dir, void Function(String)? onLine}) => _task('git_pull', {'dir': ?dir}, onLine);
   Future<void> gitPush({String? dir, void Function(String)? onLine}) => _task('git_push', {'dir': ?dir}, onLine);
   Future<String> createPr(String title, String body, {String? base, String? dir}) async =>

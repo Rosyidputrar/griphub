@@ -19,6 +19,7 @@ async function bundle(name) {
 	return import(pathToFileURL(outfile).href);
 }
 const { Integrations } = await bundle("integrations");
+const gitops = await bundle("gitops");
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, stdio: "pipe" }).toString().trim();
 const realHome = process.env.HOME;
@@ -133,6 +134,49 @@ test("names that could escape the workspace are refused", async () => {
 	for (const bad of ["../x", "a/..", "a/b/c", "a", "a/b;rm -rf"]) {
 		await assert.rejects(it.clone(bad, noLog), /Not a GitHub repository name/, bad);
 	}
+});
+
+test("a branch pushed to GitHub after the clone shows up after fetch, and checks out", async () => {
+	const { path } = await it.clone("akun1/repo1", noLog);
+	// Someone pushes a new branch and a commit on main.
+	const other = mkdtempSync(join(out, "other-"));
+	git(out, "clone", "-q", join(remotes, "akun1/repo1.git"), other);
+	git(other, "config", "user.email", "t@t");
+	git(other, "config", "user.name", "t");
+	git(other, "checkout", "-q", "-b", "fitur-baru");
+	writeFileSync(join(other, "fitur.txt"), "x");
+	git(other, "add", "-A");
+	git(other, "commit", "-qm", "fitur");
+	git(other, "push", "-q", "origin", "fitur-baru");
+	git(other, "checkout", "-q", "main");
+	writeFileSync(join(other, "OWNER"), "akun1/repo1 v2");
+	git(other, "commit", "-qam", "v2");
+	git(other, "push", "-q", "origin", "main");
+
+	const names = async () => (await gitops.branches(path)).map((b) => b.name);
+	assert.ok(!(await names()).includes("origin/fitur-baru"), "not known before fetch");
+	await gitops.fetch(path);
+	assert.ok((await names()).includes("origin/fitur-baru"));
+	assert.equal((await gitops.status(path)).behind, 1);
+
+	// Pull fast-forwards main.
+	await gitops.pull(path, noLog);
+	assert.equal(ownerOf(path), "akun1/repo1 v2");
+	assert.equal((await gitops.status(path)).behind, 0);
+
+	// The remote branch checks out as a local branch tracking it.
+	await gitops.checkout(path, "origin/fitur-baru", false);
+	const st = await gitops.status(path);
+	assert.equal(st.branch, "fitur-baru");
+	assert.equal(st.upstream, "origin/fitur-baru");
+});
+
+test("fetch reports a failure (e.g. offline) instead of pretending", async () => {
+	const ws5 = mkdtempSync(join(out, "ws-"));
+	mkdirSync(join(ws5, "x"));
+	git(join(ws5, "x"), "init", "-q");
+	git(join(ws5, "x"), "remote", "add", "origin", join(out, "does-not-exist.git"));
+	await assert.rejects(gitops.fetch(join(ws5, "x")));
 });
 
 test("cleanup", () => rmSync(out, { recursive: true, force: true }));
