@@ -42,6 +42,9 @@ class _TasksScreenState extends State<TasksScreen> {
   final _prompt = TextEditingController();
   bool _queueing = false;
 
+  /// Runs swiped away and not back from the host yet: a dismissed card must leave the list at once.
+  final _hidden = <String>{};
+
   AgentController get agent => widget.agent;
   Features get f => agent.features;
 
@@ -83,6 +86,32 @@ class _TasksScreenState extends State<TasksScreen> {
       _error(e);
     } finally {
       if (mounted) setState(() => _queueing = false);
+    }
+  }
+
+  /// Swiped away: removed from the list (its chat stays), with Undo.
+  Future<void> _removeRun(RunInfo run) async {
+    setState(() => _hidden.add(run.id));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final removed = await f.deleteRun(run.id);
+      if (removed == null) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(tr('Run removed')),
+          action: SnackBarAction(
+            label: tr('Undo'),
+            onPressed: () => _guard(() async {
+              await f.restoreRun(removed.run, removed.index);
+              if (mounted) setState(() => _hidden.remove(run.id));
+            }),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) setState(() => _hidden.remove(run.id));
+      _error(e);
     }
   }
 
@@ -143,7 +172,7 @@ class _TasksScreenState extends State<TasksScreen> {
     return ListenableBuilder(
       listenable: f,
       builder: (context, _) {
-        final runs = f.runs;
+        final runs = f.runs.where((r) => !_hidden.contains(r.id)).toList();
         final finished = runs.where((r) => !r.active).length;
         return Scaffold(
           appBar: AppBar(title: Text(tr('Tasks'))),
@@ -224,14 +253,29 @@ class _TasksScreenState extends State<TasksScreen> {
                     ),
                   )
                 else
-                  for (final r in runs) ...[
-                    _RunCard(
-                      run: r,
-                      onCancel: () => _guard(() => f.cancelRun(r.id)),
-                      onOpen: r.sessionFile != null ? () => _openRun(r) : null,
+                  for (final r in runs)
+                    // Finished runs swipe away either way; queued and running ones are cancelled from the card.
+                    Padding(
+                      key: ValueKey(r.id),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: r.active
+                          ? _RunCard(
+                              run: r,
+                              onCancel: () => _guard(() => f.cancelRun(r.id)),
+                              onOpen: r.sessionFile != null ? () => _openRun(r) : null,
+                            )
+                          : Dismissible(
+                              key: ValueKey('dismiss-${r.id}'),
+                              background: const _RemoveBackground(alignment: Alignment.centerLeft),
+                              secondaryBackground: const _RemoveBackground(alignment: Alignment.centerRight),
+                              onDismissed: (_) => _removeRun(r),
+                              child: _RunCard(
+                                run: r,
+                                onCancel: () => _guard(() => f.cancelRun(r.id)),
+                                onOpen: r.sessionFile != null ? () => _openRun(r) : null,
+                              ),
+                            ),
                     ),
-                    const SizedBox(height: 10),
-                  ],
                 SectionLabel(
                   tr('Schedules'),
                   trailing: TextButton.icon(
@@ -288,6 +332,33 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Behind a run card being swiped away.
+class _RemoveBackground extends StatelessWidget {
+  const _RemoveBackground({required this.alignment});
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Container(
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 22),
+      decoration: BoxDecoration(
+        color: p.danger.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(Radii.xl),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(LucideIcons.trash2, size: 18, color: p.danger),
+          const SizedBox(width: 8),
+          Text(tr('Remove'), style: TextStyle(color: p.danger, fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 }

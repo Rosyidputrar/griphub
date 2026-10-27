@@ -1209,6 +1209,13 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "runs_clear":
 			runner.clearFinished();
 			return runner.summary();
+		case "run_delete": {
+			const removed = runner.delete(cmd.runId);
+			return { ...runner.summary(), removed };
+		}
+		case "run_restore":
+			runner.restore(cmd.run, cmd.index);
+			return runner.summary();
 		case "runs_concurrency":
 			runner.setConcurrency(cmd.n);
 			return runner.summary();

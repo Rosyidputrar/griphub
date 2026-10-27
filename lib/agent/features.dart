@@ -486,6 +486,18 @@ class Features extends ChangeNotifier {
 
   Future<void> cancelRun(String id) async => _applyRuns(_m(await client.call('run_cancel', {'runId': id})));
   Future<void> clearRuns() async => _applyRuns(_m(await client.call('runs_clear')));
+
+  /// Removes one finished run from the list (its chat stays). Returns what [restoreRun] needs for Undo.
+  Future<({Map<String, dynamic> run, int index})?> deleteRun(String id) async {
+    final r = _m(await client.call('run_delete', {'runId': id}));
+    _applyRuns(r);
+    final removed = r['removed'];
+    if (removed is! Map) return null;
+    return (run: _m(removed['run']), index: removed['index'] as int? ?? 0);
+  }
+
+  Future<void> restoreRun(Map<String, dynamic> run, int index) async =>
+      _applyRuns(_m(await client.call('run_restore', {'run': run, 'index': index})));
   Future<void> setConcurrency(int n) async => _applyRuns(_m(await client.call('runs_concurrency', {'n': n})));
   Future<void> saveSchedule(Map<String, dynamic> schedule) async =>
       _applyRuns(_m(await client.call('schedule_save', {'schedule': schedule})));

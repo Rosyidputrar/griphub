@@ -31,6 +31,12 @@ Future<void> loadAppFonts() async {
   }
 }
 
+/// An answer from [FakeHost.answers] that fails the command the way the host does ({ok: false, error}).
+class HostError {
+  const HostError(this.message);
+  final String message;
+}
+
 /// A fake agent host on the platform channels. It answers `settings_get` /
 /// `settings_set` the way agent/src/integrations.ts does (null or "" clears a
 /// key; publicSettings fills defaults), records every command, and can push
@@ -45,7 +51,9 @@ class FakeHost {
           final cmd = (jsonDecode(call.arguments as String) as Map).cast<String, dynamic>();
           commands.add(cmd);
           final data = _answer(cmd);
-          if (data != _noReply) {
+          if (data is HostError) {
+            Future<void>.microtask(() => emit({'type': 'response', 'id': cmd['id'], 'ok': false, 'error': data.message}));
+          } else if (data != _noReply) {
             Future<void>.microtask(() => emit({'type': 'response', 'id': cmd['id'], 'ok': true, 'data': data}));
           }
           return null;
@@ -92,7 +100,12 @@ class FakeHost {
     'subagentApprovalOverride': stored.containsKey('subagentApprovalMode'),
   };
 
+  /// Answers for commands a test needs beyond the defaults below, by command type.
+  final answers = <String, Object? Function(Map<String, dynamic> cmd)>{};
+
   Object? _answer(Map<String, dynamic> cmd) {
+    final custom = answers[cmd['type']];
+    if (custom != null) return custom(cmd);
     switch (cmd['type']) {
       case 'settings_get':
         return publicSettings();

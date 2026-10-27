@@ -454,6 +454,7 @@ const _id = <String, String>{
   'Switch branch': 'Ganti branch',
   '1 line': '1 baris',
   '{n} lines': '{n} baris',
+  'Run removed': 'Run dihapus',
   "Couldn't reach the remote; showing the branches on this phone.":
       'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
   'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':
