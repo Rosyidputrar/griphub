@@ -10,6 +10,7 @@ import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
 import 'griphub_screen.dart';
+import '../agent/pricing.dart';
 import 'i18n.dart';
 import 'kit.dart';
 import 'theme.dart';
@@ -29,7 +30,8 @@ class ImageGenScreen extends StatefulWidget {
   State<ImageGenScreen> createState() => _ImageGenScreenState();
 }
 
-const _models = ['gpt-image', 'gemini-3.1-flash-image'];
+/// Built-in image models, used until GripHub's own list (/v1/models) loads.
+const _fallbackModels = ['gpt-image', 'gemini-3.1-flash-image'];
 const _sizes = [
   ('1024x1024', '1024 × 1024', 1.0),
   ('1536x1024', '1536 × 1024', 1.5),
@@ -62,7 +64,12 @@ class _HistoryItem {
 class _ImageGenScreenState extends State<ImageGenScreen> {
   final _prompt = TextEditingController();
   final _customModel = TextEditingController();
-  String _model = _models.first;
+  String _model = _fallbackModels.first;
+
+  /// GripHub's image models with their price per image (id -> credits, normal price).
+  List<({String id, String name, double? credits, double? list})> _models = [
+    for (final m in _fallbackModels) (id: m, name: m, credits: null, list: null),
+  ];
   bool _custom = false;
   String _size = _sizes.first.$1;
   bool _busy = false;
@@ -109,11 +116,31 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
       providers = const [];
     }
     await _loadHistory();
+    final hasKey = providers.any((p) => p.id == 'griphub' && p.hasKey);
     if (mounted) {
       setState(() {
-        _hasKey = providers.any((p) => p.id == 'griphub' && p.hasKey);
+        _hasKey = hasKey;
         _loading = false;
       });
+    }
+    if (!hasKey) return;
+    try {
+      final list = await agent.integrations.griphubImageModels();
+      if (!mounted || list.isEmpty) return;
+      setState(() {
+        _models = [
+          for (final m in list)
+            (
+              id: m['id'] as String,
+              name: m['name'] as String? ?? m['id'] as String,
+              credits: (m['credits'] as num?)?.toDouble(),
+              list: (m['list'] as num?)?.toDouble(),
+            ),
+        ];
+        if (!_models.any((m) => m.id == _model)) _model = _models.first.id;
+      });
+    } catch (_) {
+      // Offline or an older host: the built-in list stays.
     }
   }
 
@@ -395,12 +422,14 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                   children: [
                     for (final m in _models)
                       _OptionChip(
-                        label: m,
-                        selected: !_custom && _model == m,
+                        label: m.credits == null
+                            ? m.name
+                            : '${m.name} · ${tr('{n} credits').replaceAll('{n}', localNumber(formatCredits(m.credits!)))}',
+                        selected: !_custom && _model == m.id,
                         onTap: _busy
                             ? null
                             : () => setState(() {
-                                  _model = m;
+                                  _model = m.id;
                                   _custom = false;
                                 }),
                       ),

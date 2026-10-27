@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -192,6 +193,7 @@ class AssistantMessageView extends StatelessWidget {
     this.live,
     this.modelLabel,
     this.subagentCard,
+    this.footer,
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
@@ -209,6 +211,10 @@ class AssistantMessageView extends StatelessWidget {
   /// knows no subagent for it (a chat from before a restart): then the call
   /// shows as a plain tool card with the report as its output.
   final Widget? Function(String toolCallId)? subagentCard;
+
+  /// The turn's copy-and-model footer, when this is the turn's last message
+  /// and the turn is over (see [turnFooters]); null draws none.
+  final TurnFooter? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -241,13 +247,11 @@ class AssistantMessageView extends StatelessWidget {
     if (entry.aborted) {
       children.add(Text(tr('Stopped'), style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint)));
     }
-    final reply = [
-      for (final b in blocks)
-        if (b.kind == BlockKind.text && b.text.trim().isNotEmpty) b.text.trim(),
-    ].join('\n\n');
-    final model = entry.model;
-    if (!entry.streaming && reply.isNotEmpty) {
-      children.add(_MessageFooter(text: reply, model: model == null ? null : (modelLabel?.call(model) ?? model)));
+    if (footer case final f?) {
+      final model = f.model;
+      children.add(
+        _MessageFooter(text: f.text, model: model == null ? null : (modelLabel?.call(model) ?? model)),
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -362,6 +366,37 @@ class _MessageFooter extends StatelessWidget {
   }
 }
 
+/// A table column as wide as its content, but no wider than [max] (cells
+/// wrap past it) and no narrower than its longest word.
+///
+/// It must be an [IntrinsicColumnWidth]: flutter_markdown_plus only wraps a
+/// table in its horizontal scroller for that type (or a fixed width).
+class CappedColumnWidth extends IntrinsicColumnWidth {
+  const CappedColumnWidth({this.max = 280});
+  final double max;
+
+  @override
+  double minIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) {
+    var result = 0.0;
+    for (final cell in cells) {
+      result = math.max(result, cell.getMinIntrinsicWidth(double.infinity));
+    }
+    return result;
+  }
+
+  @override
+  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) {
+    var widest = 0.0;
+    for (final cell in cells) {
+      widest = math.max(widest, cell.getMaxIntrinsicWidth(double.infinity));
+    }
+    return math.max(math.min(widest, max), minIntrinsicWidth(cells, containerWidth));
+  }
+
+  @override
+  double? flex(Iterable<RenderBox> cells) => null;
+}
+
 class MarkdownText extends StatelessWidget {
   const MarkdownText(this.data, {super.key});
   final String data;
@@ -372,9 +407,23 @@ class MarkdownText extends StatelessWidget {
     final p = context.palette;
     final body = theme.textTheme.bodyLarge!;
     final code = TextStyle(fontFamily: mono, fontSize: 13, height: 1.5, color: p.text);
+    // One selection area for the whole message instead of a SelectableText
+    // per paragraph and table cell: each of those claimed horizontal drags for
+    // its own selection, so a wide table could not be swiped sideways. Text is
+    // still selectable (long-press, across paragraphs too).
+    return SelectionArea(child: _markdown(context, body: body, code: code, theme: theme, p: p));
+  }
+
+  Widget _markdown(
+    BuildContext context, {
+    required TextStyle body,
+    required TextStyle code,
+    required ThemeData theme,
+    required Palette p,
+  }) {
     return MarkdownBody(
       data: data,
-      selectable: true,
+      selectable: false,
       extensionSet: md.ExtensionSet.gitHubFlavored,
       builders: {'pre': _CodeBlockBuilder(context)},
       onTapLink: (text, href, title) {
@@ -399,6 +448,13 @@ class MarkdownText extends StatelessWidget {
         tableBody: body,
         tableBorder: TableBorder.all(color: p.border),
         tableCellsPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        // Columns size to their content, capped so prose wraps at a readable
+        // width; a table wider than the screen scrolls sideways (the package
+        // only adds the horizontal scroller for intrinsic/fixed widths). The
+        // default FlexColumnWidth squeezed every column into the screen, one
+        // word per line.
+        tableColumnWidth: const CappedColumnWidth(),
+        tableScrollbarThumbVisibility: true,
         horizontalRuleDecoration: BoxDecoration(
           border: Border(top: BorderSide(color: p.border)),
         ),

@@ -89,6 +89,37 @@ class _GripHubScreenState extends State<GripHubScreen> {
     }
   }
 
+  bool _refreshing = false;
+
+  /// New GripHub models appear (and retired ones go) without retyping the key.
+  Future<void> _refreshModels() async {
+    setState(() {
+      _refreshing = true;
+      _problem = null;
+    });
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final r = await widget.agent.integrations.refreshGripHubModels();
+      await widget.agent.refreshProviders();
+      await _load();
+      final added = (r['added'] as List?)?.length ?? 0;
+      final removed = (r['removed'] as List?)?.length ?? 0;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            added == 0 && removed == 0
+                ? tr('Models are up to date ({n}).').replaceAll('{n}', '${r['count']}')
+                : tr('{a} new, {b} removed · {n} models').replaceAll('{a}', '$added').replaceAll('{b}', '$removed').replaceAll('{n}', '${r['count']}'),
+          ),
+        ),
+      );
+    } on AgentError catch (e) {
+      if (mounted) setState(() => _problem = e.message);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   Future<void> _remove() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -171,9 +202,18 @@ class _GripHubScreenState extends State<GripHubScreen> {
                     children: [
                       Pill(tr('Connected'), color: p.success, dot: true),
                       const SizedBox(width: 8),
-                      Text(
-                        '${existing!.models.length} ${tr('models available')}',
-                        style: text.bodySmall?.copyWith(color: p.muted),
+                      Expanded(
+                        child: Text(
+                          '${existing!.models.length} ${tr('models available')}',
+                          style: text.bodySmall?.copyWith(color: p.muted),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _busy || _refreshing ? null : _refreshModels,
+                        icon: _refreshing
+                            ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(LucideIcons.refreshCw, size: 16),
+                        label: Text(tr('Update models')),
                       ),
                     ],
                   ),

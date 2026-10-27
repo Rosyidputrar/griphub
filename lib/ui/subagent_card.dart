@@ -95,10 +95,28 @@ String subagentMeta(SubagentState s, {bool full = false}) {
   return [
     _toolCount(s.tools.length),
     ?(e == null ? null : formatDurationShort(e)),
-    if (full && s.inputTokens + s.outputTokens > 0)
-      tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(s.inputTokens + s.outputTokens))),
+    if (full && s.totalTokens > 0) tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(s.totalTokens))),
     ?(c == null ? null : _creditsText(c)),
   ].join(' • ');
+}
+
+/// pi's thinking levels, as the composer labels them.
+String thinkingLabel(String level) => tr(switch (level) {
+  'off' => 'No thinking',
+  'minimal' => 'Minimal',
+  'low' => 'Low',
+  'medium' => 'Medium',
+  'high' => 'High',
+  'xhigh' => 'Max',
+  _ => level,
+});
+
+/// "Claude Opus 5.5 · High": the model at work and how hard it thinks.
+String? subagentModelLine(SubagentState s) {
+  final name = s.modelName ?? s.model;
+  if (name == null) return null;
+  final level = s.thinkingLevel;
+  return level == null ? name : '$name · ${thinkingLabel(level)}';
 }
 
 /// The first readable line of a markdown report, for the card preview.
@@ -322,6 +340,24 @@ class _SubagentCardState extends State<SubagentCard> with _Ticking, SingleTicker
                               SubagentStatusPill(s),
                             ],
                           ),
+                          if (subagentModelLine(s) case final line?)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Row(
+                                children: [
+                                  Icon(LucideIcons.cpu, size: 12, color: p.faint),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      line,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: text.labelSmall?.copyWith(fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           AnimatedSize(
                             duration: duration,
                             curve: Motion.curve,
@@ -642,7 +678,7 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
         s.status == SubagentStatus.queued;
     final report = (s.report ?? '').trim();
     // The cost limit only works when the model's price is known.
-    final costUnknown = s.startedAt != null && s.credits == null && s.inputTokens + s.outputTokens > 0;
+    final costUnknown = s.startedAt != null && s.credits == null && s.requests > 0;
 
     Widget section(String title, {Widget? trailing}) =>
         SectionLabel(title, trailing: trailing, padding: const EdgeInsets.fromLTRB(0, 20, 0, 8));
@@ -704,8 +740,8 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
                       ),
               ),
               Text(subagentMeta(s, full: true), style: text.bodySmall),
-              if (s.credits != null)
-                Text(tr('Costs are estimates.'), style: text.bodySmall?.copyWith(color: p.faint)),
+              const SizedBox(height: 12),
+              SubagentCostPanel(state: s),
               if (costUnknown)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
@@ -1302,5 +1338,78 @@ class CrossChatBanner extends StatelessWidget {
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(tr(e.toString()))));
     }
+  }
+}
+
+/// Model, thinking level and the running cost, line by line: requests,
+/// tokens (cache included, as GripHub bills them), how many requests were
+/// raised to the model's minimum, and the estimate in credits and rupiah.
+class SubagentCostPanel extends StatelessWidget {
+  const SubagentCostPanel({super.key, required this.state});
+  final SubagentState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final s = state;
+    Widget row(IconData icon, String label, String value, {Color? color}) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: p.faint),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label, style: text.bodySmall)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: text.bodyMedium?.copyWith(color: color, fontFeatures: const [FontFeature.tabularFigures()]),
+            ),
+          ),
+        ],
+      ),
+    );
+    final cached = s.cacheReadTokens + s.cacheWriteTokens;
+    final c = s.credits;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md)),
+      child: Column(
+        children: [
+          if (s.modelName ?? s.model case final name?) row(LucideIcons.cpu, tr('Model'), name),
+          if (s.thinkingLevel case final level?) row(LucideIcons.brain, tr('Thinking'), thinkingLabel(level)),
+          if (s.rate case final r?) row(LucideIcons.tag, tr('Rate'), tr('{n} credits / 1M tokens').replaceAll('{n}', localNumber(formatCredits(r)))),
+          row(
+            LucideIcons.activity,
+            tr('Requests'),
+            s.flooredRequests > 0
+                ? tr('{n} ({m} at the minimum)').replaceAll('{n}', '${s.requests}').replaceAll('{m}', '${s.flooredRequests}')
+                : '${s.requests}',
+          ),
+          row(
+            LucideIcons.layers,
+            tr('Tokens billed'),
+            cached > 0
+                ? tr('{n} ({m}% cache)').replaceAll('{n}', localNumber(formatTokens(s.totalTokens))).replaceAll('{m}', '${(cached / s.totalTokens * 100).round()}')
+                : localNumber(formatTokens(s.totalTokens)),
+          ),
+          row(
+            LucideIcons.coins,
+            tr(s.isActive ? 'Cost so far' : 'Cost'),
+            c == null ? '—' : '~${localNumber(formatCredits(c))} ${tr('credits')} · Rp ${(c * kRupiahPerCredit).round()}',
+            color: c == null ? p.faint : null,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              tr('Estimated per request at GripHub\'s live rate, including cache and each model\'s minimum; the exact charge is in Usage.'),
+              style: text.bodySmall?.copyWith(color: p.faint),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

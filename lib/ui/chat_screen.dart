@@ -470,6 +470,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _transcript() {
     final entries = agent.entries;
     final placed = placeSubagents(agent);
+    final footers = turnFooters(entries, busy: agent.busy);
     final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
@@ -492,6 +493,7 @@ class _ChatScreenState extends State<ChatScreen> {
               live: agent,
               modelLabel: agent.modelLabel,
               subagentCard: placed.cardFor,
+              footer: footers[i],
             ),
             NoticeEntry() => NoticeView(e),
           };

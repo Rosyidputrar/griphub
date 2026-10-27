@@ -139,7 +139,14 @@ class UsageRow {
   int get input => json['input'] as int? ?? 0;
   int get output => json['output'] as int? ?? 0;
   int get cacheRead => json['cacheRead'] as int? ?? 0;
+  int get cacheWrite => json['cacheWrite'] as int? ?? 0;
+
+  /// All tokens the request was billed for (cache included, as the router counts them).
+  int get tokens => input + output + cacheRead + cacheWrite;
   double get cost => (json['cost'] as num? ?? 0).toDouble();
+
+  /// Estimated GripHub credits by the router's rule (null: price unknown).
+  double? get credits => (json['credits'] as num?)?.toDouble();
   int get requests => json['requests'] as int? ?? 0;
 }
 

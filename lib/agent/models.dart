@@ -14,6 +14,24 @@ class ModelInfo {
   int? get maxTokens => (json['maxTokens'] as num?)?.toInt();
   bool get acceptsImages => (json['input'] as List?)?.contains('image') ?? false;
   String get key => '$provider/$id';
+
+  /// GripHub pricing, when the host knows it (router.ts): credits per 1M
+  /// tokens, the per-request minimum, a running promo, and availability.
+  ModelPricing? get pricing => json['pricing'] is Map ? ModelPricing((json['pricing'] as Map).cast<String, dynamic>()) : null;
+}
+
+class ModelPricing {
+  ModelPricing(this.json);
+  final Map<String, dynamic> json;
+  double? get credits => (json['credits'] as num?)?.toDouble();
+  double? get list => (json['list'] as num?)?.toDouble();
+  double? get floor => (json['floor'] as num?)?.toDouble();
+  String? get promo => json['promo'] as String?;
+  DateTime? get promoEndsAt => DateTime.tryParse(json['promoEndsAt'] as String? ?? '');
+  bool get available => json['available'] != false;
+
+  /// A promo that has not ended yet.
+  bool get onPromo => list != null && (promoEndsAt == null || promoEndsAt!.isAfter(DateTime.now()));
 }
 
 /// Favorite models in the order they were starred, not catalog order. Keys
@@ -332,3 +350,50 @@ Map<String, dynamic> partialJsonStrings(String raw) {
   }
   return out;
 }
+
+/// What the copy-and-model footer under an assistant reply shows.
+typedef TurnFooter = ({String text, String? model});
+
+/// Footers for a transcript, keyed by entry index. One turn (from a user
+/// message to the next) is several assistant messages — text, tools, more
+/// text — and the footer belongs only under the last one, once the turn is
+/// over: it copies the turn's final answer and names the model that gave it.
+/// It used to appear under every step that had text, mid-run.
+///
+/// [busy] is whether the agent is still working on the last turn; that turn
+/// gets no footer until it ends.
+Map<int, TurnFooter> turnFooters(List<ChatEntry> entries, {required bool busy}) {
+  final out = <int, TurnFooter>{};
+  var start = 0;
+  void close(int end, {required bool last}) {
+    if (last && busy) return;
+    // The last assistant message of the turn, and the last one with text.
+    int? tail;
+    AssistantEntry? answer;
+    for (var i = end - 1; i >= start; i--) {
+      final e = entries[i];
+      if (e is! AssistantEntry) continue;
+      tail ??= i;
+      if (e.streaming) return;
+      if (answer == null && _replyText(e).isNotEmpty) answer = e;
+      if (answer != null) break;
+    }
+    if (tail == null || answer == null) return;
+    final lastEntry = entries[tail] as AssistantEntry;
+    out[tail] = (text: _replyText(answer), model: lastEntry.model ?? answer.model);
+  }
+
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i] is UserEntry) {
+      close(i, last: false);
+      start = i + 1;
+    }
+  }
+  close(entries.length, last: true);
+  return out;
+}
+
+String _replyText(AssistantEntry e) => [
+  for (final b in e.orderedBlocks)
+    if (b.kind == BlockKind.text && b.text.trim().isNotEmpty) b.text.trim(),
+].join('\n\n');

@@ -35,7 +35,7 @@ import { Integrations, type Log, run } from "./integrations.js";
 import { installLenientTools } from "./lenient.js";
 import { BASH_TIMEOUT_SECONDS, limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
-import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID } from "./providers.js";
+import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { Skills } from "./skills.js";
 import {
@@ -62,7 +62,8 @@ import {
 	wibDay,
 	writeZip,
 } from "./workbench.js";
-import { estimatedCredits } from "./pricing.js";
+import { FALLBACK_RATES, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
+import { Router } from "./router.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
 
@@ -86,6 +87,7 @@ let mcp: Mcp;
 let customProviders: CustomProviders;
 let sync: GitHubSync;
 let subagents: SubagentManager;
+let router: Router;
 const tunnels = new Tunnels();
 let unsubscribe: (() => void) | undefined;
 
@@ -126,6 +128,9 @@ function wireEvent(event: AgentSessionEvent): object {
 
 function modelInfo(model: any) {
 	if (!model || model.provider === "unknown") return null;
+	// GripHub pricing for the picker: rate, per-request floor, promo, status.
+	const griphub = model.provider === GRIPHUB_ID && router;
+	const rate = griphub ? router.rate(model.id) : undefined;
 	return {
 		provider: model.provider,
 		id: model.id,
@@ -134,7 +139,22 @@ function modelInfo(model: any) {
 		contextWindow: model.contextWindow ?? null,
 		maxTokens: model.maxTokens ?? null,
 		input: model.input ?? ["text"],
+		...(griphub && {
+			pricing: {
+				credits: rate?.credits ?? null,
+				list: rate?.list ?? null,
+				promo: rate?.promo ?? null,
+				promoEndsAt: rate?.promoEndsAt ?? null,
+				floor: router.floor(model.id) ?? null,
+				available: router.modelAvailable(model.id),
+			},
+		}),
 	};
+}
+
+/** Image models a key fetched before they were filtered out must not be offered for chat. */
+function isChatModel(m: any) {
+	return !(m?.provider === GRIPHUB_ID && router?.rate(m.id)?.perImage);
 }
 
 function state() {
@@ -360,22 +380,85 @@ async function tryFallback(error: string) {
 	}
 }
 
+/** Estimated GripHub credits of one pi usage record (rate + floor + cache, see router.ts). */
+function estimateUsage(model: string, u: any): number | null {
+	return requestEstimate(model, usageOf(u));
+}
+
 /**
- * Refuses new work once today's spend reaches the configured cap, in
- * GripHub credits. Spend is estimated from token counts with the same
- * rate table as the Usage screen (agent/src/pricing.ts), because pi's
- * own cost field is always 0 for GripHub (the router reports no prices).
- * The day is the user's day (Asia/Jakarta), not UTC. Models with no known
- * rate are not counted — the same rule as the Usage screen's "—".
+ * Today's spend in GripHub credits (WIB day): the router's own total from the
+ * last refresh (at most a minute old), plus local estimates for this app's
+ * requests since that refresh. With no router data yet (offline, no key),
+ * the local estimate for the whole day. Refreshes in the background so a
+ * prompt never waits on the network.
  */
+function spentToday(): { credits: number; real: boolean } {
+	void router.refreshToday(60_000).catch(() => {});
+	const today = router.today();
+	const sessions = join(agentDir, "sessions");
+	const day = wibDay(Date.now());
+	const local = (from?: number) =>
+		usageSummary(sessions, 1, estimateUsage, from)
+			.filter((r) => r.day === day)
+			.reduce((sum, r) => sum + (r.credits ?? 0), 0);
+	// Subagents run on in-memory sessions (no chat file): their spend since the
+	// router snapshot is counted from their own running totals.
+	const subs = (from: number) =>
+		subagents
+			.list()
+			.filter((r) => (r.finishedAt ?? Date.now()) >= from && r.credits !== null)
+			.reduce((sum, r) => sum + (r.credits ?? 0) * subagentShareSince(r, from), 0);
+	if (!today) return { credits: local() + subs(Date.parse(`${day}T00:00:00+07:00`)), real: false };
+	return { credits: today.credits + local(today.fetchedAt) + subs(today.fetchedAt), real: true };
+}
+
+/** The part of a subagent's spend that falls after [from] (linear over its run). */
+function subagentShareSince(r: { startedAt?: number; finishedAt?: number }, from: number): number {
+	const start = r.startedAt ?? Date.now();
+	const end = r.finishedAt ?? Date.now();
+	if (start >= from) return 1;
+	if (end <= from) return 0;
+	return (end - from) / Math.max(1, end - start);
+}
+
+/**
+ * GripHub's model list, refreshed from /v1/models with the saved key. The
+ * open chat keeps its model definition in step (limits, reasoning). Returns
+ * what changed; throws without a key or on a network error.
+ */
+async function refreshGripHubModels() {
+	const key = customProviders.key(GRIPHUB_ID);
+	if (!key) throw new Error("No GripHub key saved");
+	const before = new Set(customProviders.list().find((p) => p.id === GRIPHUB_ID)?.models.map((m) => m.id) ?? []);
+	const models = await fetchModels(GRIPHUB_API, GRIPHUB_BASE_URL, key);
+	customProviders.save({ id: GRIPHUB_ID, apiKey: "", models }, new Set());
+	await modelRuntime.refresh({ allowNetwork: false });
+	const s = session;
+	if (s?.model?.provider === GRIPHUB_ID) {
+		const fresh = modelRuntime.getModel(GRIPHUB_ID, s.model.id);
+		if (fresh && !s.isStreaming) {
+			const level = s.thinkingLevel;
+			await s.setModel(fresh);
+			s.setThinkingLevel(level);
+		}
+	}
+	const after = new Set(models.map((m) => m.id));
+	return {
+		count: models.length,
+		added: [...after].filter((id) => !before.has(id)),
+		removed: [...before].filter((id) => !after.has(id)),
+		refreshedAt: Date.now(),
+	};
+}
+
+/** Refuses new work once today's spend reaches the configured cap (Settings → Usage). */
 function budgetError(): string | null {
 	const cap = integrations.settings.dailyBudget ?? 0;
 	if (!cap) return null;
-	const today = wibDay(Date.now());
-	const spent = usageSummary(join(agentDir, "sessions"), 1)
-		.filter((r) => r.day === today)
-		.reduce((sum, r) => sum + (estimatedCredits(r.model, r.input, r.output) ?? 0), 0);
-	return spent >= cap ? `Daily budget of ${cap} credits reached (${spent.toFixed(2)} credits spent today). Raise it in Settings → Usage.` : null;
+	const { credits } = spentToday();
+	return credits >= cap
+		? `Daily budget of ${cap} credits reached (${credits.toFixed(2)} credits spent today). Raise it in Settings → Usage.`
+		: null;
 }
 
 function checkBudget() {
@@ -817,7 +900,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "providers":
 			return providers();
 		case "models":
-			return (await modelRuntime.getAvailable(cmd.provider)).map(modelInfo);
+			return (await modelRuntime.getAvailable(cmd.provider)).filter(isChatModel).map(modelInfo);
 		case "set_model": {
 			const model = modelRuntime.getModel(cmd.provider, cmd.model);
 			if (!model) throw new Error(`Unknown model ${cmd.provider}/${cmd.model}`);
@@ -882,6 +965,19 @@ async function handle(cmd: Command): Promise<unknown> {
 			return customProviders.list();
 		case "custom_provider_fetch_models":
 			return fetchModels(GRIPHUB_API, GRIPHUB_BASE_URL, cmd.apiKey || customProviders.key(GRIPHUB_ID));
+		// Re-reads GripHub's /v1/models with the saved key and updates the model
+		// list (new models appear, retired ones go). Image models stay out of it.
+		case "griphub_models_refresh": {
+			const r = await refreshGripHubModels();
+			return { ...r, providers: customProviders.list() };
+		}
+		case "griphub_image_models": {
+			const key = customProviders.key(GRIPHUB_ID);
+			if (!key) throw new Error("No GripHub key saved");
+			const models = await listImageModels(GRIPHUB_BASE_URL, key);
+			const rates = router.rates();
+			return models.map((m) => ({ ...m, credits: rates[m.id]?.credits ?? null, perImage: rates[m.id]?.perImage ?? true, list: rates[m.id]?.list ?? null, promoEndsAt: rates[m.id]?.promoEndsAt ?? null }));
+		}
 		case "custom_provider_images_generate":
 			return {
 				b64_json: await generateImage(
@@ -1068,7 +1164,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "tunnels":
 			return tunnels.list();
 		case "usage":
-			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30);
+			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30, estimateUsage);
 
 		// Prompt templates: slash commands pi expands.
 		case "templates":
@@ -1159,41 +1255,30 @@ async function handle(cmd: Command): Promise<unknown> {
 			await reopenSession();
 			return container.status(settingsManager.getShellPath());
 
+		// GripHub Router account data (router.ts), with the saved GripHub key.
+		case "router_account": {
+			const [account] = await Promise.all([
+				router.refreshAccount(cmd.force ? 0 : 30_000),
+				router.refreshToday(cmd.force ? 0 : 30_000).catch(() => null),
+				router.refreshRequests().catch(() => null),
+			]);
+			const spent = spentToday();
+			return { ...router.snapshot(), account, spentToday: spent.credits, spentTodayReal: spent.real };
+		}
+		case "router_snapshot":
+			return router.snapshot();
 		case "griphub_credits": {
-			// Account credit balance from the router's /v1/credits endpoint, using
-			// the saved GripHub key. Returns a trimmed summary for the Usage card.
-			const key = customProviders?.key(GRIPHUB_ID) ?? "";
-			if (!key) throw new Error("No GripHub key saved");
-			const res = await fetch(`${GRIPHUB_BASE_URL}/credits`, {
-				headers: { Authorization: `Bearer ${key}` },
-				signal: AbortSignal.timeout(30_000),
-			});
-			const body = await res.json().catch(() => null);
-			if (!res.ok) throw new Error(`GripHub credits: ${(body as any)?.error?.message ?? res.statusText} (${res.status})`);
-			const b = (body as any)?.balance ?? {};
-			const account = (body as any)?.account ?? {};
-			const batches = Array.isArray(account.batches) ? account.batches : [];
-			let nearest: { credits: number; expiresAt: string } | null = null;
-			for (const batch of batches) {
-				if (typeof batch?.expiresAt !== "string") continue;
-				if (!nearest || batch.expiresAt < nearest.expiresAt) {
-					nearest = { credits: Number(batch.credits ?? 0), expiresAt: batch.expiresAt };
-				}
-			}
-			const byModel = Array.isArray((body as any)?.byModel) ? (body as any).byModel : [];
-			const topModels = [...byModel]
-				.filter((m: any) => typeof m?.model === "string")
-				.sort((a: any, b: any) => Number(b.creditsUsed ?? 0) - Number(a.creditsUsed ?? 0))
-				.slice(0, 5)
-				.map((m: any) => ({ model: m.model as string, creditsUsed: Number(m.creditsUsed ?? 0) }));
+			// Older app builds: the trimmed summary the first Usage card used.
+			const a = await router.refreshAccount(30_000);
+			const nearest = a.batches.find((b) => b.expiresAt) ?? null;
 			return {
-				remaining: Number(b.remaining ?? account.creditsBalance ?? 0),
-				used: Number(b.used ?? account.creditsUsed ?? 0),
-				limit: Number(b.limit ?? account.creditsGranted ?? 0),
-				suspended: account.suspended === true,
-				suspendedUntil: typeof account.suspendedUntil === "string" ? account.suspendedUntil : null,
-				nearestExpiry: nearest,
-				topModels,
+				remaining: a.balance,
+				used: a.used,
+				limit: a.granted,
+				suspended: a.suspended,
+				suspendedUntil: a.suspendedUntil,
+				nearestExpiry: nearest ? { credits: nearest.credits, expiresAt: nearest.expiresAt } : null,
+				topModels: a.byModel.slice(0, 5).map((m) => ({ model: m.model, creditsUsed: m.credits })),
 			};
 		}
 		// App settings: DNS, search keys, approvals, fallbacks, budget.
@@ -1297,6 +1382,12 @@ async function main() {
 	mcp = new Mcp(join(stateDir, "mcp.json"), () => send({ type: "mcp", servers: mcp.summary() }));
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
+	router = new Router({
+		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
+		cacheFile: join(stateDir, "router-cache.json"),
+		fallbackRates: FALLBACK_RATES,
+	});
+	usePricingRouter(router);
 	modelRuntime = await ModelRuntime.create();
 	// Never auto-trust project code: a cloned repo's .pi/extensions/*.ts
 	// would otherwise run inside the host with the user's tokens on merely
@@ -1304,6 +1395,14 @@ async function main() {
 	// either (see SettingsManager); the app's own inline extension is
 	// unaffected, it is not a project extension.
 	settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
+	// pi keeps the prompt cache warm with extra 1-token requests. On GripHub
+	// each re-reads the whole cached prompt at the full rate (one opus warm-up
+	// cost ~1.3 credits), so they cost more than the cache saves. Off unless
+	// the user turned it on themselves.
+	if ((settingsManager as any).globalSettings?.cacheWarming === undefined) {
+		settingsManager.setCacheWarmingMode("off");
+		await settingsManager.flush();
+	}
 	// Subagents are created after boot, but the manager must exist before the
 	// first interactive session is built (buildSession registers its tool).
 	subagents = new SubagentManager({
@@ -1329,6 +1428,22 @@ async function main() {
 		await settingsManager.flush();
 	}
 	await openSession(SessionManager.continueRecent(workspace));
+	// Account data and live rates in the background; the model list once a day
+	// (new GripHub models show up without re-entering the key).
+	if (customProviders.key(GRIPHUB_ID)) {
+		void router.refreshAccount().catch((e) => log("router account:", (e as Error).message));
+		void router.refreshRequests().catch(() => {});
+		const stamp = join(stateDir, "models-refreshed");
+		const last = existsSync(stamp) ? Number(readFileSync(stamp, "utf8")) || 0 : 0;
+		if (Date.now() - last > 24 * 3600_000) {
+			void refreshGripHubModels()
+				.then((r) => {
+					writeFileSync(stamp, String(r.refreshedAt));
+					if (r.added.length || r.removed.length) send({ type: "models_changed", ...r });
+				})
+				.catch((e) => log("models refresh:", (e as Error).message));
+		}
+	}
 	sync = new GitHubSync({
 		agentDir,
 		workspace,
