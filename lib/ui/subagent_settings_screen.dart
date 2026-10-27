@@ -71,10 +71,11 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
         final cost = s?.subagentCreditLimit ?? 50;
         final time = s?.subagentMinutesLimit ?? 30;
         final approval = s?.subagentApprovalMode ?? agent.approvalMode;
+        final compact = Appearance.instance.compact;
         return Scaffold(
           appBar: AppBar(title: Text(tr('Subagent'))),
           body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
+            padding: EdgeInsets.fromLTRB(16, 4, 16, compact ? 24 : 40),
             children: [
               SurfaceCard(
                 child: Column(
@@ -88,7 +89,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                           : tr('Cost: {n} credits • Time: {m} min')
                                 .replaceAll('{n}', '${cost.toInt()}')
                                 .replaceAll('{m}', '${time.toInt()}'),
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.muted),
+                      style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -98,10 +99,11 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
-              SectionLabel(tr('Cost limit (global)')),
+              SizedBox(height: compact ? 8 : 12),
+              SectionLabel(tr('Cost limit (global)'), padding: EdgeInsets.fromLTRB(4, compact ? 8 : 12, 4, 10)),
               _LimitPills(
                 presets: const [10, 25, 50],
+                compact: compact,
                 unit: tr('credits'),
                 noLimit: true,
                 value: cost,
@@ -111,10 +113,11 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                 onCustomTap: () => setState(() => _costCustomOpen = !_costCustomOpen),
                 onCustomApply: () => _applyCustom(cost: true),
               ),
-              const SizedBox(height: 20),
-              SectionLabel(tr('Time limit (global)')),
+              SizedBox(height: compact ? 8 : 12),
+              SectionLabel(tr('Time limit (global)'), padding: EdgeInsets.fromLTRB(4, compact ? 8 : 12, 4, 10)),
               _LimitPills(
                 presets: const [15, 30, 60],
+                compact: compact,
                 unit: tr('min'),
                 noLimit: false,
                 value: time,
@@ -124,8 +127,8 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                 onCustomTap: () => setState(() => _timeCustomOpen = !_timeCustomOpen),
                 onCustomApply: () => _applyCustom(cost: false),
               ),
-              const SizedBox(height: 20),
-              SectionLabel(tr('Approvals')),
+              SizedBox(height: compact ? 8 : 12),
+              SectionLabel(tr('Approvals'), padding: EdgeInsets.fromLTRB(4, compact ? 8 : 12, 4, 10)),
               PillSegments<String>(
                 value: approval,
                 options: {'ask_all': tr('Ask all'), 'ask_risky': tr('Risky only'), 'auto': tr('Bypass all')},
@@ -135,8 +138,8 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                   await _save({'subagentApprovalMode': v});
                 },
               ),
-              const SizedBox(height: 20),
-              SectionLabel(tr('Notifications')),
+              SizedBox(height: compact ? 8 : 12),
+              SectionLabel(tr('Notifications'), padding: EdgeInsets.fromLTRB(4, compact ? 8 : 12, 4, 10)),
               SwitchListTile(
                 value: s?.subagentNotifyDone ?? true,
                 title: Text(tr('Subagent finished')),
@@ -173,6 +176,7 @@ class _LimitPills extends StatelessWidget {
     required this.unit,
     required this.noLimit,
     required this.value,
+    required this.compact,
     required this.customOpen,
     required this.customController,
     required this.onPreset,
@@ -184,6 +188,7 @@ class _LimitPills extends StatelessWidget {
   final String unit;
   final bool noLimit;
   final double value;
+  final bool compact;
   final bool customOpen;
   final TextEditingController customController;
   final ValueChanged<int> onPreset;
@@ -199,18 +204,18 @@ class _LimitPills extends StatelessWidget {
     final isCustom = !isPreset && !isNoLimit;
     Widget pill(String label, bool selected, VoidCallback onTap) {
       return Material(
-        color: selected ? p.text : p.surface,
+        color: selected ? p.accent : p.raised,
         borderRadius: BorderRadius.circular(Radii.pill),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: compact ? 8 : 10),
             child: Text(
               label,
               style: Theme.of(
                 context,
-              ).textTheme.labelLarge?.copyWith(color: selected ? p.inverse : p.muted, fontWeight: FontWeight.w600),
+              ).textTheme.labelLarge?.copyWith(color: selected ? p.onAccent : p.text, fontWeight: FontWeight.w600),
             ),
           ),
         ),
