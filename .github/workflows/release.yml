@@ -206,10 +206,13 @@ jobs:
           GH_REPO: ${{ env.RELEASES_REPO }}
           TAG: v${{ steps.version.outputs.name }}
         run: |
-          # Release notes stay static on purpose: listing pushed commits here
-          # would publish the source repository and branch names on the public
-          # releases page (e.g. "Merge pull request #N from ...").
-          echo "GripHub ${{ steps.version.outputs.name }}" > notes.md
+          # Release notes come from the curated RELEASE_NOTES.md (human-written,
+          # user-facing changes only, never repository/branch/PR names). The
+          # static one-liner is only the fallback when that file is absent. 
+          # Never generate notes from pushed commits: that would publish the           
+# source repository and branch names on the public releases page           
+# (e.g. "Merge pull request #N from ...").
+          if [ -f RELEASE_NOTES.md ]; then cp RELEASE_NOTES.md notes.md; else echo "GripHub ${{ steps.version.outputs.name }}" > notes.md; fi
           # A re-run of the same run number replaces the files of its own release.
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
