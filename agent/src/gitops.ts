@@ -140,6 +140,12 @@ export async function checkout(cwd: string, branch: string, create: boolean) {
 	else await ok(cwd, ["checkout", "-q", local]);
 }
 
+/** Updates the remote branches (new ones appear, deleted ones go), without touching the working tree. */
+export async function fetch(cwd: string) {
+	const r = await git(cwd, ["fetch", "--prune", "origin"]);
+	if (r.code !== 0) throw new Error((r.err || r.out).trim().split("\n").slice(-3).join("\n"));
+}
+
 export async function pull(cwd: string, log: (l: string) => void) {
 	const r = await git(cwd, ["pull", "--ff-only"]);
 	log((r.out + r.err).trim());

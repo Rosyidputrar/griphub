@@ -36,6 +36,8 @@ function fakeSession(steps, model = { provider: "griphub", id: "claude-opus-5.5"
 				listener({ type: "message_end", message: { role: "assistant", model: model.id, ...m } });
 			}
 			listener({ type: "agent_end" });
+			// pi's run boundary: the session is idle only from here on.
+			listener({ type: "agent_settled", aborted: false });
 		},
 		getSessionStats: () => ({ tokens: { ...totals } }),
 		getLastAssistantText: () => "Laporan",

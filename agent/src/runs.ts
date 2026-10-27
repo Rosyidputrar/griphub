@@ -60,6 +60,7 @@ export class Runner {
 	private store: Store = { runs: [], schedules: [], concurrency: 1 };
 	private active = new Map<string, RunSession>();
 	private timer?: NodeJS.Timeout;
+	private firstTick?: NodeJS.Timeout;
 	/** Issue approvals waiting for an answer, so polls never stack duplicate cards. */
 	private pendingIssueApprovals = new Set<string>();
 
@@ -83,7 +84,7 @@ export class Runner {
 		// Runs interrupted by an app restart cannot resume.
 		for (const r of this.store.runs) if (r.status === "running") r.status = "error";
 		this.timer = setInterval(() => void this.tick(), 60_000);
-		setTimeout(() => void this.tick(), 5_000);
+		this.firstTick = setTimeout(() => void this.tick(), 5_000);
 	}
 
 	private save() {
@@ -146,6 +147,28 @@ export class Runner {
 
 	clearFinished() {
 		this.store.runs = this.store.runs.filter((r) => r.status === "queued" || r.status === "running");
+		this.changed();
+	}
+
+	/**
+	 * Removes one finished run from the list (its chat stays, like "Clear finished"). Returns it and its
+	 * place so the app can offer Undo; queued and running runs are refused, they must be cancelled first.
+	 */
+	delete(id: string): { run: Run; index: number } | null {
+		const index = this.store.runs.findIndex((r) => r.id === id);
+		if (index < 0) return null;
+		const run = this.store.runs[index];
+		if (run.status === "queued" || run.status === "running") throw new Error("Cancel the run before removing it");
+		this.store.runs.splice(index, 1);
+		this.changed();
+		return { run, index };
+	}
+
+	/** Puts back a run [delete] removed (Undo), at its old place. A finished run only; never twice. */
+	restore(run: Run, index: number) {
+		if (!run?.id || this.store.runs.some((r) => r.id === run.id)) return;
+		if (run.status === "queued" || run.status === "running") return;
+		this.store.runs.splice(Math.min(Math.max(Math.trunc(index) || 0, 0), this.store.runs.length), 0, run);
 		this.changed();
 	}
 
@@ -322,5 +345,6 @@ export class Runner {
 
 	dispose() {
 		if (this.timer) clearInterval(this.timer);
+		if (this.firstTick) clearTimeout(this.firstTick);
 	}
 }

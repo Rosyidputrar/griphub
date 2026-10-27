@@ -115,6 +115,35 @@ List<TextSpan> _spans(List<Node> nodes, Map<String, Color> colors, Color? inheri
   return out;
 }
 
+/// A highlighted text, kept so a rebuild with the same text reuses the very same span: no new highlight pass,
+/// and Flutter sees an identical span, so the text isn't laid out again. The chat rebuilds every frame while
+/// the agent works, and every code panel on screen used to be re-highlighted each time.
+class _Highlighted {
+  _Highlighted(this.text, this.language, this.brightness, this.style, this.span);
+  final String text;
+  final String? language;
+  final Brightness brightness;
+  final TextStyle style;
+  final TextSpan span;
+}
+
+final _highlighted = <_Highlighted>[];
+
+TextSpan _highlight(String text, String? language, Brightness brightness, TextStyle style) {
+  for (var i = 0; i < _highlighted.length; i++) {
+    final h = _highlighted[i];
+    if (h.language == language && h.brightness == brightness && h.style == style && h.text == text) {
+      // Most recently used last.
+      if (i != _highlighted.length - 1) _highlighted.add(_highlighted.removeAt(i));
+      return h.span;
+    }
+  }
+  final span = TextSpan(style: style, children: highlightSpans(text, language, brightness));
+  _highlighted.add(_Highlighted(text, language, brightness, style, span));
+  if (_highlighted.length > 32) _highlighted.removeAt(0);
+  return span;
+}
+
 /// Bordered code panel: language label, copy button, line numbers, highlighting.
 class CodeBox extends StatelessWidget {
   const CodeBox({
@@ -126,6 +155,8 @@ class CodeBox extends StatelessWidget {
     this.lineNumbers = true,
     this.followTail = false,
     this.onPreview,
+    this.firstLine = 1,
+    this.copyText,
   });
   final String text;
   final String? label;
@@ -137,18 +168,24 @@ class CodeBox extends StatelessWidget {
   final bool followTail;
   final VoidCallback? onPreview;
 
+  /// The line number of [text]'s first line, when it is the end of something longer.
+  final int firstLine;
+
+  /// What Copy copies, when [text] is only part of it; [text] otherwise.
+  final String? copyText;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final brightness = Theme.of(context).brightness;
     final style = TextStyle(fontFamily: mono, fontSize: 12.5, height: 1.6, color: p.text);
     final lines = '\n'.allMatches(text).length + 1;
-    final showNumbers = lineNumbers && lines > 1;
+    final showNumbers = lineNumbers && (lines > 1 || firstLine > 1);
 
     Widget code = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: EdgeInsets.fromLTRB(showNumbers ? 12 : 14, 12, 14, 14),
-      child: SelectableText.rich(TextSpan(style: style, children: highlightSpans(text, language ?? label, brightness))),
+      child: SelectableText.rich(_highlight(text, language ?? label, brightness, style)),
     );
     Widget body = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,7 +197,7 @@ class CodeBox extends StatelessWidget {
               border: Border(right: BorderSide(color: p.border)),
             ),
             child: Text(
-              List.generate(lines, (i) => '${i + 1}').join('\n'),
+              List.generate(lines, (i) => '${firstLine + i}').join('\n'),
               textAlign: TextAlign.right,
               style: style.copyWith(color: p.faint),
             ),
@@ -202,7 +239,7 @@ class CodeBox extends StatelessWidget {
                   ),
                 ),
                 if (onPreview != null) _HeaderAction(icon: LucideIcons.play, label: tr('Preview'), onTap: onPreview!),
-                CopyButton(text: text),
+                CopyButton(text: copyText ?? text),
                 const SizedBox(width: 4),
               ],
             ),

@@ -14,6 +14,7 @@
  * running subagent or turn.
  */
 
+import { GRIPHUB_ID } from "./providers.js";
 import { type Rate, type Router, type Usage, lookup, requestCredits, SEED_FLOORS } from "./router.js";
 
 /** Fallback rates: credits per 1M tokens (or per image). */
@@ -99,4 +100,23 @@ export function usageOf(u: any): Usage {
 		cacheRead: Number(u?.cacheRead ?? 0) || 0,
 		cacheWrite: Number(u?.cacheWrite ?? 0) || 0,
 	};
+}
+
+/**
+ * The estimate for one assistant message, i.e. one model request: credits by the router's rule (null when the
+ * price is unknown, or the request went to another provider, even one serving a model with a GripHub name), and
+ * whether it was billed at the model's per-request minimum. A failed request with no output is free.
+ */
+export function messageCost(m: any): { credits: number | null; floored: boolean } | null {
+	if (m?.role !== "assistant" || !m.usage) return null;
+	if (m.provider && m.provider !== GRIPHUB_ID) return { credits: null, floored: false };
+	const model = String(m.model ?? "");
+	if (!model) return { credits: null, floored: false };
+	const ok = !(m.stopReason === "error" && !(m.usage.output > 0));
+	const u = usageOf(m.usage);
+	const credits = requestEstimate(model, u, ok);
+	const rate = rateForModel(model);
+	const tokens = u.input + u.output + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+	const floored = ok && credits !== null && !!rate && !rate.perImage && credits > (rate.credits * tokens) / 1_000_000 + 1e-9;
+	return { credits, floored };
 }

@@ -38,7 +38,7 @@ import type {
 import { Type } from "typebox";
 
 import { Guard, type ApprovalMode } from "./guard.js";
-import { rateForModel, requestEstimate, usageOf } from "./pricing.js";
+import { messageCost, rateForModel } from "./pricing.js";
 
 /** Read-only work: research, read files, search the web. Never changes anything. */
 export const READ_TOOLS = ["read", "grep", "find", "ls", "web_search", "web_fetch"];
@@ -612,12 +612,16 @@ export class SubagentManager {
 			case "message_end": {
 				const m = e.message;
 				if (m?.role === "assistant") {
-					if (m.stopReason === "error") rt.lastError = String(m.errorMessage ?? "Model error");
+					// A later answer (pi's auto-retry succeeding) clears an earlier error.
+					rt.lastError = m.stopReason === "error" ? String(m.errorMessage ?? "Model error") : undefined;
 					this.chargeRequest(rt, m);
 				}
 				break;
 			}
-			case "agent_end":
+			// Not agent_end: pi can end several agent loops in one run (auto-retry,
+			// compaction, follow-ups) and stays busy until agent_settled, so a
+			// prompt() sent at agent_end is refused and finishing there would
+			// dispose a run pi is still retrying.
 			case "agent_settled":
 				if (!rt.settling) {
 					rt.settling = true;
@@ -670,19 +674,14 @@ export class SubagentManager {
 		const rec = rt.record;
 		const model = String(m.model ?? rec.model ?? rt.parent.modelId ?? "");
 		if (!model || !m.usage) return;
-		// A failed request with no output is not billed by the router.
-		const ok = !(m.stopReason === "error" && !(m.usage.output > 0));
-		const u = usageOf(m.usage);
-		const cost = requestEstimate(model, u, ok);
+		// The same estimate as the chat's per-turn cost (pricing.ts): floor, cache tokens, failed requests free.
+		const c = messageCost({ ...m, model });
+		const cost = c?.credits ?? null;
 		rec.requests += 1;
 		// One request of unknown price makes the total unknown (never a made-up number).
 		const unknown = cost === null || (rec.requests > 1 && rec.credits === null);
 		rec.credits = unknown ? null : (rec.credits ?? 0) + cost;
-		if (ok && cost !== null) {
-			const rate = rateForModel(model);
-			const tokens = u.input + u.output + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
-			if (rate && !rate.perImage && cost > (rate.credits * tokens) / 1_000_000 + 1e-9) rec.flooredRequests += 1;
-		}
+		if (c?.floored) rec.flooredRequests += 1;
 		rt.cachedCredits = rec.credits;
 		this.refreshUsage(rt);
 		this.emitStatus(rt);

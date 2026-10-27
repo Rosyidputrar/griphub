@@ -26,8 +26,48 @@ export interface SshHost {
 	path?: string;
 }
 
+/**
+ * A GitHub sign-in. Device-flow tokens from a GitHub App expire (8 hours) and
+ * come with a refresh token (6 months); OAuth App tokens and pasted tokens
+ * carry no expiry here. `expired` is set when GitHub rejected the token and it
+ * could not be refreshed: the account stays listed so the app can ask the
+ * user to sign in again instead of failing with a bare 401.
+ */
+interface GithubAccount {
+	token: string;
+	login: string;
+	name: string | null;
+	email: string;
+	avatarUrl: string;
+	refreshToken?: string;
+	/** Epoch ms; absent when the token does not expire. */
+	expiresAt?: number;
+	refreshExpiresAt?: number;
+	/** The Client ID the token was issued to; refreshing must use the same one. */
+	clientId?: string;
+	expired?: boolean;
+}
+
+/** What the device flow's token endpoint returns besides the access token. */
+interface GithubGrant {
+	refresh_token?: unknown;
+	expires_in?: unknown;
+	refresh_token_expires_in?: unknown;
+}
+
+/** Refresh this long before the access token runs out, so a long git push never starts on a dying token. */
+const GITHUB_REFRESH_MARGIN_MS = 30 * 60_000;
+
+/** Raised when GitHub no longer accepts the sign-in; the app shows "sign in again". */
+export class GithubAuthError extends Error {
+	readonly code = "github_auth_expired";
+	constructor() {
+		super("GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.");
+	}
+}
+
 interface Store {
-	github?: { token: string; login: string; name: string | null; email: string; avatarUrl: string };
+	github?: GithubAccount;
 	vercel?: { token: string; username: string };
 	cloudflare?: { token: string; accounts: CloudflareAccount[]; accountId: string };
 	sshHosts: SshHost[];
@@ -285,7 +325,7 @@ export class Integrations {
 		const { github, vercel, cloudflare, sshHosts } = this.store;
 		const pub = join(this.home, ".ssh", "id_ed25519.pub");
 		return {
-			github: github ? { login: github.login, name: github.name, avatarUrl: github.avatarUrl } : null,
+			github: github ? { login: github.login, name: github.name, avatarUrl: github.avatarUrl, expired: !!github.expired } : null,
 			vercel: vercel ? { username: vercel.username } : null,
 			cloudflare: cloudflare ? { accounts: cloudflare.accounts, accountId: cloudflare.accountId } : null,
 			ssh: { publicKey: existsSync(pub) ? readFileSync(pub, "utf8").trim() : null, hosts: sshHosts },
@@ -295,8 +335,32 @@ export class Integrations {
 	// -------------------------------------------------------------------------
 	// GitHub
 
-	private async github(path: string, init: RequestInit = {}, token = this.store.github?.token) {
-		if (!token) throw new Error("Not signed in to GitHub");
+	/**
+	 * Calls the GitHub REST API with the stored sign-in, refreshing it first when
+	 * it is about to expire. A 401 refreshes once and retries; when that is not
+	 * possible the account is marked expired and a GithubAuthError is thrown.
+	 * An explicit [token] (signing in) is used as is.
+	 */
+	private async github(path: string, init: RequestInit = {}, token?: string): Promise<any> {
+		if (token) return this.githubRequest(path, init, token);
+		if (!this.store.github) throw new Error("Not signed in to GitHub");
+		const fresh = await this.githubToken();
+		try {
+			return await this.githubRequest(path, init, fresh);
+		} catch (e) {
+			if ((e as any)?.status !== 401) throw e;
+			// Rejected before its expiry (revoked, or the clock is off): one refresh, one retry.
+			const again = await this.githubToken(true);
+			try {
+				return await this.githubRequest(path, init, again);
+			} catch (e2) {
+				if ((e2 as any)?.status === 401) this.markGithubExpired();
+				throw (e2 as any)?.status === 401 ? new GithubAuthError() : e2;
+			}
+		}
+	}
+
+	private async githubRequest(path: string, init: RequestInit, token: string) {
 		const res = await fetch(`https://api.github.com${path}`, {
 			...init,
 			signal: init.signal ?? AbortSignal.timeout(30_000),
@@ -323,7 +387,7 @@ export class Integrations {
 		return this.github(path, init);
 	}
 
-	async githubLogin(token: string) {
+	async githubLogin(token: string, grant?: GithubGrant & { clientId?: string }) {
 		token = token.trim();
 		const user = await this.github("/user", {}, token);
 		this.store.github = {
@@ -332,11 +396,111 @@ export class Integrations {
 			name: user.name ?? null,
 			email: user.email ?? `${user.id}+${user.login}@users.noreply.github.com`,
 			avatarUrl: user.avatar_url,
+			...this.grantFields(grant, grant?.clientId),
 		};
 		this.save();
 		await this.configureGit();
 		return this.summary();
 	}
+
+	/** Expiry and refresh fields from a token response; empty for tokens that do not expire. */
+	private grantFields(grant: GithubGrant | undefined, clientId: string | undefined): Partial<GithubAccount> {
+		const now = Date.now();
+		const secs = (v: unknown) => (typeof v === "number" && v > 0 ? v : typeof v === "string" && Number(v) > 0 ? Number(v) : 0);
+		const expiresIn = secs(grant?.expires_in);
+		const refreshToken = typeof grant?.refresh_token === "string" && grant.refresh_token ? grant.refresh_token : undefined;
+		return {
+			refreshToken,
+			expiresAt: expiresIn ? now + expiresIn * 1000 : undefined,
+			refreshExpiresAt: secs(grant?.refresh_token_expires_in) ? now + secs(grant?.refresh_token_expires_in) * 1000 : undefined,
+			clientId: refreshToken ? clientId : undefined,
+			expired: false,
+		};
+	}
+
+	private refreshing?: Promise<string>;
+
+	/**
+	 * The current access token, refreshed when it expires within the margin (or
+	 * now, with [force]). Single-flight: GitHub rotates the refresh token on use,
+	 * so two refreshes at once would sign the user out.
+	 */
+	async githubToken(force = false): Promise<string> {
+		const gh = this.store.github;
+		if (!gh) throw new Error("Not signed in to GitHub");
+		if (gh.expired) throw new GithubAuthError();
+		const due = gh.expiresAt !== undefined && Date.now() >= gh.expiresAt - GITHUB_REFRESH_MARGIN_MS;
+		if (!force && !due) return gh.token;
+		if (!gh.refreshToken || !gh.clientId) {
+			// Nothing to refresh with: a token that has already expired is dead; otherwise try it.
+			if (gh.expiresAt !== undefined && Date.now() >= gh.expiresAt) {
+				this.markGithubExpired();
+				throw new GithubAuthError();
+			}
+			if (force) {
+				this.markGithubExpired();
+				throw new GithubAuthError();
+			}
+			return gh.token;
+		}
+		this.refreshing ??= this.refreshGithub(gh).finally(() => {
+			this.refreshing = undefined;
+		});
+		return this.refreshing;
+	}
+
+	private async refreshGithub(gh: GithubAccount): Promise<string> {
+		if (gh.refreshExpiresAt !== undefined && Date.now() >= gh.refreshExpiresAt) {
+			this.markGithubExpired();
+			throw new GithubAuthError();
+		}
+		// Device-flow tokens refresh without a client secret (GitHub docs, "Refreshing user access tokens").
+		// A network failure throws here without touching the account, so the next call tries again.
+		const r = await this.githubOAuth("/login/oauth/access_token", {
+			client_id: gh.clientId!,
+			grant_type: "refresh_token",
+			refresh_token: gh.refreshToken!,
+		});
+		if (typeof r.access_token !== "string" || !r.access_token) {
+			// bad_refresh_token, unauthorized_client, ...: only a new sign-in helps.
+			this.markGithubExpired();
+			throw new GithubAuthError();
+		}
+		// Signed out or re-signed in meanwhile: leave the newer account alone. (Not githubToken():
+		// this promise is still the in-flight refresh, so that would wait on itself.)
+		if (this.store.github !== gh) {
+			if (!this.store.github) throw new Error("Not signed in to GitHub");
+			return this.store.github.token;
+		}
+		const fields = this.grantFields(r, gh.clientId);
+		// GitHub rotates the refresh token on every use; should a response lack one, keep the old one.
+		if (!fields.refreshToken) {
+			delete fields.refreshToken;
+			delete fields.refreshExpiresAt;
+			delete fields.clientId;
+		}
+		Object.assign(gh, { token: r.access_token, ...fields });
+		this.save();
+		await this.configureGit();
+		return gh.token;
+	}
+
+	/** Refreshes the token if it is due, for callers about to run git; never throws. */
+	async githubFresh() {
+		if (!this.store.github || this.store.github.expired) return;
+		await this.githubToken().catch(() => {});
+	}
+
+	private markGithubExpired() {
+		const gh = this.store.github;
+		if (!gh || gh.expired) return;
+		gh.expired = true;
+		this.save();
+		this.onChange?.();
+	}
+
+	/** Called when the account summary changes on its own (a sign-in expiring), so the app can redraw. */
+	onChange?: () => void;
 
 	/**
 	 * The OAuth App Client ID for the device flow: the one entered in
@@ -376,7 +540,9 @@ export class Integrations {
 			device_code: deviceCode,
 			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 		});
-		if (r.access_token) return { status: "done", state: await this.githubLogin(r.access_token as string) };
+		if (r.access_token) {
+			return { status: "done", state: await this.githubLogin(r.access_token as string, { ...r, clientId: this.githubClientId }) };
+		}
 		switch (r.error) {
 			case "authorization_pending":
 				return { status: "pending" };
@@ -434,6 +600,7 @@ export class Integrations {
 	}
 
 	async repos() {
+		const clones = await this.workspaceClones();
 		const list: any[] = [];
 		for (let page = 1; page <= 5; page++) {
 			const batch = await this.github(
@@ -452,17 +619,68 @@ export class Integrations {
 			stars: r.stargazers_count ?? 0,
 			pushedAt: r.pushed_at,
 			defaultBranch: r.default_branch,
-			cloned: existsSync(join(this.workspace, r.name, ".git")),
+			...this.clonedAt(r.full_name, clones),
 		}));
 	}
 
-	async clone(fullName: string, log: Log) {
-		const name = fullName.split("/").pop()!;
-		const dest = join(this.workspace, name);
-		if (existsSync(join(dest, ".git"))) {
-			log(`${name} is already cloned`);
-			return { path: dest };
+	/**
+	 * Workspace folders that are clones of a GitHub repository, keyed by
+	 * lower-cased "owner/repo" (GitHub names are case-insensitive). Matched on
+	 * the origin remote, never on the folder name: akun1/repo1 and akun2/repo1
+	 * are different repositories that would both want the folder "repo1".
+	 */
+	private async workspaceClones(): Promise<Map<string, string>> {
+		const out = new Map<string, string>();
+		let names: string[] = [];
+		try {
+			names = readdirSync(this.workspace);
+		} catch {
+			return out;
 		}
+		await Promise.all(
+			names.map(async (name) => {
+				const dir = join(this.workspace, name);
+				if (name.startsWith(".") || !existsSync(join(dir, ".git"))) return;
+				// The URL as configured; `remote get-url` would apply url.insteadOf rewrites.
+				const origin = (await run("git", ["config", "--get", "remote.origin.url"], { cwd: dir }).catch(() => "")).trim();
+				const slug = parseGithubSlug(origin)?.toLowerCase();
+				// Two folders with the same origin: the one named after the repo wins, as before.
+				if (slug && (!out.has(slug) || name.toLowerCase() === slug.split("/")[1])) out.set(slug, dir);
+			}),
+		);
+		return out;
+	}
+
+	private clonedAt(fullName: string, clones: Map<string, string>) {
+		const path = clones.get(fullName.toLowerCase());
+		return { cloned: path !== undefined, path: path ?? null };
+	}
+
+	/**
+	 * The folder a new clone of [fullName] goes to: the repository's name, or
+	 * "<name>-<owner>" (then "-2", "-3", ...) when that name is taken by any
+	 * other file or folder.
+	 */
+	private cloneDest(fullName: string): string {
+		const [owner, name] = fullName.split("/");
+		const free = (n: string) => !existsSync(join(this.workspace, n));
+		if (free(name)) return join(this.workspace, name);
+		const base = `${name}-${owner}`;
+		if (free(base)) return join(this.workspace, base);
+		for (let i = 2; ; i++) if (free(`${base}-${i}`)) return join(this.workspace, `${base}-${i}`);
+	}
+
+	async clone(fullName: string, log: Log) {
+		if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName) || fullName.split("/").some((p) => p === "." || p === "..")) {
+			throw new Error(`Not a GitHub repository name: ${fullName}`);
+		}
+		const existing = (await this.workspaceClones()).get(fullName.toLowerCase());
+		if (existing) {
+			log(`${fullName} is already cloned in ${basename(existing)}`);
+			return { path: existing };
+		}
+		mkdirSync(this.workspace, { recursive: true });
+		const dest = this.cloneDest(fullName);
 		await run("git", ["clone", "--progress", `https://github.com/${fullName}.git`, dest], {
 			cwd: this.workspace,
 			log,
@@ -886,7 +1104,7 @@ export class Integrations {
 		try {
 			const res = await fetch(`https://api.github.com/repos/${slug}/actions/jobs/${jobId}/logs`, {
 				signal: AbortSignal.timeout(60_000),
-				headers: { Authorization: `Bearer ${this.store.github?.token}`, Accept: "application/vnd.github+json" },
+				headers: { Authorization: `Bearer ${await this.githubToken()}`, Accept: "application/vnd.github+json" },
 			});
 			if (!res.ok) return [`(logs unavailable: ${res.status})`];
 			const text = await res.text();

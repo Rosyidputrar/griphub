@@ -179,7 +179,7 @@ class _GitScreenState extends State<GitScreen> {
     final s = await showModalBottomSheet<GitStatus>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _BranchSheet(features: _f),
+      builder: (_) => BranchSheet(features: _f),
     );
     if (s != null && mounted) {
       setState(() {
@@ -811,15 +811,20 @@ class _SmallButton extends StatelessWidget {
 }
 
 /// Lists local and remote branches; pops with the new status after a checkout.
-class _BranchSheet extends StatefulWidget {
-  const _BranchSheet({required this.features});
+///
+/// [dir] is the repository (the open chat's folder when null). With [fetch], origin is fetched first so
+/// branches pushed to GitHub since the clone are listed; offline, the branches already known are shown.
+class BranchSheet extends StatefulWidget {
+  const BranchSheet({super.key, required this.features, this.dir, this.fetch = false});
   final Features features;
+  final String? dir;
+  final bool fetch;
 
   @override
-  State<_BranchSheet> createState() => _BranchSheetState();
+  State<BranchSheet> createState() => _BranchSheetState();
 }
 
-class _BranchSheetState extends State<_BranchSheet> {
+class _BranchSheetState extends State<BranchSheet> {
   List<GitBranch>? _branches;
   String? _busy;
   final _name = TextEditingController();
@@ -828,16 +833,29 @@ class _BranchSheetState extends State<_BranchSheet> {
   void initState() {
     super.initState();
     _name.addListener(() => setState(() {}));
-    widget.features.gitBranches().then(
-      (b) {
-        if (mounted) setState(() => _branches = b);
-      },
-      onError: (Object e) {
-        if (!mounted) return;
-        setState(() => _branches = const []);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
-      },
-    );
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (widget.fetch) {
+      try {
+        await widget.features.gitFetch(dir: widget.dir);
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(tr("Couldn't reach the remote; showing the branches on this phone."))),
+          );
+        }
+      }
+    }
+    try {
+      final b = await widget.features.gitBranches(dir: widget.dir);
+      if (mounted) setState(() => _branches = b);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _branches = const []);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   @override
@@ -849,7 +867,7 @@ class _BranchSheetState extends State<_BranchSheet> {
   Future<void> _checkout(String name, {bool create = false}) async {
     setState(() => _busy = name);
     try {
-      final s = await widget.features.gitCheckout(name, create: create);
+      final s = await widget.features.gitCheckout(name, create: create, dir: widget.dir);
       if (mounted) Navigator.of(context).pop(s);
     } catch (e) {
       if (!mounted) return;

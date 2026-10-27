@@ -1,3 +1,4 @@
+import '../agent/clock.dart';
 import 'theme.dart';
 
 /// Translates an English UI string into the chosen language. English text is the key, so a
@@ -28,7 +29,7 @@ double? parseLocalNumber(String text) {
 /// five screens, each with slightly different thresholds and only one of them
 /// localized). Old dates show months/years, like git history did.
 String formatAgo(DateTime t) {
-  final d = DateTime.now().difference(t);
+  final d = clock().difference(t);
   final id = Appearance.instance.language == 'id';
   if (d.inMinutes < 1) return id ? 'baru saja' : 'just now';
   if (d.inHours < 1) return id ? '${d.inMinutes} mnt lalu' : '${d.inMinutes}m ago';
@@ -439,6 +440,34 @@ const _id = <String, String>{
   'Enter an https:// DNS-over-HTTPS address': 'Masukkan alamat DNS-over-HTTPS yang diawali https://',
   'DNS updated': 'DNS diperbarui',
   'Disconnect {service}?': 'Putuskan {service}?',
+  'This sign-in expired or was revoked. Sign in again to keep cloning, pushing and publishing.':
+      'Login ini sudah kedaluwarsa atau dicabut. Masuk lagi agar bisa clone, push, dan publish lagi.',
+  'Sign in again': 'Masuk lagi',
+  'sign-in expired': 'login kedaluwarsa',
+  'Pulling {name}': 'Menarik {name}',
+  '1 new commit': '1 commit baru',
+  '{n} new commits': '{n} commit baru',
+  'This branch has no remote to pull from': 'Branch ini belum punya remote untuk ditarik',
+  'Checking for changes…': 'Memeriksa perubahan…',
+  'Up to date': 'Sudah terbaru',
+  'Open in a new chat': 'Buka di chat baru',
+  'Pull latest changes': 'Tarik perubahan terbaru',
+  'Switch branch': 'Ganti branch',
+  '1 line': '1 baris',
+  '{n} lines': '{n} baris',
+  'Run removed': 'Run dihapus',
+  'Pasted content': 'Konten yang ditempel',
+  'Sent with your message as a file the agent reads, so a long log or document does not fill the chat.':
+      'Dikirim bersama pesanmu sebagai file yang dibaca agent, jadi log atau dokumen panjang tidak memenuhi chat.',
+  'Paste as text': 'Tempel sebagai teks',
+  'This turn': 'Giliran ini',
+  'subagent': 'subagent',
+  'No GripHub price is known for this model, so only its tokens are shown.':
+      'Harga GripHub untuk model ini tidak diketahui, jadi hanya tokennya yang ditampilkan.',
+  "Couldn't reach the remote; showing the branches on this phone.":
+      'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
+  'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':
+      'Login GitHub kedaluwarsa atau dicabut. Masuk lagi ke GitHub di Akun.',
   'Its token is removed from this device. To reconnect you will need to paste a token again.':
       'Token-nya dihapus dari perangkat ini. Untuk menghubungkan lagi, kamu perlu menempelkan token lagi.',
   'Disconnect': 'Putuskan',

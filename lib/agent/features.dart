@@ -395,6 +395,8 @@ class Features extends ChangeNotifier {
       (await client.call<List>('git_branches', {'dir': ?dir})).map((e) => GitBranch(_m(e))).toList();
   Future<GitStatus> gitCheckout(String branch, {bool create = false, String? dir}) async =>
       GitStatus(_m(await client.call('git_checkout', {'branch': branch, 'create': create, 'dir': ?dir})));
+  /// Fetches origin, so branches created on GitHub since the clone show up; returns the status after.
+  Future<GitStatus> gitFetch({String? dir}) async => GitStatus(_m(await client.call('git_fetch', {'dir': ?dir})));
   Future<void> gitPull({String? dir, void Function(String)? onLine}) => _task('git_pull', {'dir': ?dir}, onLine);
   Future<void> gitPush({String? dir, void Function(String)? onLine}) => _task('git_push', {'dir': ?dir}, onLine);
   Future<String> createPr(String title, String body, {String? base, String? dir}) async =>
@@ -484,6 +486,18 @@ class Features extends ChangeNotifier {
 
   Future<void> cancelRun(String id) async => _applyRuns(_m(await client.call('run_cancel', {'runId': id})));
   Future<void> clearRuns() async => _applyRuns(_m(await client.call('runs_clear')));
+
+  /// Removes one finished run from the list (its chat stays). Returns what [restoreRun] needs for Undo.
+  Future<({Map<String, dynamic> run, int index})?> deleteRun(String id) async {
+    final r = _m(await client.call('run_delete', {'runId': id}));
+    _applyRuns(r);
+    final removed = r['removed'];
+    if (removed is! Map) return null;
+    return (run: _m(removed['run']), index: removed['index'] as int? ?? 0);
+  }
+
+  Future<void> restoreRun(Map<String, dynamic> run, int index) async =>
+      _applyRuns(_m(await client.call('run_restore', {'run': run, 'index': index})));
   Future<void> setConcurrency(int n) async => _applyRuns(_m(await client.call('runs_concurrency', {'n': n})));
   Future<void> saveSchedule(Map<String, dynamic> schedule) async =>
       _applyRuns(_m(await client.call('schedule_save', {'schedule': schedule})));

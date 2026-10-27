@@ -2,40 +2,44 @@
 
 ## Bahasa Indonesia
 
-**Pemakaian & kredit sesuai tagihan GripHub**
-- Layar Pemakaian kini menampilkan angka asli dari akun GripHub kamu: saldo, kredit terpakai hari ini, tagihan per model, dan daftar request terakhir lengkap dengan biaya, token, dan tanda "Minimum" atau "Tidak ditagih".
-- Peringatan saat kredit hampir habis, perkiraan sisa hari, dan tanggal kedaluwarsa kredit terdekat.
-- Budget harian kini memakai tagihan asli hari ini (WIB), jadi berhenti tepat waktu.
-- Perkiraan biaya jauh lebih akurat: token cache dan harga minimum per request kini ikut dihitung, sesuai cara GripHub menagih.
-- Pemilih model menampilkan tarif, harga minimum per request, promo yang sedang berjalan, dan model yang sedang tidak tersedia.
-- Daftar model GripHub diperbarui otomatis; ada juga tombol "Perbarui model". Model gambar tidak lagi muncul di pemilih model chat.
-- Generate image menampilkan model dan harga per gambar langsung dari GripHub.
-- Penghangatan cache otomatis dimatikan karena justru menambah biaya di GripHub.
+**Chat**
+- Biaya setiap jawaban kini terlihat di samping tombol salin dan nama model: jumlah token dan perkiraan kredit untuk satu giliran. Biaya subagent ditampilkan terpisah. Ketuk untuk melihat rinciannya: jumlah request, token (termasuk cache), kredit, dan rupiah.
+- Teks panjang yang ditempel (lebih dari 1.000 karakter atau 15 baris) kini otomatis menjadi lampiran "Konten yang ditempel", jadi kolom ketik dan chat tetap rapi. Ketuk lampirannya untuk melihat isinya, atau pilih "Tempel sebagai teks".
+- Aplikasi tidak lagi menjadi berat saat agent menulis file panjang (misalnya halaman HTML). Selama menulis, yang ditampilkan hanya baris-baris terbaru beserta jumlah baris dan ukurannya; isi lengkapnya muncul setelah selesai. Live preview tetap tersedia.
 
 **Subagent**
-- Kartu subagent menampilkan model dan tingkat berpikir (reasoning) yang dipakai.
-- Biaya subagent naik secara langsung di setiap langkah, dengan rincian request, token (termasuk cache), dan berapa request yang kena harga minimum. Batas biaya subagent kini berhenti tepat waktu.
+- Pesan yang diantrekan ke subagent yang sedang berjalan kini benar-benar terkirim. Sebelumnya subagent malah berhenti dengan status gagal.
+- Subagent tidak lagi dinyatakan gagal saat koneksi sempat terputus lalu berhasil dicoba ulang.
 
-**Chat**
-- Tombol salin dan nama model hanya muncul setelah jawaban benar-benar selesai, tidak lagi di tengah pekerjaan agent.
-- Tabel lebar di jawaban kini bisa digeser ke kiri dan kanan, tidak lagi dipaksa sempit sampai satu kata per baris.
+**GitHub**
+- Login GitHub tidak lagi berhenti bekerja setelah beberapa jam dengan error "401 Bad credentials": sesi diperpanjang otomatis. Jika login sudah tidak berlaku, layar Akun menampilkannya dengan tombol "Masuk lagi".
+- Repository dengan nama yang sama dari pemilik berbeda (misalnya milikmu dan repo tempat kamu menjadi collaborator) tidak lagi tertukar. Masing-masing di-clone ke foldernya sendiri dan dibuka dengan benar.
+- Repository yang sudah ada di HP kini bisa ditarik perubahannya (lengkap dengan jumlah commit baru) dan pindah branch langsung dari daftar repository, termasuk branch yang baru dibuat di GitHub.
+
+**Tasks**
+- Task yang sudah selesai, gagal, atau dibatalkan bisa digeser ke kiri atau kanan untuk dihapus, dengan tombol Urungkan.
+
+**Lainnya**
+- Tombol pada notifikasi bawah (seperti Urungkan, Buka, Lihat) kini terbaca di tema gelap.
 
 ## English
 
-**Usage & credits that match GripHub's bill**
-- The Usage screen now shows real figures from your GripHub account: balance, credits spent today, charges per model, and recent requests with their cost, tokens, and a "Minimum" or "Not charged" tag.
-- A warning when credit runs low, an estimate of the days left, and the date of the next credit expiry.
-- The daily budget now uses today's real charges (WIB), so it stops on time.
-- Much more accurate cost estimates: cache tokens and each request's minimum price now count, the way GripHub bills.
-- The model picker shows each model's rate, its per-request minimum, running promos, and models that are unavailable.
-- GripHub's model list updates on its own, with an "Update models" button too. Image models no longer appear in the chat model picker.
-- Generate image lists GripHub's image models with their price per image.
-- Automatic cache warming is off, since on GripHub it added cost instead of saving it.
+**Chat**
+- Each reply now shows what it cost next to the copy button and model name: tokens and estimated credits for the turn, with subagents shown apart. Tap it for the breakdown: requests, tokens (cache included), credits and rupiah.
+- Pasting long text (over 1,000 characters or 15 lines) now attaches it as "Pasted content", so the message box and the chat stay tidy. Tap it to see the text, or choose "Paste as text".
+- The app no longer slows down while the agent writes a long file (such as an HTML page). While writing, only the newest lines show, with the line count and size; the full file shows once it's done. Live preview still works.
 
 **Subagents**
-- Subagent cards show the model and the thinking (reasoning) level in use.
-- A subagent's cost now rises live with every step, with a breakdown of requests, tokens (cache included) and how many were billed at the minimum. The subagent cost limit now stops on time.
+- A message queued for a running subagent is now actually sent; it used to make the subagent stop as failed.
+- A subagent is no longer reported as failed when the connection dropped and the retry succeeded.
 
-**Chat**
-- The copy button and model name appear only once a reply is really finished, not in the middle of the agent's work.
-- Wide tables in replies now scroll sideways instead of being squeezed to one word per line.
+**GitHub**
+- GitHub sign-in no longer stops working after a few hours with "401 Bad credentials": the session renews itself. When a sign-in is no longer valid, Accounts says so, with a "Sign in again" button.
+- Repositories with the same name from different owners (say, yours and one you collaborate on) are no longer mixed up. Each is cloned into its own folder and opens correctly.
+- A repository already on the phone can now pull the latest changes (showing how many new commits) and switch branch right from the repository list, including branches created on GitHub since.
+
+**Tasks**
+- Finished, failed or cancelled tasks swipe away in either direction, with Undo.
+
+**Other**
+- Snackbar buttons (Undo, Open, View) are now readable in the dark theme.

@@ -9,6 +9,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import '../agent/models.dart';
+import '../agent/pricing.dart';
 import '../agent/sent_attachments.dart';
 import '../agent/updater.dart';
 import 'attachment_viewer.dart';
@@ -138,7 +139,7 @@ class _AttachmentFileChip extends StatelessWidget {
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                a.name,
+                a.name == pastedName ? tr('Pasted content') : a.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium,
@@ -193,6 +194,7 @@ class AssistantMessageView extends StatelessWidget {
     this.live,
     this.modelLabel,
     this.subagentCard,
+    this.subagentCost,
     this.footer,
   });
   final AssistantEntry entry;
@@ -211,6 +213,10 @@ class AssistantMessageView extends StatelessWidget {
   /// knows no subagent for it (a chat from before a restart): then the call
   /// shows as a plain tool card with the report as its output.
   final Widget? Function(String toolCallId)? subagentCard;
+
+  /// What the subagent a `subagent` tool call started has cost: found, with its credits (null when unknown);
+  /// null when the app knows no subagent for the call. Counted apart from the turn's own cost.
+  final ({double? credits})? Function(String toolCallId)? subagentCost;
 
   /// The turn's copy-and-model footer, when this is the turn's last message
   /// and the turn is over (see [turnFooters]); null draws none.
@@ -249,8 +255,16 @@ class AssistantMessageView extends StatelessWidget {
     }
     if (footer case final f?) {
       final model = f.model;
+      final subagents = [for (final id in f.cost?.subagentCalls ?? const <String>[]) ?subagentCost?.call(id)];
       children.add(
-        _MessageFooter(text: f.text, model: model == null ? null : (modelLabel?.call(model) ?? model)),
+        _MessageFooter(
+          text: f.text,
+          model: model == null ? null : (modelLabel?.call(model) ?? model),
+          cost: f.cost,
+          subagents: subagents.isEmpty
+              ? null
+              : (count: subagents.length, credits: subagents.any((c) => c.credits == null) ? null : subagents.fold<double>(0, (a, c) => a + c.credits!)),
+        ),
       );
     }
     return Column(
@@ -337,31 +351,159 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
   }
 }
 
+/// The subagents a turn started: how many, and what they cost together (null when any is unknown).
+typedef SubagentsCost = ({int count, double? credits});
+
+String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
+
 class _MessageFooter extends StatelessWidget {
-  const _MessageFooter({required this.text, this.model});
+  const _MessageFooter({required this.text, this.model, this.cost, this.subagents});
   final String text;
   final String? model;
+  final TurnCost? cost;
+  final SubagentsCost? subagents;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
+    final style = TextStyle(fontSize: 11.5, color: p.faint);
+    final c = cost;
+    // Tokens and credits are never cut off.
+    final usage = c == null
+        ? null
+        : [
+            tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(c.tokens))),
+            if (c.credits case final credits?) _creditsText(credits),
+            if (subagents?.credits case final sub?) '(+${localNumber(formatCredits(sub))} ${tr('subagent')})',
+          ].join(' · ');
+    // Side by side when they fit; on a narrow screen or with large text, the cost wraps under the model.
+    final details = Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (model != null)
+          Text(
+            // The separator ends the model's line, so a wrapped cost starts clean.
+            usage == null ? model! : '${model!} · ',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            // The model's name, as in the composer chip, not a code-styled id.
+            style: style,
+          ),
+        if (usage != null) Text(usage, style: style),
+      ],
+    );
     return Row(
       children: [
         Transform.translate(
           offset: const Offset(-8, 0),
           child: CopyButton(text: text, showLabel: false),
         ),
-        if (model != null)
+        if (model != null || c != null)
           Expanded(
-            child: Text(
-              model!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              // The model's name, as in the composer chip, not a code-styled id.
-              style: TextStyle(fontSize: 11.5, color: p.faint),
-            ),
+            child: c == null
+                ? details
+                : GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => showModalBottomSheet<void>(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (_) => TurnCostSheet(cost: c, model: model, subagents: subagents),
+                    ),
+                    child: details,
+                  ),
           ),
       ],
+    );
+  }
+}
+
+/// What one turn cost, line by line, as the subagent panel shows it: requests (and how many were raised to the
+/// model's minimum), tokens billed (cache included), the estimate, and the subagents it started, apart.
+class TurnCostSheet extends StatelessWidget {
+  const TurnCostSheet({super.key, required this.cost, this.model, this.subagents});
+  final TurnCost cost;
+  final String? model;
+  final SubagentsCost? subagents;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final c = cost;
+    Widget row(IconData icon, String label, String value, {Color? color}) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: p.faint),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label, style: text.bodySmall)),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: text.bodyMedium?.copyWith(color: color, fontFeatures: const [FontFeature.tabularFigures()]),
+            ),
+          ),
+        ],
+      ),
+    );
+    String money(double? v) => v == null ? '—' : '${_creditsText(v)} · Rp ${(v * kRupiahPerCredit).round()}';
+    final sub = subagents;
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(tr('This turn'), style: text.titleLarge),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.md)),
+              child: Column(
+                children: [
+                  if (model case final m?) row(LucideIcons.cpu, tr('Model'), m),
+                  row(
+                    LucideIcons.activity,
+                    tr('Requests'),
+                    c.floored > 0
+                        ? tr('{n} ({m} at the minimum)').replaceAll('{n}', '${c.requests}').replaceAll('{m}', '${c.floored}')
+                        : '${c.requests}',
+                  ),
+                  row(
+                    LucideIcons.layers,
+                    tr('Tokens billed'),
+                    c.cached > 0 && c.tokens > 0
+                        ? tr('{n} ({m}% cache)')
+                              .replaceAll('{n}', localNumber(formatTokens(c.tokens)))
+                              .replaceAll('{m}', '${(c.cached / c.tokens * 100).round()}')
+                        : localNumber(formatTokens(c.tokens)),
+                  ),
+                  row(LucideIcons.coins, tr('Cost'), money(c.credits), color: c.credits == null ? p.faint : null),
+                  if (sub != null)
+                    row(
+                      LucideIcons.bot,
+                      sub.count == 1 ? tr('Subagent') : tr('{n} subagents').replaceAll('{n}', '${sub.count}'),
+                      money(sub.credits),
+                      color: sub.credits == null ? p.faint : null,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              tr(
+                c.credits == null
+                    ? 'No GripHub price is known for this model, so only its tokens are shown.'
+                    : 'Estimated per request at GripHub\'s live rate, including cache and each model\'s minimum; the exact charge is in Usage.',
+              ),
+              style: text.bodySmall?.copyWith(color: p.faint),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -573,6 +715,44 @@ class _ThinkingViewState extends State<ThinkingView> {
   }
 }
 
+/// What the agent is writing right now: only the newest lines, with the real line numbers and the size so far.
+/// The whole file arrives a few characters at a time and the chat redraws ~30 times a second; highlighting and
+/// laying out all of it on every frame made the app crawl on long files. The full text shows once it lands.
+class _LiveTail extends StatelessWidget {
+  const _LiveTail({required this.text, required this.name, required this.language});
+  final String text;
+  final String? name;
+  final String? language;
+
+  /// Lines on screen while writing; about what fits in the panel.
+  static const lines = 14;
+
+  @override
+  Widget build(BuildContext context) {
+    // Start of the last [lines] lines, scanning back from the end only.
+    var start = text.length;
+    for (var n = 0; n < lines && start > 0; n++) {
+      start = text.lastIndexOf('\n', start - 1);
+      if (start < 0) break;
+    }
+    final cut = start > 0;
+    final from = cut ? start + 1 : 0;
+    final total = '\n'.allMatches(text).length + 1;
+    final shown = '\n'.allMatches(text, from).length + 1;
+    final kb = text.length / 1024;
+    final size = kb < 1 ? '${text.length} B' : '${localNumber(kb.toStringAsFixed(1))} KB';
+    final count = total == 1 ? tr('1 line') : tr('{n} lines').replaceAll('{n}', localNumber('$total'));
+    return CodeBox(
+      text: text.substring(from),
+      firstLine: total - shown + 1,
+      copyText: text,
+      label: [?name, count, size].join(' · '),
+      language: language,
+      followTail: true,
+    );
+  }
+}
+
 class ToolCallView extends StatefulWidget {
   const ToolCallView({super.key, required this.block, required this.run, this.cwd, this.live});
   final Block block;
@@ -714,13 +894,19 @@ class _ToolCallViewState extends State<ToolCallView> {
           if ((writing || sawLive) && !open && liveText != null && liveText.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: CodeBox(
-                text: liveText,
-                label: path?.split('/').last ?? b.toolName,
-                language: b.toolName == 'bash' ? 'bash' : ext,
-                maxHeight: 260,
-                followTail: true,
-              ),
+              child: writing
+                  ? _LiveTail(
+                      text: liveText,
+                      name: path?.split('/').last ?? b.toolName,
+                      language: b.toolName == 'bash' ? 'bash' : ext,
+                    )
+                  : CodeBox(
+                      text: liveText,
+                      label: path?.split('/').last ?? b.toolName,
+                      language: b.toolName == 'bash' ? 'bash' : ext,
+                      maxHeight: 260,
+                      followTail: true,
+                    ),
             ),
           // Opens and closes instead of jumping; the header stays put.
           ClipRect(
@@ -742,12 +928,14 @@ class _ToolCallViewState extends State<ToolCallView> {
                               if (b.toolName == 'write' && liveText != null)
                                 _Section(
                                   label: tr('Content'),
-                                  child: CodeBox(
-                                    text: liveText,
-                                    label: path?.split('/').last,
-                                    language: ext,
-                                    maxHeight: 320,
-                                  ),
+                                  child: writing
+                                      ? _LiveTail(text: liveText, name: path?.split('/').last, language: ext)
+                                      : CodeBox(
+                                          text: liveText,
+                                          label: path?.split('/').last,
+                                          language: ext,
+                                          maxHeight: 320,
+                                        ),
                                 )
                               else
                                 _Section(

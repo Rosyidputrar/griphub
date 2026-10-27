@@ -62,7 +62,7 @@ import {
 	wibDay,
 	writeZip,
 } from "./workbench.js";
-import { FALLBACK_RATES, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
+import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { Router } from "./router.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
@@ -110,8 +110,17 @@ function log(...args: unknown[]) {
 	process.stderr.write(`${args.map(String).join(" ")}\n`);
 }
 
+/**
+ * An assistant message as the app gets it: a copy with `griphubCost`, the estimate for that model request
+ * (pricing.ts), so the chat can total a turn. A copy, because pi persists the original to the session file.
+ */
+function withCost(m: any) {
+	return m?.role === "assistant" ? { ...m, griphubCost: messageCost(m) } : m;
+}
+
 /** Drop cumulative snapshots from streaming updates, like pi's JSON mode. */
 function wireEvent(event: AgentSessionEvent): object {
+	if (event.type === "message_end") return { ...event, message: withCost((event as any).message) };
 	if (event.type === "message_update") {
 		const { message: _message, assistantMessageEvent, ...rest } = event as any;
 		const { partial, ...delta } = assistantMessageEvent ?? {};
@@ -561,6 +570,9 @@ You are running inside GripHub AI Agent, an Android app, on the user's phone.
   what they want instead rather than retrying.
 - There is no display server; do not try to open GUIs or browsers. The app can
   preview HTML files you write.
+- Files listed after "Attached files:" in a message are part of it. A
+  \`pasted-text.txt\` there is text the user pasted into the message (the app
+  attaches long pastes as files): read it before you answer.
 `,
 	);
 }
@@ -791,9 +803,17 @@ function restoreBackup(path: string) {
 // ---------------------------------------------------------------------------
 // Commands
 
+/**
+ * Commands that run git against github.com with the token in git's config. A
+ * GitHub App sign-in expires every 8 hours, so it is refreshed first if due
+ * (a no-op otherwise). API calls refresh on their own (Integrations.github).
+ */
+const GITHUB_GIT_COMMANDS = new Set(["git_clone", "git_fetch", "git_pull", "git_push", "deploy", "sync_now", "ci_watch", "run_enqueue", "schedule_run"]);
+
 async function handle(cmd: Command): Promise<unknown> {
 	const s = session!;
 	const cwd = (cmd.dir as string | undefined) ?? s.sessionManager.getCwd();
+	if (GITHUB_GIT_COMMANDS.has(cmd.type)) await integrations.githubFresh();
 	switch (cmd.type) {
 		case "hello":
 			return { version: VERSION, node: process.version, agentDir, workspace, tools: s.getActiveToolNames(), ...state() };
@@ -809,6 +829,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			const text = guard.planMode
 				? `${cmd.text}\n\n[Plan mode] Investigate as needed, then reply with a numbered plan only. Do not change files or run commands that modify anything until I approve.`
 				: cmd.text;
+			// The agent may git push from its shell; don't hold the prompt for it.
+			void integrations.githubFresh();
 			// Don't await the run; progress arrives as events.
 			s.prompt(text, {
 				images: cmd.images,
@@ -1022,7 +1044,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "delete_project":
 			return deleteProject(cmd.path, !!cmd.deleteChats);
 		case "messages":
-			return s.messages;
+			return s.messages.map(withCost);
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":
@@ -1088,6 +1110,9 @@ async function handle(cmd: Command): Promise<unknown> {
 			return gitops.branches(cwd);
 		case "git_checkout":
 			await gitops.checkout(cwd, cmd.branch, !!cmd.create);
+			return gitops.status(cwd);
+		case "git_fetch":
+			await gitops.fetch(cwd);
 			return gitops.status(cwd);
 		case "git_pull":
 			await gitops.pull(cwd, taskLog(cmd));
@@ -1195,6 +1220,13 @@ async function handle(cmd: Command): Promise<unknown> {
 			return runner.summary();
 		case "runs_clear":
 			runner.clearFinished();
+			return runner.summary();
+		case "run_delete": {
+			const removed = runner.delete(cmd.runId);
+			return { ...runner.summary(), removed };
+		}
+		case "run_restore":
+			runner.restore(cmd.run, cmd.index);
 			return runner.summary();
 		case "runs_concurrency":
 			runner.setConcurrency(cmd.n);
@@ -1372,6 +1404,11 @@ async function main() {
 	// Route every lookup through DNS-over-HTTPS (configurable in settings).
 	installDohLookup();
 	integrations = new Integrations(agentDir, workspace);
+	integrations.onChange = () => send({ type: "integrations", summary: integrations.summary() });
+	// Keeps a GitHub App sign-in (8-hour tokens) fresh for git and the agent's shell, which read
+	// the token from git's config and $GITHUB_TOKEN rather than asking for it.
+	setInterval(() => void integrations.githubFresh(), 10 * 60_000).unref();
+	void integrations.githubFresh();
 	guard.mode = integrations.settings.approvalMode ?? "ask_risky";
 	skills = new Skills(agentDir, join(fileURLToPath(new URL(".", import.meta.url)), "skills"), () => process.env.GITHUB_TOKEN);
 	skills.seed();

@@ -6,13 +6,17 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/clock.dart';
 import 'package:griphub_agent/agent/subagents.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
 /// Every golden renders at this instant, so live durations are stable.
 final goldenNow = DateTime(2026, 10, 27, 12);
 
-void pinClock() => SubagentState.clock = () => goldenNow;
+void pinClock() {
+  SubagentState.clock = () => goldenNow;
+  clock = () => goldenNow;
+}
 
 /// Loads every font in the test FontManifest (Geist, GeistMono, Lucide, ...)
 /// so goldens show real text and icons instead of Ahem boxes.
@@ -25,6 +29,12 @@ Future<void> loadAppFonts() async {
     }
     await loader.load();
   }
+}
+
+/// An answer from [FakeHost.answers] that fails the command the way the host does ({ok: false, error}).
+class HostError {
+  const HostError(this.message);
+  final String message;
 }
 
 /// A fake agent host on the platform channels. It answers `settings_get` /
@@ -41,7 +51,9 @@ class FakeHost {
           final cmd = (jsonDecode(call.arguments as String) as Map).cast<String, dynamic>();
           commands.add(cmd);
           final data = _answer(cmd);
-          if (data != _noReply) {
+          if (data is HostError) {
+            Future<void>.microtask(() => emit({'type': 'response', 'id': cmd['id'], 'ok': false, 'error': data.message}));
+          } else if (data != _noReply) {
             Future<void>.microtask(() => emit({'type': 'response', 'id': cmd['id'], 'ok': true, 'data': data}));
           }
           return null;
@@ -88,7 +100,12 @@ class FakeHost {
     'subagentApprovalOverride': stored.containsKey('subagentApprovalMode'),
   };
 
+  /// Answers for commands a test needs beyond the defaults below, by command type.
+  final answers = <String, Object? Function(Map<String, dynamic> cmd)>{};
+
   Object? _answer(Map<String, dynamic> cmd) {
+    final custom = answers[cmd['type']];
+    if (custom != null) return custom(cmd);
     switch (cmd['type']) {
       case 'settings_get':
         return publicSettings();
