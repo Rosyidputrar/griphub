@@ -69,7 +69,7 @@ versi APK** (sudah terbukti: `agent.zip` GripHub boot di Linux x86_64 dengan Nod
 | CoderRa | Alasan |
 | --- | --- |
 | Update APK lewat host (fase 8 CoderRa) | GripHub mengunduh APK lewat Android DownloadManager di HP; masalahnya tidak ada |
-| Tool `tasks` dan `subagent` CoderRa | GripHub punya `todo_write` dan subagent asinkron yang lebih lengkap |
+| Tool `tasks` dan `subagent` CoderRa, serta `guard.ts`-nya | Subagent CoderRa rusak (kata pemilik); GripHub punya `todo_write` dan subagent asinkron yang lebih lengkap. Lihat 4.9 |
 | Provider gratis Zelai, login flow CoderRa | Di luar cakupan; GripHub terkunci ke GripHub Router |
 | `longtask.ts` (supervisor 24 jam) | Ditunda ke fase opsional (bagian 6, fase 8) setelah mode server stabil |
 
@@ -148,7 +148,25 @@ Chip "Konten yang ditempel" dan viewer lampiran membaca lewat `agent.fs`. Drafts
 - `integrations.ts:847` menjalankan wrangler lewat `GRIPHUB_ROOTFS` (proot). Di server diarahkan ke `box -c`.
 - `mcp.ts:86` `/system/bin/sh` → `/bin/sh` di server. DNS bawaan `system` (bukan DoH Cloudflare) di server.
 
-### 4.9 Lain-lain
+### 4.9 Subagent CoderRa tidak boleh ikut terbawa
+
+Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderRa:
+
+- Bersih dari subagent, aman disalin: `transport.ts`, `fs.ts`, `preview.ts`, `podmanbox.ts`, `health.ts`, `notify.ts`,
+  `agents-file.ts`.
+- **Terjalin dengan subagent CoderRa, tidak disalin**: `guard.ts` (`isReadOnlyCall` dengan `role` explorer/worker, baris
+  28-29) dan bagian `host.ts` untuk `Slots`, `createChild`, `EXPLORER_TOOLS`, folder sesi `subagents/`. Dari `guard.ts`
+  hanya dua ide yang ditanam ulang di `guard.ts` GripHub: `pendingApprovals()` dan mode `deny_risky`.
+- **Kapan host boleh restart** (`isIdle()` CoderRa, `host.ts:1423`) hanya memeriksa chat, run, dan approval chat, karena
+  subagent CoderRa berjalan di dalam giliran chat. Subagent GripHub asinkron dan bisa hidup lebih lama dari gilirannya.
+  Di GripHub `isIdle()` wajib juga memeriksa: tidak ada subagent `queued`/`running`/`waiting_approval`/`stopping`, dan
+  tidak ada approval subagent yang tertunda. Kalau tidak, "Perbarui agent di server" (`host_restart {whenIdle:true}`)
+  membunuh subagent yang sedang bekerja. `shutdown()` (SIGTERM) menghentikan subagent dengan `stop(force)` agar laporan
+  parsialnya tersimpan.
+- Test fase 1: `host_restart {whenIdle:true}` menunggu sampai subagent terakhir selesai; SIGTERM menghasilkan subagent
+  berstatus `stopped` dengan laporan parsial, bukan hilang.
+
+### 4.10 Lain-lain
 
 | Hal | Keputusan |
 | --- | --- |
@@ -180,7 +198,7 @@ Setiap fase berakhir dengan PR sendiri, CI hijau, dan kondisi selesai yang bisa 
 
 | Fase | Isi | Selesai bila | Perkiraan |
 | --- | --- | --- | --- |
-| 1 | Host: `transport.ts`, `send`→`emit`, `--listen`, `resume`, `kicked`, `ping`, `host_restart`; `REPLAYED_TYPES` GripHub (4.1); `pendingApprovals` chat + subagent (4.2) | Test Node: putus/resume tanpa duplikat, gap, kick, banjir `subagent_event` tidak mendorong keluar chat, approval tertunda bisa dijawab setelah gap; mode stdio identik (semua test lama lulus) | 3 hari |
+| 1 | Host: `transport.ts`, `send`→`emit`, `--listen`, `resume`, `kicked`, `ping`, `host_restart`; `REPLAYED_TYPES` GripHub (4.1); `pendingApprovals` chat + subagent (4.2); `isIdle`/`shutdown` sadar subagent (4.9) | Test Node: putus/resume tanpa duplikat, gap, kick, banjir `subagent_event` tidak mendorong keluar chat, approval tertunda bisa dijawab setelah gap, restart menunggu subagent, SIGTERM menyimpan laporan parsial; mode stdio identik (semua test lama lulus) | 3–4 hari |
 | 2 | Host mode server: `agents-file`, MCP shell, DNS, `PodmanBox` + wrangler via box, `health`, `notify` + notifikasi subagent, sync mati, `deny_risky`, `fs.ts`, `preview.ts` | Test Node per modul; host asli sebagai daemon menjawab `hello`/`fs_*`/`preview_serve`; teks `AGENTS.md` HP identik byte per byte | 3–4 hari |
 | 3 | `server/`: bootstrap, attach, unit, box, test bootstrap di container | `bootstrap.sh --dry-run` bersih, shellcheck bersih, attach diuji dengan sshd asli | 1 hari |
 | 4 | Dart transport: `AgentBackend`, `AgentClient` reconnect, `resync` (+ `refreshSubagents`, approvals, runs, integrations), Kotlin `startRemote`/`appInfo`, `RemoteProfile`/`RemoteMode`, layar Server agent, indikator koneksi | Test Dart melawan daemon Node asli lewat attach + sshd asli: putus berulang tanpa duplikat; subagent dan approval pulih; FakeHost lama tetap jalan; golden layar baru | 4–5 hari |
