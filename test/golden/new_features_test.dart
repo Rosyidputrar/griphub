@@ -11,6 +11,7 @@ import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/integrations.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/message_views.dart';
+import 'package:griphub_agent/ui/accounts_screen.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/repos_screen.dart';
 import 'package:griphub_agent/ui/tasks_screen.dart';
@@ -423,6 +424,57 @@ void main() {
         await tester.tap(find.byType(GestureDetector).last);
         await settle(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('turn_cost_sheet_${look.name}')));
+      });
+    }
+  });
+
+  group('accounts: an expired GitHub sign-in', () {
+    Map<String, dynamic> summary({required bool signedIn, bool expired = false}) => {
+      'github': signedIn ? {'login': 'akun1', 'name': 'Akun Satu', 'avatarUrl': null, 'expired': expired} : null,
+      'vercel': null,
+      'cloudflare': null,
+      'ssh': {'publicKey': null, 'hosts': const []},
+    };
+
+    testWidgets('says so and offers to sign in again; that clears the dead sign-in', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      host.answers['integrations'] = (_) => summary(signedIn: true, expired: true);
+      host.answers['github_logout'] = (_) => summary(signedIn: false);
+      await pumpLook(tester, const Look(), AccountsScreen(agent: newAgent()));
+      await settle(tester);
+      expect(find.textContaining('This sign-in expired or was revoked'), findsOneWidget);
+      await tester.tap(find.text('Sign in again'));
+      await settle(tester);
+      expect(host.sent('github_logout'), hasLength(1));
+      expect(find.textContaining('This sign-in expired'), findsNothing);
+    });
+
+    testWidgets('a working sign-in shows no warning', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      host.answers['integrations'] = (_) => summary(signedIn: true);
+      await pumpLook(tester, const Look(), AccountsScreen(agent: newAgent()));
+      await settle(tester);
+      expect(find.text('Akun Satu'), findsOneWidget);
+      expect(find.textContaining('expired'), findsNothing);
+    });
+
+    testWidgets('the host can mark it expired while the screen is open', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      host.answers['integrations'] = (_) => summary(signedIn: true);
+      await pumpLook(tester, const Look(), AccountsScreen(agent: newAgent()));
+      await settle(tester);
+      host.emit({'type': 'integrations', 'summary': summary(signedIn: true, expired: true)});
+      await settle(tester);
+      expect(find.textContaining('This sign-in expired or was revoked'), findsOneWidget);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: expired GitHub ${look.name}', (tester) async {
+        host = FakeHost(); // inside the fake-async zone, or replies never arrive
+        host.answers['integrations'] = (_) => summary(signedIn: true, expired: true);
+        await pumpLook(tester, look, AccountsScreen(agent: newAgent()));
+        await settle(tester);
+        await expectLater(find.byType(AccountsScreen), matchesGoldenFile(golden('github_expired_${look.name}')));
       });
     }
   });

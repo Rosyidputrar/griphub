@@ -97,7 +97,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
                           avatarUrl: it.github!.avatarUrl,
                           icon: SimpleIcons.github,
                           title: it.github!.name ?? it.github!.login,
-                          subtitle: '@${it.github!.login} · ${tr('git push and Pages enabled')}',
+                          subtitle: '@${it.github!.login} · ${tr(it.github!.expired ? 'sign-in expired' : 'git push and Pages enabled')}',
                           onDisconnect: () => _disconnect('GitHub', it.githubLogout),
                           // GitHub rejected the sign-in and it couldn't be refreshed: say so, and offer the way back.
                           footer: it.github!.expired ? _GithubExpired(onSignIn: () => _guard(it.githubLogout)) : null,

@@ -443,6 +443,7 @@ const _id = <String, String>{
   'This sign-in expired or was revoked. Sign in again to keep cloning, pushing and publishing.':
       'Login ini sudah kedaluwarsa atau dicabut. Masuk lagi agar bisa clone, push, dan publish lagi.',
   'Sign in again': 'Masuk lagi',
+  'sign-in expired': 'login kedaluwarsa',
   'Pulling {name}': 'Menarik {name}',
   '1 new commit': '1 commit baru',
   '{n} new commits': '{n} commit baru',
