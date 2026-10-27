@@ -64,6 +64,15 @@ export interface AppSettings {
 	containerShell?: boolean;
 	/** When the agent must ask before acting (see guard.ts). */
 	approvalMode?: "ask_all" | "ask_risky" | "auto";
+	/** Subagent limits, global for all subagents (see subagent.ts); 0 = no limit. */
+	subagentCreditLimit?: number;
+	subagentMinutesLimit?: number;
+	/** Approval mode for subagents; unset = follow the chat's approvalMode. */
+	subagentApprovalMode?: "ask_all" | "ask_risky" | "auto";
+	/** Subagent notification toggles; unset = on. */
+	subagentNotifyDone?: boolean;
+	subagentNotifyFailed?: boolean;
+	subagentNotifyApproval?: boolean;
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
@@ -135,7 +144,7 @@ export class Integrations {
 
 	/** Keys are write-only from the app's point of view: it only sees their last four characters. */
 	publicSettings() {
-		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget } = this.settings;
+		const { dns, dnsUrl, braveKey, tavilyKey, s1Key, tinyfishKey, approvalMode, fallbackModels, dailyBudget, subagentCreditLimit, subagentMinutesLimit, subagentApprovalMode, subagentNotifyDone, subagentNotifyFailed, subagentNotifyApproval } = this.settings;
 		const masked = (text?: string) => parseKeys(text).map(maskKey);
 		return {
 			dns,
@@ -157,6 +166,12 @@ export class Integrations {
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
 			dailyBudget: dailyBudget ?? 0,
+			subagentCreditLimit: subagentCreditLimit ?? 50,
+			subagentMinutesLimit: subagentMinutesLimit ?? 30,
+			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",
+			subagentNotifyDone: subagentNotifyDone ?? true,
+			subagentNotifyFailed: subagentNotifyFailed ?? true,
+			subagentNotifyApproval: subagentNotifyApproval ?? true,
 		};
 	}
 

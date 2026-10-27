@@ -38,6 +38,14 @@ import { Mcp } from "./mcp.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { Skills } from "./skills.js";
+import {
+	FULL_TOOLS,
+	READ_TOOLS,
+	SubagentManager,
+	subagentTool,
+	type SubagentParent,
+	type SubagentSessionFactoryOptions,
+} from "./subagent.js";
 import { GitHubSync } from "./sync.js";
 import { todoTool } from "./todo.js";
 import { s1Usage, webTools } from "./web.js";
@@ -77,6 +85,7 @@ let runner: Runner;
 let mcp: Mcp;
 let customProviders: CustomProviders;
 let sync: GitHubSync;
+let subagents: SubagentManager;
 const tunnels = new Tunnels();
 let unsubscribe: (() => void) | undefined;
 
@@ -184,11 +193,76 @@ async function buildSession(sessionManager: SessionManager, opts: { interactive:
 			),
 			todoTool(),
 			...mcpTools,
+			// The parent's only way to create a subagent. Interactive sessions
+			// only: background runs and subagent sessions never get this tool,
+			// so a subagent can never spawn another one.
+			...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
 		] as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
 	installLenientTools(result.session.agent);
 	return result;
+}
+
+/** The open chat, as a subagent's parent. Read lazily: the tool runs later. */
+function currentParent(title?: string): SubagentParent {
+	const s = session!;
+	return {
+		sessionFile: s.sessionFile ?? s.sessionId,
+		title: title ?? s.sessionName ?? "",
+		cwd: s.sessionManager.getCwd(),
+		modelId: (s.model as any)?.id ?? "",
+	};
+}
+
+/**
+ * One subagent's session: same pi machinery as buildSession, but a restricted
+ * tool registry (no subagent tool, no todo state, no MCP), an in-memory
+ * session manager (no file that could surface as a chat), and its own guard
+ * and limit instances. The parent's model carries over so cost estimates and
+ * behaviour match the chat that spawned it.
+ */
+async function buildSubagentSession(opts: SubagentSessionFactoryOptions) {
+	const { cwd, profile, guard: subGuard, budgetExtension, onLimit, parent } = opts;
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		extensionFactories: [
+			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: onLimit }), hidden: true },
+			{ name: "griphub-subagent-guard", factory: subGuard.extension, hidden: true },
+			{ name: "griphub-subagent-budget", factory: budgetExtension, hidden: true },
+		],
+	});
+	await resourceLoader.reload();
+	const parentModel =
+		session?.model != null
+			? modelRuntime.getModel((session.model as any).provider, (session.model as any).id)
+			: undefined;
+	const result = await createAgentSession({
+		cwd,
+		agentDir,
+		modelRuntime,
+		settingsManager,
+		sessionManager: SessionManager.inMemory(cwd),
+		resourceLoader,
+		tools: profile === "full" ? FULL_TOOLS : READ_TOOLS,
+		customTools: [
+			...webTools(
+				() => ({
+					...integrations.searchKeys(),
+					griphubKey: customProviders?.key(GRIPHUB_ID) ?? "",
+					griphubBaseUrl: GRIPHUB_BASE_URL,
+					activeModel: parent.modelId,
+				}),
+				() => cwd,
+			),
+		] as any,
+		...(parentModel ? { model: parentModel } : {}),
+		...(session?.thinkingLevel ? { thinkingLevel: session.thinkingLevel } : {}),
+	});
+	installLenientTools(result.session.agent);
+	return result.session;
 }
 
 /** The last prompt sent from the app until it reaches the history, so Try again can send it once more. */
@@ -670,6 +744,24 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "approval_reply":
 			guard.reply(cmd.approvalId, !!cmd.allow, !!cmd.always, cmd.key);
 			return null;
+
+		// Subagents (subagent.ts). Creation is the parent model's job via the
+		// `subagent` tool; these commands are the app's controls for a live
+		// one (card, modal, queue, stop). They never create a chat.
+		case "subagent_list":
+			return subagents.list();
+		case "subagent_start":
+			return subagents.start(currentParent(cmd.parentTitle), cmd.task ?? cmd.brief ?? "", cmd.profile === "full" ? "full" : "read");
+		case "subagent_stop":
+			return subagents.stop(cmd.subagentId, !!cmd.force);
+		case "subagent_queue":
+			return subagents.queueMessage(cmd.subagentId, cmd.text ?? "");
+		case "subagent_queue_remove":
+			return subagents.removeQueued(cmd.subagentId, cmd.queueId);
+		case "subagent_queue_move":
+			return subagents.moveQueued(cmd.subagentId, cmd.queueId, cmd.direction === "down" ? "down" : "up");
+		case "subagent_approval_reply":
+			return subagents.approvalReply(cmd.subagentId, cmd.approvalId, !!cmd.allow, !!cmd.always, cmd.key);
 		case "plan_mode":
 			guard.planMode = !!cmd.on;
 			return state();
@@ -1177,6 +1269,21 @@ async function main() {
 	// either (see SettingsManager); the app's own inline extension is
 	// unaffected, it is not a project extension.
 	settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
+	// Subagents are created after boot, but the manager must exist before the
+	// first interactive session is built (buildSession registers its tool).
+	subagents = new SubagentManager({
+		send: (r) => send(r),
+		wireEvent: (e) => wireEvent(e),
+		createSession: (opts) => buildSubagentSession(opts),
+		limits: () => {
+			const st = integrations.settings;
+			return {
+				creditLimit: st.subagentCreditLimit ?? 50,
+				minutesLimit: st.subagentMinutesLimit ?? 30,
+				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
+			};
+		},
+	});
 	// Linux container is the agent's shell by default once installed.
 	if (
 		container.status(undefined).installed &&
