@@ -99,6 +99,8 @@ class _AccountsScreenState extends State<AccountsScreen> {
                           title: it.github!.name ?? it.github!.login,
                           subtitle: '@${it.github!.login} · ${tr('git push and Pages enabled')}',
                           onDisconnect: () => _disconnect('GitHub', it.githubLogout),
+                          // GitHub rejected the sign-in and it couldn't be refreshed: say so, and offer the way back.
+                          footer: it.github!.expired ? _GithubExpired(onSignIn: () => _guard(it.githubLogout)) : null,
                         ),
                   _Header(tr('Vercel')),
                   it.vercelUser == null
@@ -662,6 +664,45 @@ class _Connected extends StatelessWidget {
           if (footer != null) ...[const SizedBox(height: 12), footer!],
         ],
       ),
+    );
+  }
+}
+
+/// Under an expired GitHub account: why git and Pages stopped working, and a button back to sign-in.
+class _GithubExpired extends StatelessWidget {
+  const _GithubExpired({required this.onSignIn});
+  final VoidCallback onSignIn;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(LucideIcons.triangleAlert, size: 16, color: p.warning),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                tr('This sign-in expired or was revoked. Sign in again to keep cloning, pushing and publishing.'),
+                style: text.bodySmall?.copyWith(color: p.warning),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: onSignIn,
+          icon: const Icon(SimpleIcons.github, size: 16),
+          label: Text(tr('Sign in again')),
+        ),
+      ],
     );
   }
 }

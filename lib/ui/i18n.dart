@@ -439,6 +439,11 @@ const _id = <String, String>{
   'Enter an https:// DNS-over-HTTPS address': 'Masukkan alamat DNS-over-HTTPS yang diawali https://',
   'DNS updated': 'DNS diperbarui',
   'Disconnect {service}?': 'Putuskan {service}?',
+  'This sign-in expired or was revoked. Sign in again to keep cloning, pushing and publishing.':
+      'Login ini sudah kedaluwarsa atau dicabut. Masuk lagi agar bisa clone, push, dan publish lagi.',
+  'Sign in again': 'Masuk lagi',
+  'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':
+      'Login GitHub kedaluwarsa atau dicabut. Masuk lagi ke GitHub di Akun.',
   'Its token is removed from this device. To reconnect you will need to paste a token again.':
       'Token-nya dihapus dari perangkat ini. Untuk menghubungkan lagi, kamu perlu menempelkan token lagi.',
   'Disconnect': 'Putuskan',

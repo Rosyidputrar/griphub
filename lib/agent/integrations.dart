@@ -12,6 +12,9 @@ class GithubAccount {
   String get login => json['login'] as String;
   String? get name => json['name'] as String?;
   String? get avatarUrl => json['avatarUrl'] as String?;
+
+  /// GitHub rejected the sign-in and it could not be refreshed: sign in again.
+  bool get expired => json['expired'] == true;
 }
 
 class SshHost {
@@ -179,6 +182,8 @@ class Integrations extends ChangeNotifier {
   Integrations(this.client) {
     client.records.listen((r) {
       if (r['type'] == 'task') _taskLines.add(r);
+      // The host changed the accounts on its own (a GitHub sign-in expired).
+      if (r['type'] == 'integrations' && r['summary'] is Map) _apply(r['summary']);
       if (r['type'] == 'sync') {
         final s = SyncStatus((r['status'] as Map).cast<String, dynamic>());
         // A finished sync may have brought projects in from another phone.

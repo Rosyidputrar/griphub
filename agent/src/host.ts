@@ -791,9 +791,17 @@ function restoreBackup(path: string) {
 // ---------------------------------------------------------------------------
 // Commands
 
+/**
+ * Commands that run git against github.com with the token in git's config. A
+ * GitHub App sign-in expires every 8 hours, so it is refreshed first if due
+ * (a no-op otherwise). API calls refresh on their own (Integrations.github).
+ */
+const GITHUB_GIT_COMMANDS = new Set(["git_clone", "git_pull", "git_push", "deploy", "sync_now", "ci_watch", "run_enqueue", "schedule_run"]);
+
 async function handle(cmd: Command): Promise<unknown> {
 	const s = session!;
 	const cwd = (cmd.dir as string | undefined) ?? s.sessionManager.getCwd();
+	if (GITHUB_GIT_COMMANDS.has(cmd.type)) await integrations.githubFresh();
 	switch (cmd.type) {
 		case "hello":
 			return { version: VERSION, node: process.version, agentDir, workspace, tools: s.getActiveToolNames(), ...state() };
@@ -809,6 +817,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			const text = guard.planMode
 				? `${cmd.text}\n\n[Plan mode] Investigate as needed, then reply with a numbered plan only. Do not change files or run commands that modify anything until I approve.`
 				: cmd.text;
+			// The agent may git push from its shell; don't hold the prompt for it.
+			void integrations.githubFresh();
 			// Don't await the run; progress arrives as events.
 			s.prompt(text, {
 				images: cmd.images,
@@ -1372,6 +1382,11 @@ async function main() {
 	// Route every lookup through DNS-over-HTTPS (configurable in settings).
 	installDohLookup();
 	integrations = new Integrations(agentDir, workspace);
+	integrations.onChange = () => send({ type: "integrations", summary: integrations.summary() });
+	// Keeps a GitHub App sign-in (8-hour tokens) fresh for git and the agent's shell, which read
+	// the token from git's config and $GITHUB_TOKEN rather than asking for it.
+	setInterval(() => void integrations.githubFresh(), 10 * 60_000).unref();
+	void integrations.githubFresh();
 	guard.mode = integrations.settings.approvalMode ?? "ask_risky";
 	skills = new Skills(agentDir, join(fileURLToPath(new URL(".", import.meta.url)), "skills"), () => process.env.GITHUB_TOKEN);
 	skills.seed();
