@@ -83,9 +83,13 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
     super.dispose();
   }
 
+  /// While the agent writes, the page reloads at most this often: every reload parses and paints the whole
+  /// document again, which on a phone competes with the chat for the CPU.
+  static const liveInterval = Duration(milliseconds: 1500);
+
   void _onSourceChanged() {
     if (debounce?.isActive ?? false) return;
-    debounce = Timer(const Duration(milliseconds: 400), _reload);
+    debounce = Timer(liveInterval, _reload);
   }
 
   void _reload({bool force = false}) {

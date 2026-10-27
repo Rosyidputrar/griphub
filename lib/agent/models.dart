@@ -163,11 +163,25 @@ class Block {
 
   String get text => buffer.toString();
 
+  /// Reads the streamed argument JSON incrementally: each call only scans what
+  /// arrived since the last one, so a long file being written costs the same
+  /// per frame at its end as at its start.
+  PartialJsonReader? _reader;
+
   /// Arguments so far: final ones once known, else string fields read from
   /// the streamed JSON (for tool calls the buffer holds raw argument JSON).
-  Map<String, dynamic>? get liveArgs => args ?? (buffer.isEmpty ? null : partialJsonStrings(text));
+  Map<String, dynamic>? get liveArgs {
+    if (args != null) return args;
+    if (buffer.isEmpty) return null;
+    var reader = _reader;
+    // The buffer only grows while streaming; if it was replaced, read it again from the start.
+    if (reader == null || buffer.length < reader.length) reader = _reader = PartialJsonReader();
+    if (buffer.length != reader.length) reader.update(text);
+    return reader.values;
+  }
 
   set text(String value) {
+    _reader = null;
     buffer
       ..clear()
       ..write(value);
@@ -297,58 +311,84 @@ String? _shortPath(String? path) {
 /// Reads top-level-looking `"key": "string"` pairs from possibly truncated
 /// JSON. The last value may be cut off; it is returned as far as it goes.
 /// Repeated keys keep the latest value (e.g. the edit being written now).
-Map<String, dynamic> partialJsonStrings(String raw) {
-  final out = <String, dynamic>{};
-  final key = RegExp(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*"');
-  var pos = 0;
-  while (true) {
-    final m = key.firstMatch(raw.substring(pos));
-    if (m == null) break;
-    var i = pos + m.end;
-    final value = StringBuffer();
-    while (i < raw.length) {
-      final c = raw[i];
-      if (c == '"') break;
-      if (c != r'\') {
-        value.write(c);
-        i++;
-        continue;
+Map<String, dynamic> partialJsonStrings(String raw) => (PartialJsonReader()..update(raw)).values;
+
+/// [partialJsonStrings] for text that keeps growing: [update] with the whole
+/// text so far, and only the part after the previous call is scanned. A value
+/// still being written is kept in a buffer, so an unfinished escape at the end
+/// (`\`, `\u00`) waits for the rest instead of being re-read from the start.
+class PartialJsonReader {
+  static final _key = RegExp(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*"');
+
+  /// The values read so far; the one being written holds what has arrived.
+  final values = <String, dynamic>{};
+
+  /// How much of the text has been read.
+  int get length => _length;
+  int _length = 0;
+
+  /// Where scanning resumes: the start of the next key, or the next character of [_key]'s value.
+  int _pos = 0;
+  String? _open;
+  final _value = StringBuffer();
+
+  void update(String raw) {
+    _length = raw.length;
+    while (_pos < raw.length) {
+      if (_open == null) {
+        final m = _key.firstMatch(raw.substring(_pos));
+        // The next key isn't complete yet: try again from here next time.
+        if (m == null) return;
+        _open = m.group(1);
+        _value.clear();
+        values[_open!] = '';
+        _pos += m.end;
       }
-      if (i + 1 >= raw.length) {
-        i = raw.length;
-        break;
-      }
-      final e = raw[i + 1];
-      switch (e) {
-        case 'n':
-          value.write('\n');
-        case 't':
-          value.write('\t');
-        case 'r':
-          value.write('\r');
-        case 'b':
-          value.write('\b');
-        case 'f':
-          value.write('\f');
-        case 'u':
-          if (i + 6 > raw.length) {
-            i = raw.length;
-            continue;
+      var i = _pos;
+      var closed = false;
+      while (i < raw.length) {
+        final c = raw[i];
+        if (c == '"') {
+          closed = true;
+          break;
+        }
+        if (c != r'\') {
+          // Copy the run of plain characters in one go.
+          var j = i + 1;
+          while (j < raw.length && raw[j] != '"' && raw[j] != r'\') {
+            j++;
           }
+          _value.write(raw.substring(i, j));
+          i = j;
+          continue;
+        }
+        // An escape cut off at the end: wait for the rest.
+        if (i + 1 >= raw.length) break;
+        final e = raw[i + 1];
+        if (e == 'u') {
+          if (i + 6 > raw.length) break;
           final code = int.tryParse(raw.substring(i + 2, i + 6), radix: 16);
-          if (code != null) value.writeCharCode(code);
+          if (code != null) _value.writeCharCode(code);
           i += 6;
           continue;
-        default:
-          value.write(e);
+        }
+        _value.write(switch (e) {
+          'n' => '\n',
+          't' => '\t',
+          'r' => '\r',
+          'b' => '\b',
+          'f' => '\f',
+          _ => e,
+        });
+        i += 2;
       }
-      i += 2;
+      _pos = i;
+      values[_open!] = _value.toString();
+      if (!closed) return;
+      _open = null;
+      _pos = i + 1;
     }
-    out[m.group(1)!] = value.toString();
-    pos = i < raw.length ? i + 1 : raw.length;
-    if (pos >= raw.length) break;
   }
-  return out;
 }
 
 /// What the copy-and-model footer under an assistant reply shows.

@@ -573,6 +573,44 @@ class _ThinkingViewState extends State<ThinkingView> {
   }
 }
 
+/// What the agent is writing right now: only the newest lines, with the real line numbers and the size so far.
+/// The whole file arrives a few characters at a time and the chat redraws ~30 times a second; highlighting and
+/// laying out all of it on every frame made the app crawl on long files. The full text shows once it lands.
+class _LiveTail extends StatelessWidget {
+  const _LiveTail({required this.text, required this.name, required this.language});
+  final String text;
+  final String? name;
+  final String? language;
+
+  /// Lines on screen while writing; about what fits in the panel.
+  static const lines = 14;
+
+  @override
+  Widget build(BuildContext context) {
+    // Start of the last [lines] lines, scanning back from the end only.
+    var start = text.length;
+    for (var n = 0; n < lines && start > 0; n++) {
+      start = text.lastIndexOf('\n', start - 1);
+      if (start < 0) break;
+    }
+    final cut = start > 0;
+    final from = cut ? start + 1 : 0;
+    final total = '\n'.allMatches(text).length + 1;
+    final shown = '\n'.allMatches(text, from).length + 1;
+    final kb = text.length / 1024;
+    final size = kb < 1 ? '${text.length} B' : '${localNumber(kb.toStringAsFixed(1))} KB';
+    final count = total == 1 ? tr('1 line') : tr('{n} lines').replaceAll('{n}', localNumber('$total'));
+    return CodeBox(
+      text: text.substring(from),
+      firstLine: total - shown + 1,
+      copyText: text,
+      label: [?name, count, size].join(' · '),
+      language: language,
+      followTail: true,
+    );
+  }
+}
+
 class ToolCallView extends StatefulWidget {
   const ToolCallView({super.key, required this.block, required this.run, this.cwd, this.live});
   final Block block;
@@ -714,13 +752,19 @@ class _ToolCallViewState extends State<ToolCallView> {
           if ((writing || sawLive) && !open && liveText != null && liveText.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: CodeBox(
-                text: liveText,
-                label: path?.split('/').last ?? b.toolName,
-                language: b.toolName == 'bash' ? 'bash' : ext,
-                maxHeight: 260,
-                followTail: true,
-              ),
+              child: writing
+                  ? _LiveTail(
+                      text: liveText,
+                      name: path?.split('/').last ?? b.toolName,
+                      language: b.toolName == 'bash' ? 'bash' : ext,
+                    )
+                  : CodeBox(
+                      text: liveText,
+                      label: path?.split('/').last ?? b.toolName,
+                      language: b.toolName == 'bash' ? 'bash' : ext,
+                      maxHeight: 260,
+                      followTail: true,
+                    ),
             ),
           // Opens and closes instead of jumping; the header stays put.
           ClipRect(
@@ -742,12 +786,14 @@ class _ToolCallViewState extends State<ToolCallView> {
                               if (b.toolName == 'write' && liveText != null)
                                 _Section(
                                   label: tr('Content'),
-                                  child: CodeBox(
-                                    text: liveText,
-                                    label: path?.split('/').last,
-                                    language: ext,
-                                    maxHeight: 320,
-                                  ),
+                                  child: writing
+                                      ? _LiveTail(text: liveText, name: path?.split('/').last, language: ext)
+                                      : CodeBox(
+                                          text: liveText,
+                                          label: path?.split('/').last,
+                                          language: ext,
+                                          maxHeight: 320,
+                                        ),
                                 )
                               else
                                 _Section(
