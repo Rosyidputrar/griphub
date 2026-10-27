@@ -600,6 +600,7 @@ export class Integrations {
 	}
 
 	async repos() {
+		const clones = await this.workspaceClones();
 		const list: any[] = [];
 		for (let page = 1; page <= 5; page++) {
 			const batch = await this.github(
@@ -618,17 +619,68 @@ export class Integrations {
 			stars: r.stargazers_count ?? 0,
 			pushedAt: r.pushed_at,
 			defaultBranch: r.default_branch,
-			cloned: existsSync(join(this.workspace, r.name, ".git")),
+			...this.clonedAt(r.full_name, clones),
 		}));
 	}
 
-	async clone(fullName: string, log: Log) {
-		const name = fullName.split("/").pop()!;
-		const dest = join(this.workspace, name);
-		if (existsSync(join(dest, ".git"))) {
-			log(`${name} is already cloned`);
-			return { path: dest };
+	/**
+	 * Workspace folders that are clones of a GitHub repository, keyed by
+	 * lower-cased "owner/repo" (GitHub names are case-insensitive). Matched on
+	 * the origin remote, never on the folder name: akun1/repo1 and akun2/repo1
+	 * are different repositories that would both want the folder "repo1".
+	 */
+	private async workspaceClones(): Promise<Map<string, string>> {
+		const out = new Map<string, string>();
+		let names: string[] = [];
+		try {
+			names = readdirSync(this.workspace);
+		} catch {
+			return out;
 		}
+		await Promise.all(
+			names.map(async (name) => {
+				const dir = join(this.workspace, name);
+				if (name.startsWith(".") || !existsSync(join(dir, ".git"))) return;
+				// The URL as configured; `remote get-url` would apply url.insteadOf rewrites.
+				const origin = (await run("git", ["config", "--get", "remote.origin.url"], { cwd: dir }).catch(() => "")).trim();
+				const slug = parseGithubSlug(origin)?.toLowerCase();
+				// Two folders with the same origin: the one named after the repo wins, as before.
+				if (slug && (!out.has(slug) || name.toLowerCase() === slug.split("/")[1])) out.set(slug, dir);
+			}),
+		);
+		return out;
+	}
+
+	private clonedAt(fullName: string, clones: Map<string, string>) {
+		const path = clones.get(fullName.toLowerCase());
+		return { cloned: path !== undefined, path: path ?? null };
+	}
+
+	/**
+	 * The folder a new clone of [fullName] goes to: the repository's name, or
+	 * "<name>-<owner>" (then "-2", "-3", ...) when that name is taken by any
+	 * other file or folder.
+	 */
+	private cloneDest(fullName: string): string {
+		const [owner, name] = fullName.split("/");
+		const free = (n: string) => !existsSync(join(this.workspace, n));
+		if (free(name)) return join(this.workspace, name);
+		const base = `${name}-${owner}`;
+		if (free(base)) return join(this.workspace, base);
+		for (let i = 2; ; i++) if (free(`${base}-${i}`)) return join(this.workspace, `${base}-${i}`);
+	}
+
+	async clone(fullName: string, log: Log) {
+		if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(fullName) || fullName.split("/").some((p) => p === "." || p === "..")) {
+			throw new Error(`Not a GitHub repository name: ${fullName}`);
+		}
+		const existing = (await this.workspaceClones()).get(fullName.toLowerCase());
+		if (existing) {
+			log(`${fullName} is already cloned in ${basename(existing)}`);
+			return { path: existing };
+		}
+		mkdirSync(this.workspace, { recursive: true });
+		const dest = this.cloneDest(fullName);
 		await run("git", ["clone", "--progress", `https://github.com/${fullName}.git`, dest], {
 			cwd: this.workspace,
 			log,

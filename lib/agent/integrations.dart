@@ -42,6 +42,10 @@ class RepoInfo {
   int get stars => json['stars'] as int? ?? 0;
   DateTime? get pushedAt => DateTime.tryParse(json['pushedAt'] as String? ?? '');
   bool get cloned => json['cloned'] == true;
+
+  /// The folder it is cloned in (matched on its origin remote, not its name); null when not on the device.
+  String? get path => json['path'] as String?;
+  String? get defaultBranch => json['defaultBranch'] as String?;
 }
 
 class SyncStatus {
