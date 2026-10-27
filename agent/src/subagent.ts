@@ -612,12 +612,16 @@ export class SubagentManager {
 			case "message_end": {
 				const m = e.message;
 				if (m?.role === "assistant") {
-					if (m.stopReason === "error") rt.lastError = String(m.errorMessage ?? "Model error");
+					// A later answer (pi's auto-retry succeeding) clears an earlier error.
+					rt.lastError = m.stopReason === "error" ? String(m.errorMessage ?? "Model error") : undefined;
 					this.chargeRequest(rt, m);
 				}
 				break;
 			}
-			case "agent_end":
+			// Not agent_end: pi can end several agent loops in one run (auto-retry,
+			// compaction, follow-ups) and stays busy until agent_settled, so a
+			// prompt() sent at agent_end is refused and finishing there would
+			// dispose a run pi is still retrying.
 			case "agent_settled":
 				if (!rt.settling) {
 					rt.settling = true;
