@@ -404,6 +404,9 @@ ThemeData buildTheme(Brightness brightness) {
     snackBarTheme: SnackBarThemeData(
       backgroundColor: p.nav,
       contentTextStyle: text.bodyMedium!.copyWith(color: Colors.white),
+      // The bar is dark in both themes; Material's default action color (inversePrimary) is dark too in the
+      // dark theme, which made Undo / Open / View unreadable there.
+      actionTextColor: light ? null : Colors.white,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg)),
       elevation: 0,

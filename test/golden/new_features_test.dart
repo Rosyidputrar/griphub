@@ -2,10 +2,14 @@
 // finished runs, the Repos sheet for clones (pull / switch branch), the
 // expired GitHub sign-in, long pastes as attachments, and the per-turn cost
 // footer. The fake host answers like the real one (agent/src).
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/integrations.dart';
+import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/repos_screen.dart';
 import 'package:griphub_agent/ui/tasks_screen.dart';
 
@@ -226,6 +230,80 @@ void main() {
       host = FakeHost(); // inside the fake-async zone, or replies never arrive
         await open(tester, look, fetched: status(behind: 2, dirty: true));
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('repo_actions_${look.name}')));
+      });
+    }
+  });
+
+  group('chat: long pastes become attachments', () {
+    final paste = List.generate(40, (i) => '2026-10-27 16:${(i % 60).toString().padLeft(2, '0')} ERROR job $i failed').join('\n');
+
+    Future<void> pumpChat(WidgetTester tester, Look look) async {
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      await pumpLook(tester, look, ChatScreen(agent: newAgent()));
+      await settle(tester);
+    }
+
+    Finder composer() => find.byType(TextField).last;
+
+    testWidgets('a long paste lands as "Pasted content", the field stays as typed', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      await pumpChat(tester, const Look());
+      await tester.enterText(composer(), 'Kenapa error ini?');
+      await tester.enterText(composer(), 'Kenapa error ini?$paste');
+      await settle(tester);
+      expect(tester.widget<TextField>(composer()).controller!.text, 'Kenapa error ini?');
+      expect(find.text('Pasted content'), findsOneWidget);
+      // Nothing pops over the composer.
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('tapping the paste previews it; "Paste as text" puts it in the field instead', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      await pumpChat(tester, const Look());
+      await tester.enterText(composer(), 'Lihat: ');
+      await tester.enterText(composer(), 'Lihat: $paste');
+      await settle(tester);
+      await tester.tap(find.text('Pasted content'));
+      await settle(tester);
+      expect(find.text('40 lines · 1 KB'), findsOneWidget);
+      await tester.tap(find.text('Paste as text'));
+      await settle(tester);
+      expect(find.text('Pasted content'), findsNothing);
+      expect(tester.widget<TextField>(composer()).controller!.text, 'Lihat: $paste');
+    });
+
+    testWidgets('closing the preview keeps the paste attached', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      await pumpChat(tester, const Look());
+      await tester.enterText(composer(), paste);
+      await settle(tester);
+      await tester.tap(find.text('Pasted content'));
+      await settle(tester);
+      await tester.tapAt(const Offset(20, 20));
+      await settle(tester);
+      expect(find.text('Pasted content'), findsOneWidget);
+      expect(tester.widget<TextField>(composer()).controller!.text, '');
+    });
+
+    testWidgets('a short paste stays text', (tester) async {
+      host = FakeHost(); // inside the fake-async zone, or replies never arrive
+      await pumpChat(tester, const Look());
+      await tester.enterText(composer(), 'npm ERR! code ERESOLVE');
+      await settle(tester);
+      expect(find.text('Pasted content'), findsNothing);
+      expect(tester.widget<TextField>(composer()).controller!.text, 'npm ERR! code ERESOLVE');
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: composer with a paste ${look.name}', (tester) async {
+        host = FakeHost(); // inside the fake-async zone, or replies never arrive
+        await pumpChat(tester, look);
+        await tester.enterText(composer(), paste);
+        await settle(tester);
+        await expectLater(find.byType(ChatScreen), matchesGoldenFile(golden('composer_paste_${look.name}')));
+        await tester.tap(find.text(look.language == 'id' ? 'Konten yang ditempel' : 'Pasted content').first);
+        await settle(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('paste_preview_${look.name}')));
       });
     }
   });

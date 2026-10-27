@@ -94,6 +94,11 @@ class SentAttachments {
   }
 }
 
+/// The file name of a long paste turned into an attachment (ui/chat_extras.dart). Drafts and sends prefix
+/// their own stamps, so several pastes never collide; the name is what tells the agent (and the chat) it is
+/// pasted text.
+const pastedName = 'pasted-text.txt';
+
 /// Removes the machine-generated "Attached files:" block that
 /// [preparePrompt] appends to a sent message, so the bubble can show chips
 /// instead of raw paths. Only strips a trailing block in the exact format

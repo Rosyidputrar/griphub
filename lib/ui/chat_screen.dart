@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -239,6 +241,44 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// A long paste lands as a "Pasted content" attachment; tapping it offers to put it in the field instead.
+  void _pasted(String text) {
+    final Attachment a;
+    try {
+      a = pastedAttachment(text);
+    } catch (_) {
+      // No temp storage: keep the paste as text rather than losing it.
+      _insert(text);
+      return;
+    }
+    setState(() => attachments.add(a));
+    _saveFiles();
+  }
+
+  Future<void> _openPasted(Attachment a) async {
+    final String text;
+    try {
+      text = File(a.path).readAsStringSync();
+    } catch (_) {
+      return;
+    }
+    final asText = await showPastedSheet(context, text);
+    if (asText != true || !mounted || !attachments.remove(a)) return;
+    setState(() {});
+    _saveFiles();
+    _insert(text);
+  }
+
+  /// Puts [text] at the cursor (replacing a selection), as a paste would.
+  void _insert(String text) {
+    final v = input.value;
+    final sel = v.selection.isValid ? v.selection : TextSelection.collapsed(offset: v.text.length);
+    input.value = TextEditingValue(
+      text: v.text.replaceRange(sel.start, sel.end, text),
+      selection: TextSelection.collapsed(offset: sel.start + text.length),
+    );
+  }
+
   Future<void> _attach() async {
     final picked = await pickAttachments(context);
     if (picked.isNotEmpty) {
@@ -428,8 +468,10 @@ class _ChatScreenState extends State<ChatScreen> {
               onSend: _send,
               onQueue: _queue,
               onAttach: _attach,
+              onPaste: _pasted,
               onVoice: _voice,
               attachments: attachments,
+              onOpenAttachment: (a) => a.isPasted ? _openPasted(a) : null,
               onRemoveAttachment: (a) {
                 setState(() => attachments.remove(a));
                 _saveFiles();
@@ -717,8 +759,10 @@ class _Composer extends StatelessWidget {
     required this.onSend,
     required this.onQueue,
     required this.onAttach,
+    required this.onPaste,
     required this.onVoice,
     required this.attachments,
+    required this.onOpenAttachment,
     required this.onRemoveAttachment,
     required this.onPickModel,
   });
@@ -729,8 +773,12 @@ class _Composer extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onQueue;
   final VoidCallback onAttach;
+
+  /// Called instead of inserting a long paste (see LongPasteFormatter).
+  final void Function(String text) onPaste;
   final VoidCallback onVoice;
   final List<Attachment> attachments;
+  final void Function(Attachment) onOpenAttachment;
   final void Function(Attachment) onRemoveAttachment;
   final VoidCallback onPickModel;
 
@@ -765,10 +813,12 @@ class _Composer extends StatelessWidget {
           ),
           child: Column(
             children: [
-              if (attachments.isNotEmpty) AttachmentStrip(items: attachments, onRemove: onRemoveAttachment),
+              if (attachments.isNotEmpty)
+                AttachmentStrip(items: attachments, onOpen: onOpenAttachment, onRemove: onRemoveAttachment),
               TextField(
                 controller: controller,
                 focusNode: focus,
+                inputFormatters: [LongPasteFormatter(onPaste)],
                 minLines: 1,
                 maxLines: 8,
                 textCapitalization: TextCapitalization.sentences,

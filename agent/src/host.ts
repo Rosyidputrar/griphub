@@ -561,6 +561,9 @@ You are running inside GripHub AI Agent, an Android app, on the user's phone.
   what they want instead rather than retrying.
 - There is no display server; do not try to open GUIs or browsers. The app can
   preview HTML files you write.
+- Files listed after "Attached files:" in a message are part of it. A
+  \`pasted-text.txt\` there is text the user pasted into the message (the app
+  attaches long pastes as files): read it before you answer.
 `,
 	);
 }

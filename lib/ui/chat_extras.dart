@@ -11,8 +11,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import '../agent/sent_attachments.dart';
+import '../agent/updater.dart' show formatBytes;
 import 'i18n.dart';
 import 'changes_screen.dart';
+import 'code_view.dart';
 import 'editor_screen.dart';
 import 'files_screen.dart';
 import 'git_screen.dart';
@@ -44,6 +46,57 @@ class Attachment {
   String get ext => name.contains('.') ? name.split('.').last.toLowerCase() : '';
   String? get imageMime => mime?.startsWith('image/') == true ? mime : _imageTypes[ext];
   bool get isImage => imageMime != null;
+
+  /// Long text pasted into the composer, kept as a file (see [LongPasteFormatter]).
+  bool get isPasted => name == pastedName;
+}
+
+/// Pasting more than this many characters, or lines, attaches the text as a file instead.
+const longPasteChars = 1000;
+const longPasteLines = 15;
+
+/// Whether [text] is long enough to become an attachment when pasted.
+bool isLongPaste(String text) => text.length > longPasteChars || '\n'.allMatches(text).length >= longPasteLines;
+
+/// Turns a long paste into an attachment: the field is left as it was and [onLongPaste] gets the text.
+///
+/// A paste is told apart from typing by size: one edit that inserts more than [longPasteChars] characters or
+/// [longPasteLines] lines. Keyboards insert a word or a suggestion at a time, and text the app sets itself
+/// (voice input, shared text, a restored draft) never goes through input formatters.
+class LongPasteFormatter extends TextInputFormatter {
+  LongPasteFormatter(this.onLongPaste);
+  final void Function(String text) onLongPaste;
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final before = oldValue.text;
+    final after = newValue.text;
+    // What this edit inserted: newValue minus the prefix and suffix it shares with oldValue.
+    var start = 0;
+    final shortest = before.length < after.length ? before.length : after.length;
+    while (start < shortest && before.codeUnitAt(start) == after.codeUnitAt(start)) {
+      start++;
+    }
+    var end = 0;
+    while (end < shortest - start &&
+        before.codeUnitAt(before.length - 1 - end) == after.codeUnitAt(after.length - 1 - end)) {
+      end++;
+    }
+    final inserted = after.substring(start, after.length - end);
+    if (!isLongPaste(inserted)) return newValue;
+    // After this edit is applied; the callback updates widgets.
+    scheduleMicrotask(() => onLongPaste(inserted));
+    return oldValue;
+  }
+}
+
+/// Writes pasted text to a file and returns it as an attachment. Synchronous: it is a paste (kilobytes),
+/// and the chip should be there the moment the field stays empty.
+Attachment pastedAttachment(String text) {
+  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+    ..createSync(recursive: true);
+  final file = File('${dir.path}/$pastedName')..writeAsStringSync(text);
+  return Attachment(file.path, pastedName, mime: 'text/plain');
 }
 
 /// Pictures go to the model as images; other files are copied into the
@@ -146,9 +199,12 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
 
 /// Thumbnails / chips of what will be sent with the next message.
 class AttachmentStrip extends StatelessWidget {
-  const AttachmentStrip({super.key, required this.items, required this.onRemove});
+  const AttachmentStrip({super.key, required this.items, required this.onRemove, this.onOpen});
   final List<Attachment> items;
   final void Function(Attachment) onRemove;
+
+  /// Tapping an attachment (a long paste opens its preview).
+  final void Function(Attachment)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -167,7 +223,9 @@ class AttachmentStrip extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(Radii.md),
-                child: a.isImage
+                child: a.isPasted
+                    ? GestureDetector(onTap: onOpen == null ? null : () => onOpen!(a), child: _PastedChip(attachment: a))
+                    : a.isImage
                     ? Image.file(File(a.path), width: 56, height: 56, fit: BoxFit.cover)
                     : Container(
                         width: 120,
@@ -211,6 +269,118 @@ class AttachmentStrip extends StatelessWidget {
     );
   }
 }
+
+/// A long paste waiting to be sent: a TXT badge with its size, and "Pasted content".
+class _PastedChip extends StatelessWidget {
+  const _PastedChip({required this.attachment});
+  final Attachment attachment;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    var size = -1;
+    try {
+      size = File(attachment.path).lengthSync();
+    } catch (_) {}
+    return Container(
+      // Wide enough for "Konten yang ditempel" on one line.
+      width: 156,
+      height: 56,
+      padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
+      decoration: BoxDecoration(
+        color: p.raised,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: p.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(Radii.sm),
+                  border: Border.all(color: p.border),
+                ),
+                child: Text(
+                  'TXT',
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: p.muted, letterSpacing: 0.4),
+                ),
+              ),
+              if (size >= 0) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    formatBytes(size),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: p.faint),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          Text(
+            tr('Pasted content'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: p.text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A long paste's preview, from its chip in the composer. Pops true for "Paste as text".
+Future<bool?> showPastedSheet(BuildContext context, String text) => showModalBottomSheet<bool>(
+  context: context,
+  isScrollControlled: true,
+  builder: (context) {
+    final p = context.palette;
+    final lines = '\n'.allMatches(text).length + 1;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(tr('Pasted content'), style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(
+              '${lines == 1 ? tr('1 line') : tr('{n} lines').replaceAll('{n}', localNumber('$lines'))} · '
+              '${formatBytes(utf8.encode(text).length)}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+            ),
+            const SizedBox(height: 12),
+            CodeBox(
+              // A preview: the start is enough to recognise it, and long text stays cheap to draw.
+              text: text.length > 6000 ? '${text.substring(0, 6000)}\n…' : text,
+              copyText: text,
+              label: pastedName,
+              language: 'text',
+              maxHeight: MediaQuery.sizeOf(context).height * 0.4,
+            ),
+            const SizedBox(height: 14),
+            Text(
+              tr('Sent with your message as a file the agent reads, so a long log or document does not fill the chat.'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(context, true),
+              icon: const Icon(LucideIcons.textCursorInput, size: 16),
+              label: Text(tr('Paste as text')),
+            ),
+          ],
+        ),
+      ),
+    );
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Approvals

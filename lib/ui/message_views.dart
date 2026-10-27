@@ -138,7 +138,7 @@ class _AttachmentFileChip extends StatelessWidget {
             const SizedBox(width: 6),
             Flexible(
               child: Text(
-                a.name,
+                a.name == pastedName ? tr('Pasted content') : a.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium,

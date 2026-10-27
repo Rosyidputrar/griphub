@@ -455,6 +455,10 @@ const _id = <String, String>{
   '1 line': '1 baris',
   '{n} lines': '{n} baris',
   'Run removed': 'Run dihapus',
+  'Pasted content': 'Konten yang ditempel',
+  'Sent with your message as a file the agent reads, so a long log or document does not fill the chat.':
+      'Dikirim bersama pesanmu sebagai file yang dibaca agent, jadi log atau dokumen panjang tidak memenuhi chat.',
+  'Paste as text': 'Tempel sebagai teks',
   "Couldn't reach the remote; showing the branches on this phone.":
       'Remote tidak terjangkau; menampilkan branch yang ada di HP ini.',
   'GitHub sign-in expired or was revoked. Sign in to GitHub again in Accounts.':
