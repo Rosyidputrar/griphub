@@ -317,6 +317,45 @@ test("server mode: host_restart when idle waits for a working subagent, then res
 	assert.ok(!existsSync(join(m.dir, ".griphub", "running")));
 });
 
+test("server mode: health says which bundle the process runs and whether a copied update is waiting to restart it", async (t) => {
+	writeFileSync(join(out, ".stamp"), "bundle-A\n");
+	t.after(() => rmSync(join(out, ".stamp"), { force: true }));
+	const m = await withModel(t);
+	const id = await startSubagent(m);
+	let h = (await m.c.call("health")).data;
+	assert.equal(h.bundleStamp, "bundle-A");
+	assert.equal(h.restartPending, false);
+	// The app's update replaces the files while the process goes on running the old ones.
+	writeFileSync(join(out, ".stamp"), "bundle-B\n");
+	assert.deepEqual((await m.c.call("host_restart", { whenIdle: true })).data, { restarting: false, pending: true });
+	h = (await m.c.call("health")).data;
+	assert.equal(h.restartPending, true, "the app can say the update is waiting for the work to end");
+	assert.equal(h.bundleStamp, "bundle-A", "what runs is still the old bundle, whatever the file on disk says");
+	writeFileSync(m.mock.MOCK_RELEASE, "");
+	await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === id);
+	assert.equal(await exited(m.d.child), 0);
+});
+
+test("server mode: at start the host puts the launcher files of its bundle where the setup script put them", async (t) => {
+	const dir = home(t);
+	const gh = join(dir, ".griphub");
+	for (const [name, target, mode] of [["box", "bin/box", 0o755], ["griphub-attach", "bin/griphub-attach", 0o755], ["Containerfile", "box/Containerfile", 0o644]]) {
+		mkdirSync(join(out, "launcher"), { recursive: true });
+		writeFileSync(join(out, "launcher", name), `#!/bin/sh\n# new ${name}\n`);
+		mkdirSync(join(gh, target.split("/")[0]), { recursive: true });
+		writeFileSync(join(gh, target), `#!/bin/sh\n# old ${name}\n`);
+		chmodSync(join(gh, target), mode);
+	}
+	t.after(() => rmSync(join(out, "launcher"), { recursive: true, force: true }));
+	const d = daemon(t, dir);
+	await started(d);
+	for (const [name, target] of [["box", "bin/box"], ["griphub-attach", "bin/griphub-attach"], ["Containerfile", "box/Containerfile"]]) {
+		assert.equal(readFileSync(join(gh, target), "utf8"), `#!/bin/sh\n# new ${name}\n`, target);
+	}
+	assert.equal(statSync(join(gh, "bin", "box")).mode & 0o777, 0o755, "still executable");
+	assert.match(d.stderr(), /launcher updated: .*bin\/box/);
+});
+
 test("server mode: SIGTERM stops a working subagent with its partial report before the daemon exits", async (t) => {
 	const m = await withModel(t);
 	const id = await startSubagent(m);
