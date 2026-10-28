@@ -1307,4 +1307,18 @@ const _id = <String, String>{
   'Connected, but the server is not set up (no griphub-attach). Run the server script on it first; the app shows the command.': 'Tersambung, tetapi server belum disiapkan (tidak ada griphub-attach). Jalankan dulu skrip server di sana; app menampilkan perintahnya.',
   'Connected, but the server answered something unexpected.': 'Tersambung, tetapi server menjawab hal yang tidak terduga.',
   'The server did not accept this app\'s key. Run the server script with this app\'s public key (the app shows the command).': 'Server tidak menerima kunci app ini. Jalankan skrip server dengan kunci publik app ini (app menampilkan perintahnya).',
+  // Files on the server (server_agent.md, phase 5)
+  'Sending files': 'Mengirim file',
+  'Uploading': 'Mengunggah',
+  "Can't display this image": 'Gambar ini tidak bisa ditampilkan',
+  'Could not open the preview': 'Pratinjau tidak bisa dibuka',
+  'The connection to the server was lost. Nothing was changed.': 'Koneksi ke server terputus. Tidak ada yang diubah.',
+  'File could not be read': 'File tidak bisa dibaca',
+  'File no longer available': 'File sudah tidak ada',
+  'File is too large to preview': 'File terlalu besar untuk dipratinjau',
+  'Preview is not available for this file type': 'Pratinjau tidak tersedia untuk jenis file ini',
+  'Preview is not available for this file': 'Pratinjau tidak tersedia untuk file ini',
+  'Type': 'Jenis',
+  'Path': 'Lokasi',
+  'Projects live in the workspace on your server. To bring in files from your phone, open a project and use Files → Import from phone.': 'Proyek disimpan di workspace di server Anda. Untuk memasukkan file dari HP, buka sebuah proyek lalu pakai Files → Impor dari HP.',
 };

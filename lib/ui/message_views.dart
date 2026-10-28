@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import '../agent/agent_fs.dart';
 import '../agent/models.dart';
 import '../agent/pricing.dart';
 import '../agent/sent_attachments.dart';
@@ -21,8 +22,11 @@ import 'theme.dart';
 import 'todo_views.dart';
 
 class UserMessageView extends StatelessWidget {
-  const UserMessageView(this.entry, {super.key, this.onLongPress});
+  const UserMessageView(this.entry, {super.key, this.onLongPress, this.fs = const LocalFs()});
   final UserEntry entry;
+
+  /// Where the attachment copies are (the agent's machine).
+  final AgentFs fs;
 
   /// The message menu, supplied by the chat; gets the bubble's own context so the menu can sit next to it.
   final void Function(BuildContext bubbleContext)? onLongPress;
@@ -45,7 +49,7 @@ class UserMessageView extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (attachments.isNotEmpty) ...[
-                  MessageAttachments(attachments: attachments),
+                  MessageAttachments(attachments: attachments, fs: fs),
                   const SizedBox(height: 8),
                 ],
                 if (text.isNotEmpty) UserBubble(text),
@@ -61,8 +65,9 @@ class UserMessageView extends StatelessWidget {
 /// Thumbnails and file chips for a sent message's attachments, shown above
 /// its bubble. Photos open full-screen; files open the attachment viewer.
 class MessageAttachments extends StatelessWidget {
-  const MessageAttachments({super.key, required this.attachments});
+  const MessageAttachments({super.key, required this.attachments, this.fs = const LocalFs()});
   final List<SentAttachment> attachments;
+  final AgentFs fs;
 
   @override
   Widget build(BuildContext context) {
@@ -81,11 +86,13 @@ class MessageAttachments extends StatelessWidget {
             children: [
               for (final a in photos)
                 GestureDetector(
-                  onTap: () => openAttachmentViewer(context, a),
+                  onTap: () => openAttachmentViewer(context, a, fs: fs),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(Radii.md),
-                    child: Image.file(
-                      File(a.path),
+                    child: AgentImage(
+                      fs: fs,
+                      path: a.path,
+                      maxBytes: AttachmentViewerScreen.maxImageBytes,
                       width: 160,
                       height: 160,
                       fit: BoxFit.cover,
@@ -106,7 +113,7 @@ class MessageAttachments extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             alignment: WrapAlignment.end,
-            children: [for (final a in files) _AttachmentFileChip(attachment: a)],
+            children: [for (final a in files) _AttachmentFileChip(attachment: a, fs: fs)],
           ),
         ],
       ],
@@ -115,15 +122,16 @@ class MessageAttachments extends StatelessWidget {
 }
 
 class _AttachmentFileChip extends StatelessWidget {
-  const _AttachmentFileChip({required this.attachment});
+  const _AttachmentFileChip({required this.attachment, required this.fs});
   final SentAttachment attachment;
+  final AgentFs fs;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     final a = attachment;
     return GestureDetector(
-      onTap: () => openAttachmentViewer(context, a),
+      onTap: () => openAttachmentViewer(context, a, fs: fs),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 240),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -191,6 +199,7 @@ class AssistantMessageView extends StatelessWidget {
     super.key,
     required this.tools,
     this.cwd,
+    this.fs = const LocalFs(),
     this.live,
     this.modelLabel,
     this.subagentCard,
@@ -202,6 +211,9 @@ class AssistantMessageView extends StatelessWidget {
 
   /// Where relative tool paths resolve, for previews.
   final String? cwd;
+
+  /// The agent's files (on the phone or a server), for previews of what a tool wrote.
+  final AgentFs fs;
 
   /// Fires as the agent streams; live previews re-render on it.
   final Listenable? live;
@@ -244,7 +256,7 @@ class AssistantMessageView extends StatelessWidget {
             card ??
                 (b.toolName == 'todo_write'
                     ? TodoCard(block: b, run: tools[b.toolCallId])
-                    : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, live: live)),
+                    : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, fs: fs, live: live)),
           );
       }
     }
@@ -754,10 +766,18 @@ class _LiveTail extends StatelessWidget {
 }
 
 class ToolCallView extends StatefulWidget {
-  const ToolCallView({super.key, required this.block, required this.run, this.cwd, this.live});
+  const ToolCallView({
+    super.key,
+    required this.block,
+    required this.run,
+    this.cwd,
+    this.fs = const LocalFs(),
+    this.live,
+  });
   final Block block;
   final ToolRun? run;
   final String? cwd;
+  final AgentFs fs;
   final Listenable? live;
 
   @override
@@ -783,7 +803,7 @@ class _ToolCallViewState extends State<ToolCallView> {
   String _htmlSource() {
     final args = widget.block.liveArgs;
     final file = _absolute(args?['path'] as String?);
-    if (widget.block.args != null && file != null) {
+    if (widget.fs.isLocal && widget.block.args != null && file != null) {
       try {
         final f = File(file);
         if (f.existsSync()) return f.readAsStringSync();
@@ -792,13 +812,22 @@ class _ToolCallViewState extends State<ToolCallView> {
     return args?['content'] as String? ?? '';
   }
 
-  void _preview(String path, {required bool writing}) {
+  Future<void> _preview(String path, {required bool writing}) async {
     final file = _absolute(path);
-    HtmlPreviewScreen.open(
+    final fs = widget.fs;
+    var source = _htmlSource;
+    // On a server the written file is read once, over the link; while it streams the preview shows what came so far.
+    if (!fs.isLocal && !writing && file != null && widget.block.args != null) {
+      final streamed = widget.block.liveArgs?['content'] as String? ?? '';
+      final html = await fs.readString(file).catchError((Object _) => streamed);
+      if (!mounted) return;
+      source = () => html;
+    }
+    await HtmlPreviewScreen.open(
       context,
       title: path.split('/').last,
-      source: _htmlSource,
-      baseDir: file == null ? null : File(file).parent.path,
+      source: source,
+      baseDir: file == null || !fs.isLocal ? null : File(file).parent.path,
       // Re-render as it streams; a finished file is static.
       live: writing ? widget.live : null,
     );

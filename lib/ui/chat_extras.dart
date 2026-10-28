@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import '../agent/features.dart';
 import '../agent/sent_attachments.dart';
 import '../agent/updater.dart' show formatBytes;
@@ -105,25 +106,40 @@ Attachment pastedAttachment(String text) {
 /// same-named attachments never overwrite each other) and returned in
 /// [files], so the sent message can show it later. Unreadable files are
 /// skipped rather than failing the send.
+///
+/// The attachments live on the phone ([Attachment.path]); the project folder is on the agent's machine ([fs]), so on
+/// a server they are uploaded ([onProgress], [cancel], and [onFile] naming the file being sent). A failed upload or a
+/// cancel throws: nothing is sent then.
 Future<({String text, List<Map<String, String>> images, List<SentAttachment> files})> preparePrompt(
   String text,
   List<Attachment> attachments,
   String cwd,
-) async {
+  AgentFs fs, {
+  Progress? onProgress,
+  CancelToken? cancel,
+  void Function(String label)? onFile,
+}) async {
   final images = <Map<String, String>>[];
   final paths = <String>[];
   final files = <SentAttachment>[];
-  final dir = Directory('$cwd/.attachments')..createSync(recursive: true);
+  final dir = '$cwd/.attachments';
   final stamp = DateTime.now().microsecondsSinceEpoch;
+  final present = [
+    for (final a in attachments)
+      if (File(a.path).existsSync()) a,
+  ];
+  if (present.isNotEmpty) await fs.mkdir(dir);
   for (var i = 0; i < attachments.length; i++) {
     final a = attachments[i];
     final file = File(a.path);
     if (!file.existsSync()) continue;
-    final target = '${dir.path}/${stamp}_${i}_${a.name}';
+    final target = '$dir/${stamp}_${i}_${a.name}';
+    cancel?.check();
+    onFile?.call(present.length > 1 ? '${a.name} · ${present.indexOf(a) + 1} ${tr('of')} ${present.length}' : a.name);
     try {
-      await file.copy(target);
-    } catch (_) {
-      continue;
+      await fs.upload(a.path, target, onProgress: onProgress, cancel: cancel);
+    } on FileSystemException {
+      continue; // unreadable on the phone
     }
     final length = _fileSize(file);
     files.add((path: target, name: a.name, mime: a.imageMime ?? a.mime, size: length));
@@ -880,12 +896,22 @@ Future<void> showProjectTools(
                     color: const Color(0xFFEC4899),
                     title: tr('Project memory'),
                     subtitle: tr('AGENTS.md: rules the agent follows in this folder'),
-                    onTap: () {
-                      final f = File(memory);
-                      if (!f.existsSync()) {
-                        f.writeAsStringSync('# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n');
+                    onTap: () async {
+                      try {
+                        if (!await agent.fs.exists(memory)) {
+                          await agent.fs.writeString(
+                            memory,
+                            '# Project notes for the agent\n\n- Stack:\n- How to run:\n- Conventions:\n',
+                          );
+                        }
+                      } catch (e) {
+                        if (sheet.mounted) {
+                          ScaffoldMessenger.of(sheet)
+                              .showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: $e')));
+                        }
+                        return;
                       }
-                      go(EditorScreen(agent: agent, path: memory));
+                      if (sheet.mounted) go(EditorScreen(agent: agent, path: memory));
                     },
                   ),
                 ],

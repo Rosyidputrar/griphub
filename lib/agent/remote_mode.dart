@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'agent_controller.dart';
+import 'agent_fs.dart';
+import 'remote_fs.dart';
 import 'remote_profile.dart';
 
 /// Which agent the app uses: the one on this phone, or the one on the user's own server. Owns the saved server, the
@@ -23,6 +25,9 @@ class RemoteMode extends ChangeNotifier {
 
   /// The agent bundle on this phone (the same files the phone's own agent runs), copied to the server by [install].
   String? hostDir;
+
+  /// The phone's own folder for files fetched from the server (to share, save or open them on the phone).
+  Directory? phoneCache;
 
   /// Whether the app is set to use the server.
   bool get active => profile?.active == true;
@@ -44,14 +49,21 @@ class RemoteMode extends ChangeNotifier {
       setup: RemoteSetup(home: home, ssh: '$bin/ssh', sshKeygen: '$bin/ssh-keygen', rsync: '$bin/rsync'),
       store: RemoteProfileStore(File('$home/.griphub/remote.json')),
       hostDir: env['GRIPHUB_FILES'] == null ? null : '${env['GRIPHUB_FILES']}/agent',
+      phoneCache: Directory('$home/.cache/griphub-remote'),
     );
   }
 
   /// Sets the pieces up by hand (the tests do this). Applies the saved choice.
-  void configure({required RemoteSetup setup, required RemoteProfileStore store, String? hostDir}) {
+  void configure({
+    required RemoteSetup setup,
+    required RemoteProfileStore store,
+    String? hostDir,
+    Directory? phoneCache,
+  }) {
     this.setup = setup;
     this.store = store;
     this.hostDir = hostDir;
+    this.phoneCache = phoneCache ?? Directory('${setup.home}/.cache/griphub-remote');
     profile = store.load();
     _apply();
     notifyListeners();
@@ -150,6 +162,13 @@ class RemoteMode extends ChangeNotifier {
   void _apply() {
     final p = profile;
     final s = setup;
-    agent.client.remote = p != null && p.active && s != null ? s.launch(p, env: env) : null;
+    final client = agent.client;
+    if (p != null && p.active && s != null) {
+      client.remote = s.launch(p, env: env);
+      agent.fs = RemoteFs(client.call, phoneCache: phoneCache!, waitOnline: client.whenConnected);
+    } else {
+      client.remote = null;
+      agent.fs = const LocalFs();
+    }
   }
 }

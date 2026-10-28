@@ -1,6 +1,6 @@
 # server_agent.md — GripHub: agent berjalan di VPS (porting dari CoderRa)
 
-Status: fase 1–4 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 5–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
+Status: fase 1–5 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 6–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
 (`seseegy/coderra` 5071362, dokumen `update_agent.md` plus kodenya). Mode server CoderRa sudah dipakai pemilik di
 VPS sungguhan dan berjalan baik. Yang diambil hanya **cara kerja server**; fitur agent tetap milik GripHub karena lebih
 maju (subagent asinkron, billing GripHub Router, approval, todo, GitHub sync, Cloudflare).
@@ -246,6 +246,36 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
   `RemoteMode` (4), layar (18), golden (9). Model tiruan lewat preload `fetch` (`agent/test/fixtures/router-redirect.mjs`),
   kunci provider tidak dilonggarkan. Di CI wajib jalan (`GRIPHUB_REQUIRE_NODE_SIDE=1`).
 - Belum: Kotlin dan ssh/rsync bawaan app di HP sungguhan (diuji di fase 7).
+
+### 4.14 Dikerjakan di fase 5
+
+- `agent_fs.dart` (`AgentFs`, `LocalFs`) dan `remote_fs.dart` (`RemoteFs` lewat `fs_*`: potongan base64, unggah bertahap
+  dengan staging, lanjut setelah koneksi putus lewat `waitOnline`, batal, cache HP untuk `toPhoneFile`) diambil dari
+  CoderRa. `agent.fs` diganti oleh `RemoteMode` saat server dipakai. Dialog transfer (`transfer_dialog.dart`) dengan
+  progres dan batal.
+- Layar lewat `agent.fs`: Files (impor = unggah, bagikan/simpan = unduh dulu, gambar dari bytes), editor, pemilih folder
+  (di server hanya workspace server, breadcrumb `server`), chat baru, quick start, skill, memori proyek (`AGENTS.md`),
+  saran folder deploy Cloudflare, pratinjau kartu HTML (file dibaca sekali lewat link; aset relatif menyusul di fase 6).
+- Editor tetap memakai desain GripHub: bytes terakhir yang dibaca/ditulis dibandingkan dengan file sebelum menyimpan
+  (bukan cek `mtime` CoderRa); dialog "File berubah di disk" dengan Batal / Muat ulang / Timpa; CRLF tetap terjaga.
+- Lampiran (4.6): `preparePrompt` mengunggah setiap lampiran ke `.attachments` di mesin agent (nama unik
+  `<waktu>_<indeks>_<nama>`), dengan dialog progres saat agent di server; gagal atau batal = pesan tidak terkirim dan
+  lampiran tetap di kolom. Gambar tetap base64 di prompt. Viewer lampiran dan thumbnail di pesan membaca lewat
+  `agent.fs` (gambar diambil ke cache HP sekali, dipakai ulang selama tidak berubah).
+- Pembuat gambar: riwayat gambar tetap di folder agent **HP** walau agent di server, karena gambar hanya disimpan dan
+  dibagikan dari HP (rencana awal "simpan lewat `fs.write` di VPS" ternyata tidak cocok: layar ini tidak menyimpan ke
+  workspace).
+- Ditemukan dan diperbaiki (sudah ada di GripHub sebelumnya): di pemilih folder, mengetuk folder dan "Tampilkan folder
+  tersembunyi" tidak memuat ulang daftar; controller teks dialog "Folder baru" dibuang saat dialog masih beranimasi; editor
+  memanggil `setState` saat build ketika `CodeEditor` muncul lagi setelah muat ulang. Dari konversi: link ke folder sempat
+  ikut terdaftar di pemilih folder.
+- Test: kontrak `AgentFs` untuk `LocalFs` dan `RemoteFs` melawan `fs.ts` asli lewat `agent/test/harness/fs_server.ts`
+  (dibangun oleh `build-harness.mjs`), transfer melewati koneksi yang benar-benar diputus, dialog transfer (total 92).
+  Suite layar (Files, pemilih folder, editor termasuk konflik, lampiran, chat baru, viewer lampiran, thumbnail, memori
+  proyek, skill) dijalankan dua kali: `LocalFs` (34) dan `RemoteFs` ke daemon asli lewat attach (36; tiap test wajib
+  memanggil `fs_*`). Golden dialog transfer dan pemilih folder server (6). Test CoderRa untuk fitur yang tidak ada di
+  GripHub (hapus proyek dari pemilih folder, dialog konflik versi CoderRa) tidak dibawa. Mutasi: 5 dari 6 tertangkap;
+  cek keberadaan `AGENTS.md` lewat disk HP tidak teramati karena di test "server" memakai disk yang sama.
 
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 

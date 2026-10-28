@@ -84,8 +84,10 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
 
   AgentController get agent => widget.agent;
 
+  /// Where the history of made pictures is kept: the phone's own agent folder. The pictures are only saved and shared
+  /// from the phone, so with the agent on a server they stay here too (the server's folder is not on this phone).
   String? get _agentDir {
-    final d = agent.info['agentDir'];
+    final d = agent.client.isRemote ? agent.remote.env['PI_CODING_AGENT_DIR'] : agent.info['agentDir'];
     return d is String && d.isNotEmpty ? d : null;
   }
 

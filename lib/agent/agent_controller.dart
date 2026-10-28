@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
+import 'agent_fs.dart';
 import 'features.dart';
 import 'integrations.dart';
 import 'models.dart';
@@ -30,6 +31,9 @@ class AgentController extends ChangeNotifier {
 
   /// The server agent, when the user set one up (server_agent.md). The phone's own agent otherwise.
   late final remote = RemoteMode(this);
+
+  /// The files the agent works on: this phone's, or the server's over the link ([RemoteMode] sets it).
+  AgentFs fs = const LocalFs();
 
   BootStatus status = BootStatus.starting;
   String? bootError;
