@@ -465,6 +465,11 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 	const set = await m.c.call("settings_set", { settings: { notify: { enabled: true, url: `http://127.0.0.1:${ntfy.address().port}`, topic } } });
 	assert.equal(set.ok, true, set.error);
 
+	// The test button: goes out although the app is open.
+	assert.deepEqual((await m.c.call("notify_test")).data, { ok: true });
+	assert.deepEqual(pushes.map((p) => [p.url, p.title]), [[`/${topic}`, "Test notification"]]);
+	pushes.length = 0;
+
 	// The app is open: no push.
 	const first = await startSubagent(m);
 	writeFileSync(m.mock.MOCK_RELEASE, "");

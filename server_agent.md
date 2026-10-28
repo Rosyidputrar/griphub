@@ -398,6 +398,36 @@ keluarnya.
   gagal boot: alasan, Detail, coba lagi otomatis dan Coba sekarang); `Msg` di `classify` dan `SetupCodeError`; golden:
   langkah 3–5, dialog beralih saat sibuk, layar gagal boot, layar setup.
 
+### 4.20 Merapikan (review UI/UX, kelompok 3 bagian A)
+
+- **Layar Agent server**: pill status di bawah judul (judul tidak terpotong di 320dp), "Menyambung…" saat pertama
+  menyambung. Kartu kesehatan berupa tabel dua kolom dengan angka sesuai bahasa (57,0 GB dari 100,0 GB, 26 j 3 mnt),
+  baris Versi agent (Sudah terbaru / versi lebih baru ada di app ini), peringatan memori (`memory.level`), baris Box.
+- **ntfy**: topik acak sudah terisi sebelum disimpan; setelah disimpan ada **Kirim notifikasi uji** (perintah host
+  `notify_test`, `Notifier.test()`: terkirim walau app terbuka dan di luar batas frekuensi, alasan gagal: mati,
+  pengaturan, status HTTP, jaringan) dan **Buka di ntfy** (`ntfy://host/topik`, jatuh ke web bila app ntfy tidak ada).
+- **Lupakan server**: menyebut agent di server tetap berjalan (jadwal, notifikasi), app kembali ke agent HP, menyambung
+  lagi berarti menjalankan ulang perintah setup; tombol menyalin perintah penghapusan dari `server/README.md`.
+- **Chip koneksi** pendek (ikon + "Server", "…", "Offline"; keadaan lengkap di tooltip), tombol banner "Coba", detik
+  dalam bahasa app. Golden memakai app bar seramai chat sungguhan (chip + tiga tombol).
+- **Dialog transfer**: saat koneksi server putus menampilkan "Menunggu koneksi ke server… (lanjut sendiri)" (barrier
+  modal menutupi banner chat).
+- **Pemilih folder**: spinner saat memuat, error dengan **Coba lagi** (bukan "Tidak ada folder di sini").
+- **Banner dev server**: `server:5173` di mode server, spinner saat port diteruskan, petunjuk `--host 127.0.0.1` bila
+  gagal.
+- **Backup**: "Backup dibuat di server · n file" dan **Unduh ke HP ini** sebagai tombol utama; path terakhir disimpan
+  per mode; konfirmasi pulihkan menyebut "di server".
+- **Editor**: "File diubah di server" di mode server, Muat ulang ikut merah, **Salin editan saya** sebelum memilih.
+- **Pengaturan**: baris "Agent: HP ini / server Anda" di atas (ke layar Agent server), entri "Agent di VPS / server",
+  baris box tetap box selagi status belum datang, status container dimuat ulang setelah kembali dari layar lain. Bug
+  ikut diperbaiki: membuka Pengaturan saat server tak terjangkau melempar error null-check.
+- **Istilah**: Tersambung (bukan Terhubung), Berjalan, Sisa disk, tidak aktif, kode setup, file (bukan berkas),
+  File → Impor dari HP.
+- Test: `Notifier.test` dan `notify_test` lewat ntfy tiruan; widget: chip/tooltip, tabel kesehatan EN/ID, topik terisi
+  dan uji notifikasi, dialog Lupakan dan salin perintah, transfer menunggu koneksi, pemilih folder gagal lalu coba lagi
+  (HP dan server), label dev server, backup server, salin editan (HP dan server), Pengaturan di HP/server; golden
+  diperbarui (kesehatan, banner, dialog editor, pemilih folder, setup).
+
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 
 | Layar | Pemakaian `dart:io` | Perubahan |

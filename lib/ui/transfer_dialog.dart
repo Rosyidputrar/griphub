@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../agent/agent_client.dart';
@@ -33,11 +34,14 @@ String _size(int bytes) {
 /// Runs [task], a transfer between the phone and a server, with a dialog that shows how far it is and lets the user stop
 /// it. Returns the task's result, or null if it was stopped or failed (a failure is shown in a message). With [show]
 /// false (files on the phone itself, which copy at once) there is no dialog, but errors are still reported the same way.
+/// With [connection] (the server link) the dialog says when it is waiting for the link to come back, rather than
+/// looking stuck: the transfer carries on by itself once it does.
 Future<T?> runTransfer<T>(
   BuildContext context, {
   required String title,
   required Future<T> Function(TransferHandle handle) task,
   bool show = true,
+  ValueListenable<Connection>? connection,
 }) async {
   final handle = TransferHandle._(CancelToken());
   final navigator = Navigator.of(context, rootNavigator: true);
@@ -50,7 +54,7 @@ Future<T?> runTransfer<T>(
         context: context,
         barrierDismissible: false,
         useRootNavigator: true,
-        builder: (_) => _TransferDialog(title: title, handle: handle),
+        builder: (_) => _TransferDialog(title: title, handle: handle, connection: connection),
       ).whenComplete(() => dialogOpen = false),
     );
   }
@@ -81,10 +85,11 @@ Future<T?> runTransfer<T>(
 }
 
 class _TransferDialog extends StatelessWidget {
-  const _TransferDialog({required this.title, required this.handle});
+  const _TransferDialog({required this.title, required this.handle, this.connection});
 
   final String title;
   final TransferHandle handle;
+  final ValueListenable<Connection>? connection;
 
   @override
   Widget build(BuildContext context) {
@@ -94,10 +99,12 @@ class _TransferDialog extends StatelessWidget {
       child: AlertDialog(
         title: Text(title),
         content: ListenableBuilder(
-          listenable: Listenable.merge([handle._progress, handle._label, handle.cancel]),
+          listenable: Listenable.merge([handle._progress, handle._label, handle.cancel, ?connection]),
           builder: (context, _) {
             final v = handle._progress.value;
             final known = v.total > 0;
+            // The modal barrier hides the chat's reconnect banner, so the dialog says it itself.
+            final waiting = connection != null && !connection!.value.connected && !handle.cancel.cancelled;
             return Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -108,18 +115,21 @@ class _TransferDialog extends StatelessWidget {
                     child: Text(handle._label.value, maxLines: 1, overflow: TextOverflow.ellipsis),
                   ),
                 LinearProgressIndicator(
-                  value: known ? v.done / v.total : null,
+                  value: known && !waiting ? v.done / v.total : null,
                   minHeight: 4,
                   borderRadius: BorderRadius.circular(2),
+                  color: waiting ? p.warning : null,
                 ),
                 const SizedBox(height: 8),
                 Text(
                   handle.cancel.cancelled
                       ? tr('Stopping…')
+                      : waiting
+                      ? tr('Waiting for the server connection… (continues on its own)')
                       : known
                       ? '${_size(v.done)} ${tr('of')} ${_size(v.total)} · ${v.done * 100 ~/ v.total}%'
                       : tr('Starting…'),
-                  style: TextStyle(fontSize: 12.5, color: p.muted),
+                  style: TextStyle(fontSize: 12.5, color: waiting ? p.warning : p.muted),
                 ),
               ],
             );

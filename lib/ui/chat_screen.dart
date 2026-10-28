@@ -209,6 +209,7 @@ class _ChatScreenState extends State<ChatScreen> {
       // and its files then stay where they are, to try again).
       final prompt = await runTransfer(
         context,
+        connection: widget.agent.client.connection,
         title: tr('Sending files'),
         show: !agent.fs.isLocal,
         task: (h) => preparePrompt(

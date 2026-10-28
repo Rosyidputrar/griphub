@@ -59,18 +59,7 @@ export class Notifier {
 			if (last !== undefined && now - last < (this.o.minIntervalMs ?? 60_000)) return false;
 			this.lastSent.set(kind, now);
 
-			const headers: Record<string, string> = {
-				// Header values are plain ASCII.
-				Title: title.replace(/[^\x20-\x7e]/g, "?"),
-				Priority: String(options.priority ?? 3),
-			};
-			if (options.tags?.length) headers.Tags = options.tags.join(",");
-			const res = await (this.o.fetch ?? fetch)(`${config.url.replace(/\/+$/, "")}/${encodeURIComponent(config.topic)}`, {
-				method: "POST",
-				headers,
-				body: options.message ?? "Open GripHub to see.",
-				signal: AbortSignal.timeout(5000),
-			});
+			const res = await this.post(config, title, options);
 			if (!res.ok) {
 				this.o.log?.(`ntfy answered ${res.status}`);
 				return false;
@@ -80,5 +69,38 @@ export class Notifier {
 			this.o.log?.(`could not send a notification: ${(e as Error).message}`);
 			return false;
 		}
+	}
+
+	/**
+	 * Sends a test push now, with the app open (that is when someone presses the button) and outside the rate limit.
+	 * Says why when it does not go out: `off` (not set up or switched off), `config` (with the reason), `http` (the ntfy
+	 * server's status), or `network`.
+	 */
+	async test(): Promise<{ ok: true } | { ok: false; reason: "off" | "config" | "http" | "network"; detail?: string }> {
+		const config = this.o.config();
+		if (!config) return { ok: false, reason: "off" };
+		const bad = checkConfig(config);
+		if (bad) return { ok: false, reason: "config", detail: bad };
+		try {
+			const res = await this.post(config, "Test notification", { tags: ["bell"], message: "Notifications from GripHub arrive on this phone." });
+			return res.ok ? { ok: true } : { ok: false, reason: "http", detail: String(res.status) };
+		} catch (e) {
+			return { ok: false, reason: "network", detail: (e as Error).message };
+		}
+	}
+
+	private post(config: NotifyConfig, title: string, options: SendOptions) {
+		const headers: Record<string, string> = {
+			// Header values are plain ASCII.
+			Title: title.replace(/[^\x20-\x7e]/g, "?"),
+			Priority: String(options.priority ?? 3),
+		};
+		if (options.tags?.length) headers.Tags = options.tags.join(",");
+		return (this.o.fetch ?? fetch)(`${config.url.replace(/\/+$/, "")}/${encodeURIComponent(config.topic)}`, {
+			method: "POST",
+			headers,
+			body: options.message ?? "Open GripHub to see.",
+			signal: AbortSignal.timeout(5000),
+		});
 	}
 }

@@ -87,7 +87,7 @@ Future<void> openDevServer(
   String localUrl, {
   UrlOpener? opener,
 }) async {
-  final title = 'localhost:$port';
+  final title = agent.client.isRemote ? 'server:$port' : 'localhost:$port';
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
     final url = agent.client.isRemote ? await agent.remote.devServerUrl(port) : localUrl;
@@ -95,7 +95,13 @@ Future<void> openDevServer(
     await (opener ?? _openInPreview)(context, title, url);
   } catch (e) {
     messenger?.showSnackBar(
-      SnackBar(content: Text('${tr('Could not reach port {port} on the server').replaceAll('{port}', '$port')}: $e')),
+      SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Text(
+          '${tr('Could not reach port {port} on the server').replaceAll('{port}', '$port')}: $e\n'
+          '${tr('Make sure the dev server listens on 127.0.0.1 (for example --host 127.0.0.1).')}',
+        ),
+      ),
     );
   }
 }

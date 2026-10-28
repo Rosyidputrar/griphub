@@ -130,9 +130,15 @@ void main() {
         tester,
         look,
         Scaffold(
+          // As crowded as the chat's real bar: the chip next to its three buttons, on a narrow phone too.
           appBar: AppBar(
             title: const Text('Chat'),
-            actions: [ConnectionChip(agent: agent)],
+            actions: [
+              ConnectionChip(agent: agent),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.history)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.add_comment_outlined)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert)),
+            ],
           ),
           body: Column(
             children: [
@@ -159,9 +165,15 @@ void main() {
         tester,
         look,
         Scaffold(
+          // As crowded as the chat's real bar: the chip next to its three buttons, on a narrow phone too.
           appBar: AppBar(
             title: const Text('Chat'),
-            actions: [ConnectionChip(agent: agent)],
+            actions: [
+              ConnectionChip(agent: agent),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.history)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.add_comment_outlined)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert)),
+            ],
           ),
           body: Column(
             children: [

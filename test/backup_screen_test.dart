@@ -97,6 +97,7 @@ void main() {
     await tester.tap(find.text('Create backup'));
     await until(tester, () => find.text('Download to this phone').evaluate().isNotEmpty, 'the backup');
     expect(field(tester), startsWith('${r.workspace}/backups/'), reason: 'made on the server');
+    expect(find.textContaining('Backup made on the server · '), findsOneWidget, reason: 'says where the zip is');
 
     await tester.tap(find.text('Download to this phone'));
     await until(tester, () => platform.any((c) => c.method == 'saveToDownloads'), 'the download to finish');
@@ -131,6 +132,7 @@ void main() {
     await tester.tap(find.widgetWithText(PrimaryButton, 'Restore'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    expect(find.textContaining('project memory on the server are overwritten'), findsOneWidget);
     await tester.tap(find.widgetWithText(TextButton, 'Restore'));
     await until(tester, () => shown('Restored 2 files'), 'the restore');
     expect(File('${r.workspace}/proj/restored.txt').readAsStringSync(), 'from the phone');

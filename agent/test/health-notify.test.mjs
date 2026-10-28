@@ -231,3 +231,24 @@ test("it really posts over HTTP", async (t) => {
 	assert.equal(got[0].headers.priority, "4");
 	assert.equal(got[0].body, "Open GripHub to see.");
 });
+
+test("a test push goes out with the app open and outside the rate limit, and says why when it cannot", async () => {
+	const away = { value: false };
+	const { n, calls } = notifier({ away });
+	assert.equal(await n.send("x", "Agent finished"), false, "someone is looking: a normal push waits");
+	assert.deepEqual(await n.test(), { ok: true });
+	assert.deepEqual(await n.test(), { ok: true }, "pressing it twice is fine");
+	assert.equal(calls.length, 2);
+	assert.equal(calls[0].init.headers.Title, "Test notification");
+	assert.equal(calls[0].init.body, "Notifications from GripHub arrive on this phone.");
+
+	assert.deepEqual(await notifier({ config: () => null }).n.test(), { ok: false, reason: "off" });
+	const bad = await notifier({ config: () => ({ url: "ftp://x", topic: "griphub-0123456789" }) }).n.test();
+	assert.equal(bad.reason, "config");
+	assert.match(bad.detail, /https:\/\//);
+	const refused = await notifier({ fetchImpl: async () => new Response("no", { status: 403 }) }).n.test();
+	assert.deepEqual(refused, { ok: false, reason: "http", detail: "403" });
+	const down = await notifier({ fetchImpl: async () => { throw new Error("getaddrinfo ENOTFOUND ntfy.example"); } }).n.test();
+	assert.equal(down.reason, "network");
+	assert.match(down.detail, /ENOTFOUND/);
+});

@@ -6,6 +6,7 @@ import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/msg.dart';
 import 'package:griphub_agent/agent/remote_profile.dart';
+import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/kit.dart';
 import 'package:griphub_agent/ui/server_screen.dart';
 import 'package:griphub_agent/ui/theme.dart';
@@ -133,9 +134,13 @@ void main() {
       await tester.pump();
       expect(find.text('Server'), findsOneWidget);
 
+      expect(find.byTooltip('Connected to the server'), findsOneWidget);
+
       link.value = const Connection(LinkState.reconnecting, attempt: 2);
       await tester.pump();
-      expect(find.text('Reconnecting'), findsOneWidget);
+      // Short in the bar; the whole state is in the tooltip and the banner.
+      expect(find.text('…'), findsOneWidget);
+      expect(find.byTooltip('Reconnecting to the server'), findsOneWidget);
 
       link.value = const Connection(LinkState.offline);
       await tester.pump();
@@ -166,7 +171,7 @@ void main() {
       expect(find.textContaining('Reconnecting to the server'), findsOneWidget);
       expect(find.textContaining('Connection timed out'), findsOneWidget);
       expect(find.text('The agent keeps working on the server.'), findsOneWidget);
-      expect(find.text('Retry now'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
       await tester.pumpWidget(const SizedBox()); // stop the countdown timer
     });
 
@@ -580,6 +585,22 @@ void main() {
     });
   });
 
+  group('DevServerBanner', () {
+    testWidgets('names a server\'s port as the server\'s', (tester) async {
+      configure(saved: true, active: true);
+      agent.features.devServers[5173] = 'http://localhost:5173';
+      await show(tester, DevServerBanner(agent: agent));
+      expect(find.text('server:5173'), findsOneWidget);
+    });
+
+    testWidgets('and a port on this phone as localhost', (tester) async {
+      configure(saved: true);
+      agent.features.devServers[5173] = 'http://localhost:5173';
+      await show(tester, DevServerBanner(agent: agent));
+      expect(find.text('localhost:5173'), findsOneWidget);
+    });
+  });
+
   group('ServerBootFailed', () {
     testWidgets('opening the app on a server it cannot reach: why in plain words, and it tries again by itself', (
       tester,
@@ -674,25 +695,82 @@ void main() {
       expect(find.text('Your server runs the agent'), findsOneWidget);
       expect(find.text('Connected'), findsOneWidget);
       expect(find.text('Server health'), findsOneWidget);
-      expect(find.text('Disk free  12.5 GB / 50.0 GB'), findsOneWidget);
-      expect(find.text('Agent memory  0.3 GB'), findsOneWidget);
-      expect(find.text('Running  1 · queued 2'), findsOneWidget);
-      expect(find.text('Up for  2 h 5 min'), findsOneWidget);
-      expect(find.text('Subagents  working'), findsOneWidget);
+      // A table: each value beside its name.
+      expect(find.text('Disk free'), findsOneWidget);
+      expect(find.text('12.5 GB of 50.0 GB'), findsOneWidget);
+      expect(find.text('0.3 GB'), findsOneWidget);
+      expect(find.text('1 · queued 2'), findsOneWidget);
+      expect(find.text('2 h 5 min'), findsOneWidget);
+      expect(find.text('working'), findsOneWidget);
       expect(find.textContaining('almost full'), findsNothing);
     });
 
     testWidgets('says where the agent\'s commands run', (tester) async {
       await openConnected(tester, box: {'available': true, 'installed': true, 'enabled': true});
-      expect(find.text('Box  ready · commands run inside it'), findsOneWidget);
+      expect(find.text('ready · commands run inside it'), findsOneWidget);
       expect(find.text('Build the box'), findsNothing);
     });
 
     testWidgets('a box that is not built is a problem with a way out', (tester) async {
       await openConnected(tester, box: {'available': true, 'installed': false, 'enabled': true});
-      expect(find.text('Box  not built · commands are refused'), findsOneWidget);
+      expect(find.text('not built · commands are refused'), findsOneWidget);
       expect(find.text('The agent cannot run commands until the box is built.'), findsOneWidget);
       expect(find.text('Build the box'), findsOneWidget);
+    });
+
+    testWidgets('in Indonesian the numbers use a decimal comma', (tester) async {
+      Appearance.instance.language = 'id';
+      addTearDown(() => Appearance.instance.language = 'en');
+      await openConnected(tester);
+      expect(find.text('12,5 GB dari 50,0 GB'), findsOneWidget);
+      expect(find.text('2 j 5 mnt'), findsOneWidget);
+    });
+
+    testWidgets('a topic is ready before anything is set up, and a saved one can be tested', (tester) async {
+      await openConnected(tester);
+      final field = tester.widget<TextField>(find.widgetWithText(TextField, 'Topic (keep it secret)'));
+      expect(field.controller!.text, matches(RegExp(r'^griphub-[0-9a-f]{32}$')), reason: 'Save is the only step');
+      expect(find.text('Send a test notification'), findsNothing, reason: 'nothing saved yet');
+
+      await tester.ensureVisible(find.text('Save'));
+      await tester.tap(find.text('Save'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+      backend.onCommand = (c) => switch (c['type']) {
+        'notify_test' => {'ok': false, 'reason': 'http', 'detail': '403'},
+        'settings_get' => {'notify': notify},
+        _ => null,
+      };
+      await tester.ensureVisible(find.text('Send a test notification'));
+      await tester.tap(find.text('Send a test notification'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+      expect(backend.sent.where((c) => c['type'] == 'notify_test'), hasLength(1));
+      expect(find.text('The ntfy server refused it (status 403).'), findsOneWidget);
+      expect(find.text('Open in ntfy'), findsOneWidget);
+    });
+
+    testWidgets('forgetting says the agent keeps running there, and gives the commands to remove it', (tester) async {
+      String? clipboard;
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') clipboard = (call.arguments as Map)['text'] as String?;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      await openConnected(tester);
+      await tester.ensureVisible(find.text('Forget this server'));
+      await tester.tap(find.text('Forget this server'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('keeps running, with its schedules and notifications'), findsOneWidget);
+      await tester.tap(find.text('Copy the commands that remove it from the server'));
+      await tester.pump();
+      expect(clipboard, contains('userdel -r griphub'));
+      expect(clipboard, contains('systemctl --user disable --now griphub-hostd'));
+      await tester.tap(find.text('Cancel'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(store.load(), isNotNull);
     });
 
     testWidgets('warns when the disk is getting full', (tester) async {

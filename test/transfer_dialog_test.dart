@@ -59,6 +59,37 @@ void main() {
     expect(find.text('Sending files'), findsNothing);
   });
 
+  testWidgets('while the server link is down it says it waits for it, and carries on when it is back', (tester) async {
+    await host(tester);
+    final link = ValueNotifier(const Connection(LinkState.connected));
+    final release = Completer<void>();
+    final done = runTransfer<String>(
+      context,
+      title: 'Sending files',
+      connection: link,
+      task: (h) async {
+        h.onProgress(1024 * 1024, 4 * 1024 * 1024);
+        await release.future;
+        return 'ok';
+      },
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('1.0 MB of 4.0 MB · 25%'), findsOneWidget);
+
+    link.value = const Connection(LinkState.reconnecting, attempt: 1);
+    await tester.pump();
+    expect(find.text('Waiting for the server connection… (continues on its own)'), findsOneWidget);
+    expect(tester.widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator)).value, isNull);
+
+    link.value = const Connection(LinkState.connected);
+    await tester.pump();
+    expect(find.text('1.0 MB of 4.0 MB · 25%'), findsOneWidget);
+    release.complete();
+    expect(await done, 'ok');
+    await tester.pump(const Duration(milliseconds: 400));
+  });
+
   testWidgets('Cancel stops the transfer: the task sees it, nothing is reported as an error, the result is null', (
     tester,
   ) async {

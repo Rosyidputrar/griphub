@@ -1534,6 +1534,10 @@ async function handle(cmd: Command): Promise<unknown> {
 			};
 		}
 		// App settings: DNS, search keys, approvals, fallbacks, budget.
+		// Settings > Server agent > Send a test notification: goes out even with the app open.
+		case "notify_test":
+			if (!server) throw new Error("Notifications through ntfy are for a server agent.");
+			return notifier.test();
 		case "settings_get":
 			return integrations.publicSettings();
 		case "settings_set": {

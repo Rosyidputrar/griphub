@@ -262,26 +262,53 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     }
   }
 
-  /// The file changed on disk since it was opened (usually the agent wrote it).
-  Future<String?> _confirmOverwrite() => showDialog<String>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(tr('File changed on disk')),
-      content: Text(
-        tr('{name} was changed outside the editor, probably by the agent. Overwrite replaces those changes with yours; Reload drops your edits and shows the new file.')
-            .replaceAll('{name}', _name),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
-        TextButton(onPressed: () => Navigator.pop(ctx, 'reload'), child: Text(tr('Reload'))),
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, 'overwrite'),
-          style: TextButton.styleFrom(foregroundColor: context.palette.danger),
-          child: Text(tr('Overwrite')),
+  /// The file changed on disk since it was opened (usually the agent wrote it). Both ways out lose something (Reload my
+  /// edits, Overwrite the other changes), so both are red, and my edits can be copied first.
+  Future<String?> _confirmOverwrite() {
+    var copied = false;
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          // On a server "disk" would read as this phone's.
+          title: Text(_fs.isLocal ? tr('File changed on disk') : tr('File changed on the server')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr('{name} was changed outside the editor, probably by the agent. Overwrite replaces those changes with yours; Reload drops your edits and shows the new file.')
+                    .replaceAll('{name}', _name),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                icon: Icon(copied ? LucideIcons.check : LucideIcons.copy, size: 16),
+                label: Text(copied ? tr('Copied') : tr('Copy my edits')),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: _controller.text));
+                  setDialog(() => copied = true);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text(tr('Cancel'))),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'reload'),
+              style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+              child: Text(tr('Reload')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, 'overwrite'),
+              style: TextButton.styleFrom(foregroundColor: context.palette.danger),
+              child: Text(tr('Overwrite')),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   Future<void> _confirmLeave() async {
     final choice = await showDialog<String>(

@@ -38,23 +38,35 @@ class ConnectionChip extends StatelessWidget {
         final p = context.palette;
         final server = agent.remote.active;
         final c = agent.client.connection.value;
+        // Short, so the chat's title and buttons keep their room on a narrow phone; the whole state is in the tooltip
+        // and, while the link is down, in the banner under the bar.
         final label = !server
             ? tr('Phone')
             : switch (c.state) {
                 LinkState.connected => tr('Server'),
-                LinkState.connecting || LinkState.reconnecting => tr('Reconnecting'),
+                LinkState.connecting || LinkState.reconnecting => '…',
                 LinkState.offline => tr('Offline'),
+              };
+        final full = !server
+            ? tr('The agent on this phone')
+            : switch (c.state) {
+                LinkState.connected => tr('Connected to the server'),
+                LinkState.connecting => tr('Connecting to the server…'),
+                LinkState.reconnecting => tr('Reconnecting to the server'),
+                LinkState.offline => tr('Not connected to the server'),
               };
         return Padding(
           padding: const EdgeInsets.only(right: 4),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(99),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
-            child: Pill(
-              label,
-              color: server ? _stateColor(p, c) : p.muted,
-              dot: true,
-              icon: server ? LucideIcons.server : LucideIcons.smartphone,
+          child: Tooltip(
+            message: full,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(99),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
+              child: Pill(
+                label,
+                color: server ? _stateColor(p, c) : p.muted,
+                icon: server ? LucideIcons.server : LucideIcons.smartphone,
+              ),
             ),
           ),
         );
@@ -112,8 +124,8 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
         } else {
           title = c.attempt <= 1 && wait == null
               ? tr('Connecting to the server…')
-              : '${tr('Reconnecting to the server')}${wait != null && wait.inSeconds > 0 ? ' · ${wait.inSeconds} s' : '…'}';
-          action = tr('Retry now');
+              : '${tr('Reconnecting to the server')}${wait != null && wait.inSeconds > 0 ? ' · ${tr('{n} s').replaceAll('{n}', '${wait.inSeconds}')}' : '…'}';
+          action = tr('Retry');
         }
         return Material(
           color: color.withValues(alpha: 0.12),
@@ -433,7 +445,8 @@ class _ServerScreenState extends State<ServerScreen> {
       if (!mounted) return;
       setState(() {
         health = h;
-        topic.text = s.notifyTopic ?? '';
+        // Not set up yet: a fresh secret topic is ready, so Save is the only step.
+        topic.text = s.notifyTopic ?? (topic.text.isEmpty ? _newTopic() : topic.text);
         ntfyUrl.text = s.notifyUrl;
       });
     } catch (_) {}
@@ -573,8 +586,32 @@ class _ServerScreenState extends State<ServerScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Forget this server?')),
-        content: Text(
-          tr('The app deletes its key for the server and the saved address. Nothing on the server is touched.'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr('The app deletes its key for the server and the saved address. Nothing on the server is touched.'),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                tr(
+                  'The agent on the server keeps running, with its schedules and notifications, and the app goes back to the agent on this phone. To connect again, run the setup command on the server again.',
+                ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                  icon: const Icon(LucideIcons.copy, size: 16),
+                  label: Text(tr('Copy the commands that remove it from the server')),
+                  onPressed: () => _copy(removeCommands, tr('removal commands')),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
@@ -604,6 +641,53 @@ class _ServerScreenState extends State<ServerScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     }
     if (mounted) setState(() {});
+  }
+
+  /// What server/README.md ("Menghapus") says to run as root to take the agent off the server: everything of it goes,
+  /// chats and the workspace too.
+  static const removeCommands =
+      '# Removes the GripHub agent and everything of it (chats, ~/workspace, the box). Make a backup first.\n'
+      'runuser -u griphub -- env XDG_RUNTIME_DIR=/run/user/\$(id -u griphub) systemctl --user disable --now griphub-hostd\n'
+      'loginctl disable-linger griphub\n'
+      'userdel -r griphub\n';
+
+  bool _testingNotify = false;
+
+  Future<void> _testNotify() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _testingNotify = true);
+    String said;
+    try {
+      final r = (await agent.client.call<Map>('notify_test')).cast<String, dynamic>();
+      final detail = r['detail'] as String?;
+      said = switch (r['ok'] == true ? 'ok' : r['reason']) {
+        'ok' => tr('Sent. It should arrive in a few seconds; if not, check the topic in the ntfy app.'),
+        'off' => tr('Notifications are off. Save the topic first.'),
+        'config' => '${tr('The settings are not usable:')} ${tr(detail ?? '')}',
+        'http' => tr('The ntfy server refused it (status {status}).').replaceAll('{status}', detail ?? '?'),
+        _ => '${tr('The server could not reach ntfy:')} ${detail ?? ''}',
+      };
+    } on AgentError catch (e) {
+      said = tr(e.message);
+    }
+    if (!mounted) return;
+    setState(() => _testingNotify = false);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(said)));
+  }
+
+  /// Opens the topic in the ntfy app (subscribing to it there), or on the web without the app.
+  Future<void> _openNtfy() async {
+    final base = Uri.tryParse(ntfyUrl.text.trim());
+    final t = topic.text.trim();
+    if (base == null || t.isEmpty) return;
+    final host = base.host.isEmpty ? 'ntfy.sh' : base.host;
+    try {
+      await agent.client.openUrl('ntfy://$host/$t');
+    } catch (_) {
+      await agent.client.openUrl('${ntfyUrl.text.trim().replaceAll(RegExp(r'/+$'), '')}/$t');
+    }
   }
 
   static String _newTopic() {
@@ -671,19 +755,23 @@ class _ServerScreenState extends State<ServerScreen> {
                                 : tr('Set up a server to let the agent work around the clock.'),
                             style: text.bodySmall,
                           ),
+                          // Under the text, not beside it: a narrow phone keeps whole words in the title.
+                          if (mode.active) ...[
+                            const SizedBox(height: 8),
+                            Pill(
+                              switch (link.state) {
+                                LinkState.connected => tr('Connected'),
+                                LinkState.connecting => tr('Connecting…'),
+                                LinkState.reconnecting => tr('Reconnecting'),
+                                LinkState.offline => link.kicked ? tr('Another device') : tr('Offline'),
+                              },
+                              color: _stateColor(p, link),
+                              dot: true,
+                            ),
+                          ],
                         ],
                       ),
                     ),
-                    if (mode.active)
-                      Pill(
-                        switch (link.state) {
-                          LinkState.connected => tr('Connected'),
-                          LinkState.connecting || LinkState.reconnecting => tr('Reconnecting'),
-                          LinkState.offline => link.kicked ? tr('Another device') : tr('Offline'),
-                        },
-                        color: _stateColor(p, link),
-                        dot: true,
-                      ),
                   ],
                 ),
               ),
@@ -709,12 +797,14 @@ class _ServerScreenState extends State<ServerScreen> {
 
   Widget _healthCard(BuildContext context, Map<String, dynamic> h) {
     final p = context.palette;
-    String gb(num? bytes) => bytes == null ? '?' : '${(bytes / (1 << 30)).toStringAsFixed(1)} GB';
+    final text = Theme.of(context).textTheme;
+    String gb(num? bytes) => bytes == null ? '?' : '${localNumber((bytes / (1 << 30)).toStringAsFixed(1))} GB';
     final disk = (h['disk'] as Map?)?.cast<String, dynamic>() ?? const {};
     final mem = (h['memory'] as Map?)?.cast<String, dynamic>() ?? const {};
     final runs = (h['runs'] as Map?)?.cast<String, dynamic>() ?? const {};
     final uptime = Duration(seconds: (h['uptimeSec'] as num?)?.toInt() ?? 0);
     final low = disk['level'] != null && disk['level'] != 'ok';
+    final memoryHigh = mem['level'] != null && mem['level'] != 'ok';
     // Where the agent's commands run. A box without an image refuses them all, so that is said, with the way out.
     final box = (h['box'] as Map?)?.cast<String, dynamic>();
     final boxMissing = box != null && box['available'] == true && box['installed'] != true;
@@ -727,34 +817,48 @@ class _ServerScreenState extends State<ServerScreen> {
         : box['enabled'] == true
         ? tr('ready · commands run inside it')
         : tr('off · commands run on the server');
-    String line(String k, String v) => '$k  $v';
+    final rows = <(String, String, Color?)>[
+      if (upToDate != null)
+        (tr('Agent version'), upToDate! ? tr('Up to date') : tr('A newer one is in this app'), upToDate! ? null : p.warning),
+      (tr('Disk free'), '${gb(disk['freeBytes'] as num?)} ${tr('of')} ${gb(disk['totalBytes'] as num?)}', low ? p.warning : null),
+      (tr('Agent memory'), gb(mem['rssBytes'] as num?), memoryHigh ? p.warning : null),
+      (tr('Running'), '${runs['running'] ?? 0} · ${tr('queued')} ${runs['queued'] ?? 0}', null),
+      (tr('Subagents'), h['subagents'] == true ? tr('working') : tr('not active'), null),
+      (tr('Up for'), _upFor(uptime), null),
+      (tr('Node'), '${h['node'] ?? '?'}', null),
+      if (boxText != null) (tr('Box'), boxText, boxMissing ? p.warning : null),
+    ];
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: SurfaceCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr('Server health'), style: Theme.of(context).textTheme.titleSmall),
+            Text(tr('Server health'), style: text.titleSmall),
             const SizedBox(height: 8),
-            for (final l in [
-              line(tr('Disk free'), '${gb(disk['freeBytes'] as num?)} / ${gb(disk['totalBytes'] as num?)}'),
-              line(tr('Agent memory'), gb(mem['rssBytes'] as num?)),
-              line(tr('Running'), '${runs['running'] ?? 0} · ${tr('queued')} ${runs['queued'] ?? 0}'),
-              line(tr('Subagents'), h['subagents'] == true ? tr('working') : tr('idle')),
-              line(
-                tr('Up for'),
-                uptime.inHours >= 1 ? '${uptime.inHours} h ${uptime.inMinutes % 60} min' : '${uptime.inMinutes} min',
-              ),
-              line(tr('Node'), '${h['node'] ?? '?'}'),
-              if (boxText != null) line(tr('Box'), boxText),
-            ])
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 1),
-                child: Text(
-                  l,
-                  style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
-                ),
-              ),
+            // Two columns, so a value that needs a second line wraps under itself, not under its name.
+            Table(
+              columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
+              defaultVerticalAlignment: TableCellVerticalAlignment.top,
+              children: [
+                for (final (name, value, color) in rows)
+                  TableRow(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 14, top: 3, bottom: 3),
+                        child: Text(name, style: text.bodySmall?.copyWith(color: p.muted)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Text(
+                          value,
+                          style: text.bodySmall?.copyWith(color: color ?? p.text, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
             if (boxMissing)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
@@ -786,10 +890,26 @@ class _ServerScreenState extends State<ServerScreen> {
                   style: TextStyle(color: p.warning, fontSize: 12.5),
                 ),
               ),
+            if (memoryHigh)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  tr('The agent is using a lot of memory. Fewer subagents at once, or a restart, frees it.'),
+                  style: TextStyle(color: p.warning, fontSize: 12.5),
+                ),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  /// "2 h 5 min" / "2 j 5 mnt", or minutes alone under an hour.
+  static String _upFor(Duration d) {
+    final id = Appearance.instance.language == 'id';
+    if (d.inHours >= 24) return id ? '${d.inDays} hr ${d.inHours % 24} j' : '${d.inDays} d ${d.inHours % 24} h';
+    if (d.inHours >= 1) return id ? '${d.inHours} j ${d.inMinutes % 60} mnt' : '${d.inHours} h ${d.inMinutes % 60} min';
+    return id ? '${d.inMinutes} mnt' : '${d.inMinutes} min';
   }
 
   List<Widget> _setup(BuildContext context) {
@@ -1088,6 +1208,24 @@ class _ServerScreenState extends State<ServerScreen> {
           ),
         ],
       ),
+      if (s.notifyTopic != null)
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              icon: _testingNotify
+                  ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(LucideIcons.bellRing, size: 16),
+              label: Text(tr('Send a test notification')),
+              onPressed: _testingNotify || !s.notifyEnabled ? null : _testNotify,
+            ),
+            TextButton.icon(
+              icon: const Icon(LucideIcons.externalLink, size: 16),
+              label: Text(tr('Open in ntfy')),
+              onPressed: _openNtfy,
+            ),
+          ],
+        ),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         title: Text(tr('Send notifications')),
