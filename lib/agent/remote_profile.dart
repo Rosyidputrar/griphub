@@ -215,10 +215,23 @@ class RemoteSetup {
     }
   }
 
-  /// The command to run on the server, as root, to let this app in and set the server up.
+  /// The command that runs the setup script this app carries (griphub-setup.sh: the server/ folder in one file) on the
+  /// server, to let this app in and set the server up. The script asks sudo for root itself.
   String bootstrapCommand(String publicKey, {String? address}) {
     String q(String s) => "'${s.replaceAll("'", r"'\''")}'";
-    return 'sudo ./bootstrap.sh --pubkey ${q(publicKey)}${address == null || address.isEmpty ? '' : ' --address ${q(address)}'}';
+    return 'sh $setupFileName --pubkey ${q(publicKey)}${address == null || address.isEmpty ? '' : ' --address ${q(address)}'}';
+  }
+
+  /// What the setup script is called on the server.
+  static const setupFileName = 'griphub-setup.sh';
+
+  /// One paste for the server's terminal: writes [script] (griphub-setup.sh) to a file and runs [command] on it, so the
+  /// server needs nothing but this app.
+  static String setupPaste(String script, String command) {
+    const end = 'GRIPHUB_SETUP';
+    if (script.split('\n').contains(end)) throw ArgumentError('the setup script contains the line $end');
+    final body = script.endsWith('\n') ? script : '$script\n';
+    return "cat > $setupFileName <<'$end'\n$body$end\n$command\n";
   }
 
   // -------------------------------------------------------------------------
@@ -445,7 +458,7 @@ class RemoteSetup {
     if (r.exitCode != 0) return InstallResult(ok: false, message: 'Could not prepare the server: ${r.stderr.trim()}');
     onProgress?.call('Copying the agent...');
     r = await _run(
-      [rsync, '-rltpz', '--delete', '--itemize-changes', '-e', '$ssh -F $configPath', '$hostDir/', target],
+      [rsync, '-rltpz', '--delete', '--exclude=/server/', '--itemize-changes', '-e', '$ssh -F $configPath', '$hostDir/', target],
       env: env,
       timeout: const Duration(minutes: 10),
     );

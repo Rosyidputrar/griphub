@@ -1328,4 +1328,12 @@ const _id = <String, String>{
   'Download to this phone': 'Unduh ke HP ini',
   'Enter the path of a backup zip on the server, or choose one from your phone (it is sent to the server first).':
       'Masukkan lokasi zip backup di server, atau pilih dari HP Anda (dikirim ke server dulu).',
+  // Server setup files carried by the app
+  "On the server (Ubuntu or Debian), as root or an account with sudo: paste the setup command into its terminal. It carries the setup files and this app's key; nothing has to be downloaded.":
+      'Di server (Ubuntu atau Debian), sebagai root atau akun dengan sudo: tempel perintah setup ke terminalnya. Perintah ini sudah membawa file setup dan kunci app ini; tidak ada yang perlu diunduh.',
+  'Copy setup command': 'Salin perintah setup',
+  'Share the setup file instead': 'Atau bagikan file setup',
+  'The setup command is the file and the line above in one paste. Or send the file to the server (for example with an SFTP app) and run the line above next to it.':
+      'Perintah setup berisi file setup dan baris di atas dalam satu tempelan. Atau kirim file-nya ke server (misalnya lewat app SFTP) lalu jalankan baris di atas di folder yang sama.',
+  'setup command': 'perintah setup',
 };

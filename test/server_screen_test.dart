@@ -8,6 +8,7 @@ import 'package:griphub_agent/agent/remote_profile.dart';
 import 'package:griphub_agent/ui/server_screen.dart';
 import 'package:griphub_agent/ui/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_backend.dart';
@@ -216,12 +217,63 @@ void main() {
       configure();
       await open(tester);
       expect(find.text('This phone runs the agent'), findsOneWidget);
-      expect(find.textContaining("sudo ./bootstrap.sh --pubkey '$pubKey'"), findsOneWidget);
+      expect(find.textContaining("sh griphub-setup.sh --pubkey '$pubKey'"), findsOneWidget);
       expect(find.text('Setup code'), findsOneWidget);
 
       await tester.enterText(find.widgetWithText(TextField, 'Server address (name or IP)'), 'agent.example.com');
       await tester.pump();
       expect(find.textContaining("--address 'agent.example.com'"), findsOneWidget);
+    });
+
+    testWidgets('the setup files come with the app: one paste for the server\'s terminal, or the file to share', (
+      tester,
+    ) async {
+      final script = File('${tmp.path}/host/server/griphub-setup.sh')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('#!/bin/sh\necho the server files\n');
+      final platform = <MethodCall>[];
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(PlatformBackend.method, (call) async {
+        platform.add(call);
+        return null;
+      });
+      String? clipboard;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') clipboard = (call.arguments as Map)['text'] as String?;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      configure();
+      await open(tester);
+      expect(find.textContaining('nothing has to be downloaded'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Server address (name or IP)'), '85.9.194.68');
+      await tester.pump();
+
+      await tester.tap(find.text('Copy setup command'));
+      // Reading the script is real I/O: let it finish, then let the copy go out.
+      for (var i = 0; i < 10 && clipboard == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      expect(
+        clipboard,
+        "cat > griphub-setup.sh <<'GRIPHUB_SETUP'\n#!/bin/sh\necho the server files\nGRIPHUB_SETUP\n"
+        "sh griphub-setup.sh --pubkey '$pubKey' --address '85.9.194.68'\n",
+      );
+
+      await tester.tap(find.text('Share the setup file instead'));
+      await tester.pump();
+      expect(platform.where((c) => c.method == 'shareFile').single.arguments, {'path': script.path});
+    });
+
+    testWidgets('an app without the setup files (a build without the agent bundle) points to the repository instead', (
+      tester,
+    ) async {
+      configure();
+      await open(tester);
+      expect(find.textContaining('server/ folder of the GripHub repository'), findsOneWidget);
+      expect(find.text('Copy setup command'), findsNothing);
+      expect(find.text('Share the setup file instead'), findsNothing);
     });
 
     testWidgets('a bad code says what is wrong; a good one saves the server, writes its ssh files and shows it', (

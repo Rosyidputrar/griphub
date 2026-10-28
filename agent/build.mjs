@@ -9,6 +9,7 @@ import { build, transformSync } from "esbuild";
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { SERVER_DIR, serverInstaller } from "./server-installer.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
@@ -111,6 +112,9 @@ cpSync(join(stage, "node_modules"), join(out, "node_modules"), { recursive: true
 // AssetManager is slow, a single zip streams in one pass. The stamp lets the
 // app re-extract only when the bundle changes.
 const stamp = `${piVersion} ${Date.now()}`;
+// The server/ folder as one script, so the app alone can set up a server (Settings > Server agent).
+mkdirSync(join(out, "server"), { recursive: true });
+writeFileSync(join(out, "server", "griphub-setup.sh"), serverInstaller(SERVER_DIR, stamp), { mode: 0o755 });
 rmSync(join(assets, "agent"), { recursive: true, force: true });
 mkdirSync(assets, { recursive: true });
 execSync(

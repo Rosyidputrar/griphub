@@ -32,29 +32,30 @@ Diadaptasi dari mode server CoderRa (`seseegy/coderra`, folder `server/`).
 
 ## Memasang
 
-1. **Di app:** Settings → Server agent. Isi alamat server. App membuat kunci SSH miliknya dan menampilkan perintah
-   siap-salin, kira-kira:
+File setup ikut di dalam app: tidak perlu repo, GitHub, atau unduhan lain.
+
+1. **Di app:** Pengaturan → Data & keamanan → **Agent server**. Isi alamat server. App membuat kunci SSH miliknya dan
+   menampilkan baris perintah, kira-kira:
    ```
-   sudo ./bootstrap.sh --pubkey 'ssh-ed25519 AAAA… griphub-app' --address 'vps.contoh.com'
+   sh griphub-setup.sh --pubkey 'ssh-ed25519 AAAA… griphub-app' --address 'vps.contoh.com'
    ```
-2. **Salin folder `server/` ini ke server** (seluruh folder; skrip memeriksa bahwa semua berkas ada):
-   ```
-   scp -r server/ root@vps.contoh.com:~/griphub-server
-   ```
-3. **Di server**, lihat dulu rencananya (tidak mengubah apa pun):
-   ```
-   cd ~/griphub-server
-   bash bootstrap.sh --dry-run --pubkey '…' --address 'vps.contoh.com'
-   ```
-   Yang harus tampak: **tidak ada** peringatan `this script is written for Ubuntu and Debian`, dan baris `host key:`
-   berisi kunci `ssh-ed25519 AAAA…`.
-4. **Jalankan sungguhan** (beberapa menit: paket, Node.js, membangun image box):
-   ```
-   sudo bash bootstrap.sh --pubkey '…' --address 'vps.contoh.com'
-   ```
+2. **Salin perintah setup** (tombol di bawah baris itu). Yang tersalin adalah satu tempelan: isi `griphub-setup.sh`
+   (folder `server/` ini dalam satu file, ±20 KB) lalu baris perintah di atas.
+3. **Di server**, sebagai root atau akun dengan sudo, tempel ke terminal (aplikasi SSH di HP pun bisa). Skrip
+   membongkar file ke `~/griphub-server`, memeriksa SHA-256 setiap file (tempelan yang terpotong berhenti di sini dengan
+   pesan "arrived damaged"), lalu menjalankan `bootstrap.sh` (beberapa menit: paket, Node.js, membangun image box).
    Aman diulang: akun, kunci dan pengaturan yang ada dipertahankan, sisanya diperbarui.
-5. Skrip mencetak **setup code** (`griphub1:…`). Tempel di app, lalu **Install / update agent**: app menyalin host ke
+
+   Ingin melihat rencananya dulu? Jalankan baris perintah itu sekali lagi dengan `--dry-run` di ujungnya (tidak
+   mengubah apa pun, tidak perlu root).
+
+   Kalau menempel teks panjang di terminal Anda bermasalah: **Atau bagikan file setup** mengirim `griphub-setup.sh` ke
+   aplikasi lain (mis. aplikasi SFTP) untuk diunggah ke server; jalankan baris perintahnya di folder yang sama.
+4. Skrip mencetak **setup code** (`griphub1:…`). Tempel di app, lalu **Pasang / perbarui agent**: app menyalin host ke
    server dan menjalankannya.
+
+Dari salinan repo juga bisa: salin folder `server/` ke server lalu jalankan `sudo bash bootstrap.sh --pubkey '…'
+--address '…'` di dalamnya (opsinya sama).
 
 Opsi `bootstrap.sh`:
 
