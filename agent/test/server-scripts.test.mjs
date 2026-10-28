@@ -90,6 +90,22 @@ test("bootstrap --dry-run shows the plan, the restricted key line and a setup co
 	assert.match(second.stdout, /\/home\/griphub2\/\.griphub/);
 });
 
+test("bootstrap warns up front about a machine that is too small, and is quiet about one that is not", () => {
+	const run = (env) =>
+		spawnSync("bash", [BOOTSTRAP, "--dry-run", "--pubkey", KEY, "--address", "a.example.com"], {
+			encoding: "utf8",
+			env: { ...process.env, ...env },
+		});
+	const small = run({ GRIPHUB_TEST_MEM_KB: "1000000", GRIPHUB_TEST_DISK_KB: "3000000" });
+	assert.equal(small.status, 0, "a warning, not a refusal");
+	assert.match(small.stderr, /warning: this machine has 976 MB of memory; the agent wants at least 2 GB/);
+	assert.match(small.stderr, /warning: only 2929 MB free on \/; packages, Node and the box image need about 5 GB/);
+	const agentai = run({ GRIPHUB_TEST_MEM_KB: String(8 * 1024 * 1024), GRIPHUB_TEST_DISK_KB: String(90 * 1024 * 1024) });
+	assert.equal(agentai.status, 0);
+	assert.doesNotMatch(agentai.stderr, /memory|free on/);
+	assert.match(agentai.stdout, /Settings > Agent on a VPS \/ server/);
+});
+
 // The field-test report (server_agent.md, phase 7) reads another account's service and log, so it wants root; its whole
 // run is tried against a real systemd user service by hand (see server_agent.md 4.16), here only what it refuses.
 test("field-report.sh explains itself, and refuses odd input, a missing account, and running without root", () => {

@@ -65,6 +65,15 @@ void main() {
         fail('accepted: $input');
       }
 
+      expect(
+        () => SetupCode.parse(code({...valid(), 'port': 70000})),
+        throwsA(
+          isA<SetupCodeError>()
+              .having((e) => e.say.en, 'template', 'The port in the setup code is not valid: "{value}".')
+              .having((e) => e.say.args, 'values', {'value': 70000})
+              .having((e) => e.message, 'English', 'The port in the setup code is not valid: "70000".'),
+        ),
+      );
       expect(why(''), contains('not a setup code'));
       expect(why('hello'), contains('not a setup code'));
       expect(why('griphub1:%%%'), contains('damaged'));
@@ -229,6 +238,17 @@ void main() {
       expect(c(255, '', 'ssh: connect to host x port 22: Connection timed out').problem, ServerProblem.unreachable);
       expect(c(1, '', 'something odd').problem, ServerProblem.other);
       expect(c(255, '', 'Host key verification failed.').message, contains('Do not continue'));
+    });
+
+    test('keeps each verdict as a sentence with its values apart, so the screen can translate it', () {
+      ServerCheck c(int code, [String out = '', String err = '']) => setup.classify(profile, code, out, err);
+      final changed = c(255, '', 'Host key verification failed.').say;
+      expect(changed.en, contains('The server at {address} does not have the host key'));
+      expect(changed.args, {'address': 'agent.example.com:2222'});
+      expect('$changed', contains('The server at agent.example.com:2222 does not'));
+      final away = c(255, '', 'ssh: connect to host x port 22: Network is unreachable').say;
+      expect(away.en, startsWith('Could not reach {address}.'));
+      expect(c(7, '', '').say.args, {'code': 7});
     });
   });
 }

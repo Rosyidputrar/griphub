@@ -103,6 +103,8 @@ export interface AppSettings {
 	tavilySearch?: boolean;
 	/** Agent shell in the Linux container; unset means on whenever it is installed. */
 	containerShell?: boolean;
+	/** Server only: the phone's time zone ("Etc/GMT-7"), so schedules run at the user's hours, not the server's (UTC). */
+	timeZone?: string | null;
 	/** When the agent must ask before acting (see guard.ts). */
 	approvalMode?: "ask_all" | "ask_risky" | "auto";
 	/** Subagent limits, global for all subagents (see subagent.ts); 0 = no limit. */

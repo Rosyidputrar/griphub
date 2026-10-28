@@ -390,6 +390,7 @@ class _FilesScreenState extends State<FilesScreen> {
   /// The file on this phone: itself, or (with a server agent) a copy fetched with a progress dialog. Null if stopped.
   Future<String?> _fetch(_Entry e) => runTransfer<String>(
     context,
+    connection: widget.agent.client.connection,
     title: '${tr('Downloading')} ${e.name}',
     show: !fs.isLocal,
     task: (h) => fs.toPhoneFile(e.path, onProgress: h.onProgress, cancel: h.cancel),
@@ -415,6 +416,7 @@ class _FilesScreenState extends State<FilesScreen> {
       if (!mounted) return;
       final ok = await runTransfer<bool>(
         context,
+        connection: widget.agent.client.connection,
         title: '${tr('Uploading')} ${f.name}',
         show: !fs.isLocal,
         task: (h) async {
@@ -426,7 +428,7 @@ class _FilesScreenState extends State<FilesScreen> {
       count++;
     }
     if (count == 0) return;
-    _snack('Imported $count file${count == 1 ? '' : 's'}');
+    _snack(count == 1 ? tr('Imported 1 file') : tr('Imported {n} files').replaceAll('{n}', '$count'));
     await _load();
   }
 
@@ -563,7 +565,7 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 60),
           Icon(LucideIcons.folderX, size: 40, color: p.faint),
           const SizedBox(height: 12),
-          Text("Can't open this folder", textAlign: TextAlign.center, style: t.titleMedium),
+          Text(tr("Can't open this folder"), textAlign: TextAlign.center, style: t.titleMedium),
           const SizedBox(height: 4),
           Text(
             _error!,

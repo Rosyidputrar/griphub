@@ -49,8 +49,9 @@ class _SettingsHubState extends State<SettingsHub> {
     super.initState();
     final it = agent.integrations;
     it.refresh().catchError((_) {});
-    it.refreshContainer().catchError((_) => it.container!);
-    it.refreshSettings().catchError((_) => it.settings!);
+    // Offline (a server out of reach) these fail before anything was loaded: the rows show what is known.
+    it.refreshContainer().then((_) {}, onError: (_) {});
+    it.refreshSettings().then((_) {}, onError: (_) {});
     it.refreshSync().catchError((_) {});
     it.skills().then((s) {
       if (mounted) setState(() => skillCount = s.length);
@@ -60,6 +61,8 @@ class _SettingsHubState extends State<SettingsHub> {
   void _open(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     if (!mounted) return;
+    // A screen may have switched between this phone and a server: the container row follows.
+    agent.integrations.refreshContainer().then((_) {}, onError: (_) {});
     agent.integrations.skills().then((s) {
       if (mounted) setState(() => skillCount = s.length);
     }, onError: (_) {});
@@ -148,7 +151,15 @@ class _SettingsHubState extends State<SettingsHub> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
-      listenable: Listenable.merge([agent, agent.integrations, agent.features, Appearance.instance, Updater.instance]),
+      listenable: Listenable.merge([
+        agent,
+        agent.integrations,
+        agent.features,
+        agent.remote,
+        agent.client.connection,
+        Appearance.instance,
+        Updater.instance,
+      ]),
       builder: (context, _) {
         final it = agent.integrations;
         final look = Appearance.instance;
@@ -189,6 +200,27 @@ class _SettingsHubState extends State<SettingsHub> {
                   ],
                 ),
               ),
+              // Where the agent runs, first thing on the page: the way to the server agent, whichever it is.
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: SettingsGroup(
+                  children: [
+                    SettingsRow(
+                      icon: agent.remote.active ? LucideIcons.server : LucideIcons.smartphone,
+                      color: agent.remote.active ? const Color(0xFF0F766E) : p.muted,
+                      title: agent.remote.active ? tr('Agent: your server') : tr('Agent: this phone'),
+                      subtitle: agent.remote.active
+                          ? (agent.client.connection.value.connected
+                                ? tr('Connected')
+                                : tr('Not connected to the server'))
+                          : agent.remote.configured
+                          ? tr('A server is set up; tap to switch')
+                          : tr('Run the agent on your own VPS, around the clock'),
+                      onTap: () => _open(ServerScreen(agent: agent)),
+                    ),
+                  ],
+                ),
+              ),
               SectionLabel(tr('AI')),
               SettingsGroup(
                 children: [
@@ -223,13 +255,25 @@ class _SettingsHubState extends State<SettingsHub> {
               SettingsGroup(
                 children: [
                   SettingsRow(
-                    icon: c?.distro == 'alpine' ? SimpleIcons.alpinelinux : SimpleIcons.debian,
-                    color: c?.distro == 'alpine' ? const Color(0xFF0D597F) : const Color(0xFFD70A53),
-                    title: tr('Linux container'),
+                    // On a server the row is the agent's box even before its status has come in.
+                    icon: (c?.isBox ?? agent.remote.active)
+                        ? LucideIcons.container
+                        : c?.distro == 'alpine'
+                        ? SimpleIcons.alpinelinux
+                        : SimpleIcons.debian,
+                    color: (c?.isBox ?? agent.remote.active)
+                        ? p.accent
+                        : c?.distro == 'alpine'
+                        ? const Color(0xFF0D597F)
+                        : const Color(0xFFD70A53),
+                    // On a server this is the agent's box (Podman), not a Linux on the phone.
+                    title: tr((c?.isBox ?? agent.remote.active) ? 'The agent\'s box' : 'Linux container'),
                     subtitle: c == null
-                        ? tr('Debian or Alpine with apt / apk')
+                        ? (agent.remote.active ? tr('Where the agent\'s commands run') : tr('Debian or Alpine with apt / apk'))
                         : c.installed
                         ? '${c.image}${c.enabled ? ' · ${tr('agent shell')}' : ''}'
+                        : c.isBox
+                        ? tr('Not built · rebuild it on its screen')
                         : tr('Not installed · run apt, pip, npm and more'),
                     trailing: c?.enabled == true ? Pill(tr('On'), color: p.success, dot: true) : null,
                     onTap: () => _open(ContainerScreen(agent: agent)),
@@ -349,7 +393,7 @@ class _SettingsHubState extends State<SettingsHub> {
                   SettingsRow(
                     icon: LucideIcons.server,
                     color: const Color(0xFF0F766E),
-                    title: tr('Server agent'),
+                    title: tr('Agent on a VPS / server'),
                     subtitle: agent.remote.active
                         ? tr('The agent runs on your server')
                         : agent.remote.configured

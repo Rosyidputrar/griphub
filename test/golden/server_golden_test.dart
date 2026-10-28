@@ -9,8 +9,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/msg.dart';
 import 'package:griphub_agent/agent/remote_profile.dart';
+import 'package:griphub_agent/ui/box_screen.dart';
 import 'package:griphub_agent/ui/server_screen.dart';
+import 'package:griphub_agent/ui/terminal_screen.dart';
 
 import '../support/fake_backend.dart';
 import 'harness.dart';
@@ -30,6 +33,18 @@ class _StubSetup extends RemoteSetup {
 
   @override
   Future<String?> remoteStamp({Map<String, String>? env}) async => null;
+
+  ServerCheck result = const ServerCheck(
+    ServerProblem.hostMissing,
+    Msg('Connected. The agent is not installed on the server yet: press Install / update.'),
+  );
+
+  @override
+  Future<ServerCheck> check(
+    RemoteProfile p, {
+    Map<String, String>? env,
+    Duration timeout = const Duration(seconds: 30),
+  }) async => result;
 }
 
 const _looks = [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)];
@@ -51,14 +66,16 @@ void main() {
     agent = AgentController(AgentClient(backend: backend)..backoff = ((_) => const Duration(minutes: 1)));
   });
 
-  void configure({bool saved = false, bool active = false}) {
+  void configure({bool saved = false, bool active = false, ServerCheck? check}) {
     final store = RemoteProfileStore(File('${tmp.path}/home/.griphub/remote.json'));
     if (saved) store.save(RemoteProfile.fromSetupCode(SetupCode.parse(_code())).copyWith(active: active));
     // The setup script the agent bundle carries.
     File('${tmp.path}/host/server/griphub-setup.sh')
       ..createSync(recursive: true)
       ..writeAsStringSync('#!/bin/sh\n');
-    agent.remote.configure(setup: _StubSetup('${tmp.path}/home'), store: store, hostDir: '${tmp.path}/host');
+    final setup = _StubSetup('${tmp.path}/home');
+    if (check != null) setup.result = check;
+    agent.remote.configure(setup: setup, store: store, hostDir: '${tmp.path}/host');
   }
 
   for (final look in _looks) {
@@ -82,6 +99,8 @@ void main() {
           'subagents': true,
           'uptimeSec': 93780,
           'node': 'v24.22.0',
+          // The box image never got built (the field test's VPS): the card says so and offers the way out.
+          'box': {'available': true, 'installed': false, 'enabled': true},
         },
         'settings_get' => {
           'notify': {'enabled': true, 'url': 'https://ntfy.sh', 'topic': 'griphub-3f9c2a7b1d4e8f60a5b2c7d9e1f3a4b6'},
@@ -89,7 +108,7 @@ void main() {
         _ => null,
       };
       await tester.runAsync(() => agent.client.start());
-      await pumpLook(tester, look, ServerScreen(agent: agent), height: 1900);
+      await pumpLook(tester, look, ServerScreen(agent: agent), height: 2600);
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
       await tester.pump();
@@ -111,9 +130,15 @@ void main() {
         tester,
         look,
         Scaffold(
+          // As crowded as the chat's real bar: the chip next to its three buttons, on a narrow phone too.
           appBar: AppBar(
             title: const Text('Chat'),
-            actions: [ConnectionChip(agent: agent)],
+            actions: [
+              ConnectionChip(agent: agent),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.history)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.add_comment_outlined)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert)),
+            ],
           ),
           body: Column(
             children: [
@@ -128,6 +153,132 @@ void main() {
       await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_banner_${look.name}')));
       expect(layoutErrors.where((e) => e.contains('server_banner_${look.name}')), isEmpty);
       await tester.pumpWidget(const SizedBox()); // stops the countdown timer
+    });
+
+    testWidgets('update banner, server agent from another bundle (${look.name})', (tester) async {
+      Directory('${tmp.path}/host').createSync(recursive: true);
+      File('${tmp.path}/host/.stamp').writeAsStringSync('1.4.0 1800000000000\n');
+      configure(saved: true, active: true);
+      backend.hello = {...backend.hello, 'bundleStamp': '1.3.0 1700000000000'};
+      await tester.runAsync(() => agent.client.start());
+      await pumpLook(
+        tester,
+        look,
+        Scaffold(
+          // As crowded as the chat's real bar: the chip next to its three buttons, on a narrow phone too.
+          appBar: AppBar(
+            title: const Text('Chat'),
+            actions: [
+              ConnectionChip(agent: agent),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.history)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.add_comment_outlined)),
+              IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert)),
+            ],
+          ),
+          body: Column(
+            children: [
+              ConnectionBanner(agent: agent),
+              ServerUpdateBanner(agent: agent),
+              const Expanded(child: SizedBox()),
+            ],
+          ),
+        ),
+        height: 300,
+      );
+      await tester.pump();
+      collectLayoutErrors(tester, 'server_update_${look.name}');
+      await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_update_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_update_${look.name}')), isEmpty);
+    });
+
+    testWidgets('server screen, saved and not in use yet: the next steps (${look.name})', (tester) async {
+      configure(saved: true);
+      await pumpLook(tester, look, ServerScreen(agent: agent), height: 1500);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      collectLayoutErrors(tester, 'server_steps_${look.name}');
+      await expectLater(find.byType(ServerScreen), matchesGoldenFile(golden('server_steps_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_steps_${look.name}')), isEmpty);
+    });
+
+    testWidgets('switch dialog, with the phone\'s agent at work (${look.name})', (tester) async {
+      configure(
+        saved: true,
+        check: const ServerCheck(ServerProblem.none, Msg('Connected. The agent is running on the server.')),
+      );
+      await pumpLook(tester, look, ServerScreen(agent: agent), height: 1100);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      agent.busy = true;
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      collectLayoutErrors(tester, 'server_switch_${look.name}');
+      await expectLater(find.byType(AlertDialog), matchesGoldenFile(golden('server_switch_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_switch_${look.name}')), isEmpty);
+    });
+
+    testWidgets('opening the app on a server it cannot reach (${look.name})', (tester) async {
+      configure(saved: true, active: true);
+      agent
+        ..status = BootStatus.failed
+        ..bootFailures = 2
+        ..bootError = 'ssh: connect to host agentai.example.com port 22: Network is unreachable';
+      agent.client.backoff = (_) => const Duration(seconds: 8);
+      await pumpLook(tester, look, ServerBootFailed(agent: agent), height: 900);
+      collectLayoutErrors(tester, 'server_boot_${look.name}');
+      await expectLater(find.byType(ServerBootFailed), matchesGoldenFile(golden('server_boot_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_boot_${look.name}')), isEmpty);
+      await tester.pumpWidget(const SizedBox()); // stops the countdown
+    });
+
+    testWidgets('terminal tab, connection to the server lost (${look.name})', (tester) async {
+      var reconnects = 0;
+      await pumpLook(
+        tester,
+        look,
+        Scaffold(
+          appBar: AppBar(title: const Text('Terminal')),
+          body: Column(
+            children: [
+              ServerTabLostBar(onReconnect: () => reconnects++),
+              const Expanded(child: ColoredBox(color: Colors.black)),
+            ],
+          ),
+        ),
+        height: 260,
+      );
+      collectLayoutErrors(tester, 'server_tab_lost_${look.name}');
+      await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_tab_lost_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_tab_lost_${look.name}')), isEmpty);
+      await tester.tap(find.byType(TextButton));
+      expect(reconnects, 1);
+    });
+
+    testWidgets('box screen, box not built yet (${look.name})', (tester) async {
+      configure(saved: true, active: true);
+      backend.onCommand = (c) => switch (c['type']) {
+        'container_status' => {
+          'kind': 'podman',
+          'available': true,
+          'installed': false,
+          'state': 'none',
+          'enabled': true,
+          'image': 'localhost/griphub-box',
+          'startedAt': null,
+          'usage': null,
+          'limits': {'memory': '2g', 'swap': '3g', 'cpus': '1.5'},
+          'problem': 'The box image has not been built on this server.',
+        },
+        _ => null,
+      };
+      await tester.runAsync(() => agent.client.start());
+      await pumpLook(tester, look, BoxScreen(agent: agent), height: 1300);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+      await tester.pump();
+      collectLayoutErrors(tester, 'box_not_built_${look.name}');
+      await expectLater(find.byType(BoxScreen), matchesGoldenFile(golden('box_not_built_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('box_not_built_${look.name}')), isEmpty);
     });
   }
 }

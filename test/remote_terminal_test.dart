@@ -117,6 +117,36 @@ void main() {
     await second.until('sleep 300');
   }, skip: skip);
 
+  test(
+    'a dropped connection ends ssh with 255, which the tab shows as "reconnect", and the shell is still there',
+    () async {
+      final name = newSession();
+      final t = await open(setup.terminalArgv(cwd: remote.path, session: name));
+      t.send('KEPT=after-drop\n');
+      t.send('echo set-\$((4+4))\n');
+      await t.until('set-8');
+      sshd.dropConnections();
+      // ShellSession.connectionLost: what tells a lost connection from a shell that was exited (that ends with 0).
+      // At once when the connection closes; at worst ssh's own keepalive (15 s × 3) notices.
+      expect(await t.exitCode.timeout(const Duration(seconds: 60)), 255);
+      expect(exists(name), isTrue);
+      final again = await open(setup.terminalArgv(cwd: remote.path, session: name));
+      again.send('echo "\$KEPT"\n');
+      await again.until('after-drop');
+    },
+    skip: skip,
+  );
+
+  test('exiting the shell ends the tab with 0 and leaves no session behind', () async {
+    final name = newSession();
+    final t = await open(setup.terminalArgv(cwd: remote.path, session: name));
+    t.send('echo in-\$((1+2))\n');
+    await t.until('in-3');
+    t.send('exit\n');
+    expect(await t.exitCode.timeout(const Duration(seconds: 20)), 0);
+    expect(exists(name), isFalse);
+  }, skip: skip);
+
   test('closing a tab ends its session on the server for good', () async {
     final name = newSession();
     final t = await open(setup.terminalArgv(cwd: remote.path, session: name));
@@ -197,6 +227,8 @@ class _Term {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
   }
+
+  Future<int> get exitCode => _p.exitCode;
 
   void kill() => _p.kill(ProcessSignal.sigkill);
 }

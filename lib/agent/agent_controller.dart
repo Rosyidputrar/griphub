@@ -37,6 +37,9 @@ class AgentController extends ChangeNotifier {
 
   BootStatus status = BootStatus.starting;
   String? bootError;
+
+  /// Failed starts in a row (0 once one works): how long the server boot screen waits before trying again.
+  int bootFailures = 0;
   Map<String, dynamic> info = const {};
 
   // Session state
@@ -298,9 +301,20 @@ class AgentController extends ChangeNotifier {
       unawaited(integrations.refreshSettings().then((_) {}).catchError((_) {}));
       // A server agent may have been waiting for answers while the app was closed: show them again.
       unawaited(refreshSubagents().then((_) => client.isRemote ? restoreApprovals() : null).catchError((_) {}));
+      // A server keeps its own clock (UTC as a rule): schedules follow the phone's time zone instead.
+      if (client.isRemote) {
+        unawaited(
+          client
+              .call('timezone_set', {'offsetMinutes': DateTime.now().timeZoneOffset.inMinutes})
+              .then((_) {})
+              .catchError((_) {}),
+        );
+      }
       status = BootStatus.ready;
+      bootFailures = 0;
     } catch (e) {
       status = BootStatus.failed;
+      bootFailures++;
       final tail = client.stderrTail;
       bootError = [
         e.toString(),
@@ -338,6 +352,9 @@ class AgentController extends ChangeNotifier {
   }
 
   Future<void> abort() => client.call('abort');
+
+  /// Work a switch between this phone and a server would cut off: the chat's turn, subagents, queued or running runs.
+  bool get working => busy || subagentStore.all.any((s) => s.isActive) || features.runs.any((r) => r.active);
 
   /// The host refuses to switch chats mid-turn with this message (host.ts BUSY_SWITCH).
   static const busySwitchError = 'The agent is still working in this chat. Stop it before switching chats.';

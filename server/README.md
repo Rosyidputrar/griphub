@@ -158,7 +158,7 @@ Restart layanan, dan **Reset the box** di app supaya batas box yang baru berlaku
 
 | Gejala | Kemungkinan penyebab | Coba |
 | --- | --- | --- |
-| "tidak terjangkau" | alamat/port salah, firewall | `ssh -i kunci griphub@alamat` dari mesin lain; buka port SSH |
+| "tidak terjangkau" | alamat/port salah, firewall, HP offline | `ssh -i kunci griphub@alamat` dari mesin lain; buka port SSH |
 | "kunci ditolak" | skrip belum dijalankan dengan kunci app ini | jalankan ulang `bootstrap.sh` dengan perintah yang ditampilkan app |
 | "host key tidak cocok" | server dipasang ulang, atau ada yang menyamar | **jangan lanjut** kecuali Anda memang memasang ulang; tempel setup code baru |
 | "agent belum ada" / "tidak berjalan" | host belum disalin, atau layanan mati | **Install / update agent**; periksa log |
@@ -166,6 +166,18 @@ Restart layanan, dan **Reset the box** di app supaya batas box yang baru berlaku
 | box: image belum dibangun | build gagal | **Rebuild the image** di app; lihat pesannya |
 | layanan tidak jalan setelah reboot | lingering mati | `loginctl enable-linger griphub` |
 | disk penuh | chat, backup, image | hapus backup lama di `~/workspace/backups`, `podman system prune` sebagai `griphub` |
+
+## HP hilang
+
+Kunci app ada di HP; siapa pun yang memegang HP itu (tanpa kunci layar) bisa menyambung ke agent. Di server, sebagai
+root:
+
+```
+sed -i '/ griphub-app$/d' /home/griphub/.ssh/authorized_keys
+```
+
+Itu menghapus kunci app (baris yang berakhiran `griphub-app`). Lalu siapkan HP baru: di app, **Pengaturan > Agent di
+VPS / server**, salin perintah setup, tempel di server, tempel kode setup-nya di app. Chat dan proyek tetap di server.
 
 ## Menghapus
 

@@ -107,6 +107,8 @@ export interface HubOptions {
 	/** Reported in `hello_server`. */
 	mode?: string;
 	hostVersion?: string;
+	/** The agent bundle this host came from (its `.stamp`): the app compares it with its own to see an old server agent. */
+	bundleStamp?: string;
 	capacityRecords?: number;
 	capacityBytes?: number;
 	/** How often a connected client is pinged and checked for silence. 0 turns the timer off (tests call `tick()`). */
@@ -261,6 +263,7 @@ export class Hub {
 					seq: this.seq,
 					firstSeq: this.firstSeq(),
 					hostVersion: this.o.hostVersion,
+					bundleStamp: this.o.bundleStamp,
 				}),
 			);
 			if (this.ready) this.write(c, JSON.stringify(this.ready));

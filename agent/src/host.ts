@@ -135,6 +135,15 @@ const griphubDir = process.env.GRIPHUB_DIR ?? join(process.env.HOME ?? agentDir,
 /** Exists while the daemon runs and is removed by a clean shutdown; finding it at start means the last one crashed. */
 const runningMarker = join(griphubDir, "running");
 
+/** The `.stamp` next to this host (written with the agent bundle), or undefined when there is none. */
+function bundleStamp(): string | undefined {
+	try {
+		return readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), ".stamp"), "utf8").trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Sends the host's records to the app. On the phone that is stdout, as always (no numbering, no buffer). As a daemon
  * the hub numbers what is worth replaying and keeps it, so an app that lost its connection gets exactly what it
@@ -144,6 +153,7 @@ const hub = new Hub({
 	replay: !!listenPath,
 	mode,
 	hostVersion: VERSION,
+	bundleStamp: bundleStamp(),
 	handle: (cmd) => handle(cmd as Command),
 	// Only tests shorten these.
 	pingIntervalMs: Number(process.env.GRIPHUB_PING_MS) || undefined,
@@ -680,6 +690,12 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 }
 
 /** The agent's shell is the server's box (server only). */
+/** The box, briefly, for the health card: is there one, is its image built, do the agent's commands go to it. */
+async function boxHealth(): Promise<{ available: boolean; installed: boolean; enabled: boolean }> {
+	const s = await box.status(settingsManager.getShellPath());
+	return { available: s.available, installed: s.installed, enabled: s.enabled };
+}
+
 function boxIsShell(): boolean {
 	return server && box.available && integrations?.settings.containerShell !== false;
 }
@@ -1458,6 +1474,19 @@ async function handle(cmd: Command): Promise<unknown> {
 			return { ...(await box.wipeHome()), status: await box.status(settingsManager.getShellPath()) };
 
 		// Disk, memory, and what is running: for the app's server screen.
+		// Server only: the phone's UTC offset, for schedules. Whole hours map to Etc/GMT zones (Indonesia's are); other
+		// offsets leave the server's own zone.
+		case "timezone_set": {
+			if (!server) return { timeZone: null };
+			const minutes = Number(cmd.offsetMinutes);
+			if (!Number.isInteger(minutes) || Math.abs(minutes) > 14 * 60) throw new Error("offsetMinutes must be a whole number of minutes");
+			const zone = minutes === 0 ? "UTC" : minutes % 60 === 0 ? `Etc/GMT${minutes > 0 ? "-" : "+"}${Math.abs(minutes) / 60}` : null;
+			if (zone && zone !== integrations.settings.timeZone) {
+				integrations.updateSettings({ timeZone: zone });
+				process.env.TZ = zone;
+			}
+			return { timeZone: integrations.settings.timeZone ?? null };
+		}
 		case "health": {
 			const snap = await health.check();
 			const runs = runner.summary();
@@ -1471,6 +1500,10 @@ async function handle(cmd: Command): Promise<unknown> {
 				runs: { running: runs.running, queued: runs.runs.filter((r) => r.status === "queued").length },
 				subagents: subagents.busy(),
 				clientInBackground: hub.clientInBackground(),
+				// Where the agent's commands run: the app shows a box that is not built (commands then fail) as a problem.
+				...(server ? { box: await boxHealth() } : {}),
+				// The zone schedules run in (timezone_set), as an offset the app can compare with the phone's.
+				clock: { timeZone: process.env.TZ ?? null, offsetMinutes: -new Date().getTimezoneOffset() },
 			};
 		}
 
@@ -1501,6 +1534,10 @@ async function handle(cmd: Command): Promise<unknown> {
 			};
 		}
 		// App settings: DNS, search keys, approvals, fallbacks, budget.
+		// Settings > Server agent > Send a test notification: goes out even with the app open.
+		case "notify_test":
+			if (!server) throw new Error("Notifications through ntfy are for a server agent.");
+			return notifier.test();
 		case "settings_get":
 			return integrations.publicSettings();
 		case "settings_set": {
@@ -1684,6 +1721,9 @@ async function main() {
 	});
 	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user
 	// turned that off. If the launcher went away, stop pointing at it.
+	// A server runs on UTC as a rule; the app tells it the phone's time zone (timezone_set), so "every day at 09:00"
+	// means the user's 09:00.
+	if (server && integrations.settings.timeZone) process.env.TZ = integrations.settings.timeZone;
 	if (server) {
 		const shell = settingsManager.getShellPath();
 		if (box.available && integrations.settings.containerShell !== false && shell !== boxScript) {

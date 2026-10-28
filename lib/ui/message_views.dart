@@ -1033,8 +1033,10 @@ class NoticeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (entry.error) return _ErrorNote(entry.text);
-    return Text(entry.text, style: Theme.of(context).textTheme.bodySmall);
+    // Notices from the app itself ("Not connected to the server.") have translations; the host's own text has none
+    // and stays as it is.
+    if (entry.error) return _ErrorNote(tr(entry.text));
+    return Text(tr(entry.text), style: Theme.of(context).textTheme.bodySmall);
   }
 }
 

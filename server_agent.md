@@ -337,6 +337,114 @@ berjalan, lalu menjalankan `bootstrap.sh`. Test: isi identik byte per byte denga
 di terminal, tempelan yang kehilangan satu karakter berhenti, shellcheck pada skrip yang dibuat; layar: isi clipboard
 dan berkas yang dibagikan.
 
+### 4.18 Setelah uji lapangan pertama: box gagal tertutup, tab server, zona waktu, versi agent
+
+Di VPS, image box tidak terbangun saat setup (podman rootless gagal, kemungkinan pembatasan user namespace AppArmor di
+Ubuntu 24.04), sehingga setiap perintah agent berakhir `exit 127`. Keputusan pemilik: **gagal tertutup**. Perintah
+agent tidak pernah dijalankan langsung di server; tanpa box, perintah ditolak dengan pesan yang menunjukkan jalan
+keluarnya.
+
+- `server/box/box`: tanpa image, mencetak bahwa box belum dibangun dan cara membangunnya (app: Pengaturan > Box agent >
+  Bangun box, atau `podman build` di server), keluar 127, dan tidak menjalankan apa pun.
+- `health` (server) memuat `box: {available, installed, enabled}`. Kartu Kesehatan server menampilkan baris Box, dan
+  bila belum dibangun: peringatan plus tombol **Bangun box** ke layar box. Layar box: kartu "Box belum dibangun" dengan
+  tombol bangun (konfirmasi biasa, bukan merah), petunjuk podman rootless bila gagal, baris Agent diredupkan, dan
+  Hentikan/Reset/Bangun ulang disembunyikan sampai ada image.
+- `bootstrap.sh` `repair_podman`: bila `kernel.apparmor_restrict_unprivileged_userns=1` dan profil `podman` belum
+  ada, menulis `/etc/apparmor.d/podman` (unconfined dengan `userns,`, sama dengan yang dibawa Ubuntu) dan memuatnya,
+  lalu `podman system migrate`. Bila podman tetap gagal, error-nya dicetak dan setup selesai tanpa box (dibangun nanti
+  dari app). Menempel ulang perintah setup memperbaiki server yang sudah terpasang.
+- Tab Terminal di server: koneksi putus (ssh keluar 255) menampilkan bar "Koneksi terputus. Shell tetap berjalan di
+  server." dengan **Sambungkan lagi**, yang bergabung ke sesi tmux yang sama (tidak lagi membunuhnya). `exit` di shell
+  (keluar 0) menutup sesi seperti biasa. Menutup tab server selalu bertanya karena sesinya ikut berakhir. Menu: **Shell
+  server** dan **Shell box (box agent)**.
+- Jadwal memakai jam HP: saat tersambung app mengirim `timezone_set {offsetMinutes}`; host menyimpannya
+  (`settings.timeZone`, mis. `Etc/GMT-7` untuk WIB) dan memasang `TZ`, juga setelah restart. Offset bukan jam bulat
+  (mis. +5:30) membiarkan zona yang ada. Mode HP tidak mengirimnya.
+- Versi agent di server: `hello_server.bundleStamp` (`.stamp` bundle) dibandingkan dengan bundle di APK. Bila beda
+  (atau host lama tidak menyebutnya), chat menampilkan banner "Agent di server bukan versi yang dibawa app ini" dengan
+  **Perbarui** (pasang lalu restart setelah agent selesai bekerja).
+- Test: launcher tanpa image (podmanbox), `health.box`, `timezone_set` termasuk setelah restart, `bundleStamp` di
+  hello; tmux dengan sshd asli: koneksi diputus (255, sesi tetap ada dan bisa disambung) dan `exit` (0, sesi hilang);
+  widget: layar box belum dibangun, membangun, gagal; kartu kesehatan; banner versi; golden: layar box belum dibangun,
+  kartu kesehatan dengan baris Box, banner versi, bar tab terputus (terang/gelap, EN/ID, 320dp dengan teks 1.3).
+
+### 4.19 Alur setup dan peralihan (review UI/UX, kelompok 2)
+
+- **Langkah bernomor**: setelah **Simpan server** baris berikutnya menjadi "3 · Tes koneksi", "4 · Pasang / perbarui
+  agent", "5 · Pakai agent server". Server tersimpan langsung dites (juga setiap layar dibuka selama belum dipakai).
+  Saklar **Pakai agent server** terkunci sampai tes menemukan agent berjalan di server ("Tes koneksi dan pasang agent
+  dulu"). "Agent belum dipasang" tampil oranye sebagai langkah berikutnya, bukan merah.
+- **Beralih ke server**: dialog menyebut yang tidak ikut (model, kunci API, akun GitHub/Cloudflare) dan cara membawa
+  chat (backup di HP, pulihkan di server), dengan tombol **Backup HP ini dulu**. Bila agent di HP sedang bekerja (giliran
+  chat, subagent, run latar), dialog mengatakannya dengan merah dan tombolnya menjadi **Hentikan dan beralih**.
+- **Pakai server lain** saat server sedang dipakai: kode baru disimpan belum aktif dan app kembali ke agent HP, jadi chat
+  tidak lagi bicara ke server lama sementara terminal dan file sudah ke server baru. Formulir menyebutkannya sebelum
+  disimpan. Server lama tetap berjalan dengan chat-nya.
+- **Mode server, tersambung gagal saat app dibuka**: layar baru dengan alasan dalam kalimat biasa (hasil `classify`, mis.
+  "Tidak bisa menjangkau …"), "Agent tetap bekerja di server", hitung mundur dan coba lagi otomatis dengan backoff yang
+  sama dengan banner, **Coba sekarang**, pengaturan server, pakai agent HP; teks ssh mentah di balik **Detail**. Layar
+  gagal mode HP tidak berubah (hanya bagian servernya dibuang).
+- **Setup**: baris perintah tidak lagi punya ikon salin sendiri bila file setup ada di app (menyalin baris itu saja gagal di
+  server yang belum punya file-nya); labelnya "Yang dijalankan tempelan di akhir". Alamat server wajib: **Salin perintah
+  setup** dan **Bagikan file** menunggu alamat diisi.
+- **Bahasa**: pesan dari sisi agent dibawa sebagai `Msg` (kalimat Inggris dengan `{address}`, `{n}`, `{error}` dan
+  nilainya, `lib/agent/msg.dart`); layar menerjemahkan lalu mengisinya (`trMsg`). Berlaku untuk kesalahan kode setup
+  (`SetupCodeError`), hasil Tes koneksi termasuk peringatan host key berubah, progres dan hasil Pasang ("Sudah
+  terbaru"), pesan restart. Pesan box dari host, hasil Uji box, catatan chat dari app ("Tidak tersambung ke server."),
+  dan dua teks Files juga diterjemahkan.
+- Test: widget (penomoran, saklar terkunci lalu terbuka setelah pasang+tes, dialog sibuk, tombol backup, alasan offline di
+  layar server, server lain saat aktif, diagnosa dan kode setup dalam bahasa Indonesia, salin hanya tempelan penuh, layar
+  gagal boot: alasan, Detail, coba lagi otomatis dan Coba sekarang); `Msg` di `classify` dan `SetupCodeError`; golden:
+  langkah 3–5, dialog beralih saat sibuk, layar gagal boot, layar setup.
+
+### 4.20 Merapikan (review UI/UX, kelompok 3 bagian A)
+
+- **Layar Agent server**: pill status di bawah judul (judul tidak terpotong di 320dp), "Menyambung…" saat pertama
+  menyambung. Kartu kesehatan berupa tabel dua kolom dengan angka sesuai bahasa (57,0 GB dari 100,0 GB, 26 j 3 mnt),
+  baris Versi agent (Sudah terbaru / versi lebih baru ada di app ini), peringatan memori (`memory.level`), baris Box.
+- **ntfy**: topik acak sudah terisi sebelum disimpan; setelah disimpan ada **Kirim notifikasi uji** (perintah host
+  `notify_test`, `Notifier.test()`: terkirim walau app terbuka dan di luar batas frekuensi, alasan gagal: mati,
+  pengaturan, status HTTP, jaringan) dan **Buka di ntfy** (`ntfy://host/topik`, jatuh ke web bila app ntfy tidak ada).
+- **Lupakan server**: menyebut agent di server tetap berjalan (jadwal, notifikasi), app kembali ke agent HP, menyambung
+  lagi berarti menjalankan ulang perintah setup; tombol menyalin perintah penghapusan dari `server/README.md`.
+- **Chip koneksi** pendek (ikon + "Server", "…", "Offline"; keadaan lengkap di tooltip), tombol banner "Coba", detik
+  dalam bahasa app. Golden memakai app bar seramai chat sungguhan (chip + tiga tombol).
+- **Dialog transfer**: saat koneksi server putus menampilkan "Menunggu koneksi ke server… (lanjut sendiri)" (barrier
+  modal menutupi banner chat).
+- **Pemilih folder**: spinner saat memuat, error dengan **Coba lagi** (bukan "Tidak ada folder di sini").
+- **Banner dev server**: `server:5173` di mode server, spinner saat port diteruskan, petunjuk `--host 127.0.0.1` bila
+  gagal.
+- **Backup**: "Backup dibuat di server · n file" dan **Unduh ke HP ini** sebagai tombol utama; path terakhir disimpan
+  per mode; konfirmasi pulihkan menyebut "di server".
+- **Editor**: "File diubah di server" di mode server, Muat ulang ikut merah, **Salin editan saya** sebelum memilih.
+- **Pengaturan**: baris "Agent: HP ini / server Anda" di atas (ke layar Agent server), entri "Agent di VPS / server",
+  baris box tetap box selagi status belum datang, status container dimuat ulang setelah kembali dari layar lain. Bug
+  ikut diperbaiki: membuka Pengaturan saat server tak terjangkau melempar error null-check.
+- **Istilah**: Tersambung (bukan Terhubung), Berjalan, Sisa disk, tidak aktif, kode setup, file (bukan berkas),
+  File → Impor dari HP.
+- Test: `Notifier.test` dan `notify_test` lewat ntfy tiruan; widget: chip/tooltip, tabel kesehatan EN/ID, topik terisi
+  dan uji notifikasi, dialog Lupakan dan salin perintah, transfer menunggu koneksi, pemilih folder gagal lalu coba lagi
+  (HP dan server), label dev server, backup server, salin editan (HP dan server), Pengaturan di HP/server; golden
+  diperbarui (kesehatan, banner, dialog editor, pemilih folder, setup).
+
+### 4.21 Yang belum ada untuk pengguna VPS pertama kali (kelompok 3 bagian B)
+
+- **Daftar periksa** di layar Agent server (saat tersambung): server terjangkau, versi agent sama dengan app, box
+  dibangun, ada model terhubung di server (server menyimpan kuncinya sendiri), notifikasi tersimpan dan menyala; yang
+  belum siap disertai cara memperbaikinya, dan "n dari m siap".
+- **Bila ada masalah** di app (repo privat, jadi catatan server ikut di APK): membuka terminal server (web console
+  penyedia atau app SSH), tempelan "arrived damaged", tanpa sudo, Podman/box, tidak terjangkau, host key, HP hilang.
+- **Kembali ke HP** sekarang bertanya dan menyebut yang tetap berjalan di server (jadwal, tugas latar, notifikasi) dan
+  bahwa permintaan persetujuan dari server muncul lagi setelah beralih kembali. Banner server di HP untuk persetujuan
+  yang menunggu tidak dibuat: mode HP tidak tersambung ke server, dan notifikasi ntfy "Approval needed" sudah memberi
+  tahu.
+- **bootstrap.sh** memperingatkan di awal bila RAM < ~2 GB atau sisa disk di `/` < 5 GB (peringatan, bukan penolakan;
+  `GRIPHUB_TEST_MEM_KB`/`GRIPHUB_TEST_DISK_KB` untuk test) dan menyebut menu baru "Agent on a VPS / server".
+- **HP hilang**: `server/README.md` dan app menjelaskan cara mencabut kunci app di server (`sed` baris `griphub-app`).
+- Test: daftar periksa (1 dari 4 siap, perbaikannya), bantuan (entri HP hilang), dialog kembali ke HP; bootstrap mesin
+  kecil vs `agentai`; golden layar tersambung dengan daftar periksa.
+
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 
 | Layar | Pemakaian `dart:io` | Perubahan |

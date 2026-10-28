@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import 'kit.dart';
@@ -101,9 +102,17 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
   List<FsEntry> _dirs = [];
   Map<String, bool> _git = {};
 
+  /// A listing on its way (on a server it can take a moment), and why the last one failed: an empty or unreachable
+  /// folder must not read as "No folders here", which invites making one.
+  bool _loading = true;
+  String? _loadError;
+
   Future<void> _loadChildren() async {
     final dir = path;
     final show = showHidden;
+    // Shown with the next frame (every caller rebuilds now: initState, _go, _switch, _retry).
+    _loading = true;
+    _loadError = null;
     try {
       // This phone's folders, or the server's (server_agent.md, phase 5).
       final entries = await widget.agent.fs.list(dir, detectGit: true);
@@ -115,14 +124,22 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
       setState(() {
         _dirs = dirs;
         _git = flags;
+        _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted || path != dir) return;
       setState(() {
         _dirs = [];
         _git = {};
+        _loading = false;
+        _loadError = e is AgentError && e.code == 'offline' ? tr('Not connected to the server.') : tr('$e');
       });
     }
+  }
+
+  void _retry() {
+    setState(() {});
+    _loadChildren();
   }
 
   void _go(String p) {
@@ -283,6 +300,30 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                         ),
                       ),
                     ],
+                  )
+                : _loading && children.isEmpty
+                ? const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                : _loadError != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.folderX, size: 32, color: p.faint),
+                          const SizedBox(height: 10),
+                          Text(tr("Can't open this folder"), style: text.titleSmall),
+                          const SizedBox(height: 4),
+                          Text(_loadError!, textAlign: TextAlign.center, style: text.bodySmall),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            icon: const Icon(LucideIcons.refreshCw, size: 16),
+                            label: Text(tr('Try again')),
+                            onPressed: _retry,
+                          ),
+                        ],
+                      ),
+                    ),
                   )
                 : children.isEmpty
                 ? Center(child: Text(tr('No folders here'), style: text.bodySmall))

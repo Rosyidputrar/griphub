@@ -4,6 +4,7 @@ import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/ui/editor_screen.dart';
 import 'package:griphub_agent/ui/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -46,6 +47,9 @@ void editorUiSuite(FsVariant variant) {
   /// Something else (the agent, say) changes the file underneath the editor.
   void changeBehindTheEditor(String name, String text) => File(p(name)).writeAsStringSync(text);
 
+  /// The dialog about a file changed underneath ("on disk" on the phone, "on the server" there).
+  final conflict = find.textContaining(RegExp(r'^File changed on (disk|the server)$'));
+
   Future<void> tapSave(WidgetTester tester) async {
     await tester.tap(find.byTooltip('Save'));
     await settle(tester);
@@ -65,13 +69,13 @@ void editorUiSuite(FsVariant variant) {
       await settle(tester);
       await tapSave(tester);
       expect(File(p('a.txt')).readAsStringSync(), 'two');
-      expect(find.text('File changed on disk'), findsNothing);
+      expect(conflict, findsNothing);
 
       c.text = 'three';
       await settle(tester);
       await tapSave(tester);
       expect(File(p('a.txt')).readAsStringSync(), 'three', reason: 'the second save follows the first');
-      expect(find.text('File changed on disk'), findsNothing);
+      expect(conflict, findsNothing);
     });
 
     testWidgets('a file changed underneath is not overwritten: it asks, and "Cancel" writes nothing', (tester) async {
@@ -82,7 +86,7 @@ void editorUiSuite(FsVariant variant) {
       changeBehindTheEditor('a.txt', 'the agent was here');
 
       await tapSave(tester);
-      expect(find.text('File changed on disk'), findsOneWidget);
+      expect(conflict, findsOneWidget);
       expect(
         File(p('a.txt')).readAsStringSync(),
         'the agent was here',
@@ -95,6 +99,30 @@ void editorUiSuite(FsVariant variant) {
       expect(c.text, 'my edit', reason: 'the edits are still on screen');
     });
 
+    testWidgets('my edits can be copied before choosing, and the title says where the file changed', (tester) async {
+      String? clipboard;
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') clipboard = (call.arguments as Map)['text'] as String?;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      File(p('a.txt')).writeAsStringSync('original');
+      final c = await open(tester, 'a.txt');
+      c.text = 'my careful edit';
+      await settle(tester);
+      changeBehindTheEditor('a.txt', 'the agent was here');
+      await tapSave(tester);
+      expect(find.text(agent.fs.isLocal ? 'File changed on disk' : 'File changed on the server'), findsOneWidget);
+      await tester.tap(find.text('Copy my edits'));
+      await settle(tester);
+      expect(clipboard, 'my careful edit');
+      expect(find.text('Copied'), findsOneWidget);
+      expect(conflict, findsOneWidget, reason: 'the choice is still to be made');
+      await tester.tap(find.text('Cancel'));
+      await settle(tester);
+    });
+
     testWidgets('"Overwrite" writes my version', (tester) async {
       File(p('a.txt')).writeAsStringSync('original');
       final c = await open(tester, 'a.txt');
@@ -105,13 +133,13 @@ void editorUiSuite(FsVariant variant) {
       await tester.tap(find.text('Overwrite'));
       await settle(tester);
       expect(File(p('a.txt')).readAsStringSync(), 'my edit');
-      expect(find.text('File changed on disk'), findsNothing);
+      expect(conflict, findsNothing);
 
       // Saving again follows my own write, without asking.
       c.text = 'my second edit';
       await settle(tester);
       await tapSave(tester);
-      expect(find.text('File changed on disk'), findsNothing);
+      expect(conflict, findsNothing);
       expect(File(p('a.txt')).readAsStringSync(), 'my second edit');
     });
 
@@ -131,7 +159,7 @@ void editorUiSuite(FsVariant variant) {
       c.text = 'after reload';
       await settle(tester);
       await tapSave(tester);
-      expect(find.text('File changed on disk'), findsNothing);
+      expect(conflict, findsNothing);
       expect(File(p('a.txt')).readAsStringSync(), 'after reload');
     });
 
@@ -143,7 +171,7 @@ void editorUiSuite(FsVariant variant) {
       File(p('a.txt')).deleteSync();
 
       await tapSave(tester);
-      expect(find.text('File changed on disk'), findsNothing);
+      expect(conflict, findsNothing);
       expect(File(p('a.txt')).readAsStringSync(), 'my edit');
     });
 

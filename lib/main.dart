@@ -52,7 +52,8 @@ class GripHubApp extends StatelessWidget {
                 : switch (agent.status) {
                     BootStatus.ready => HomeShell(agent: agent),
                     BootStatus.starting => _Boot(agent: agent),
-                    BootStatus.failed => _BootFailed(agent: agent),
+                    BootStatus.failed =>
+                      agent.client.isRemote ? ServerBootFailed(agent: agent) : _BootFailed(agent: agent),
                   },
           ),
         ),
@@ -95,7 +96,6 @@ class _BootFailed extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    final server = agent.client.isRemote;
     return Scaffold(
       body: SafeArea(
         child: Padding(
@@ -104,10 +104,7 @@ class _BootFailed extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const SizedBox(height: 32),
-              Text(
-                server ? tr('Could not reach the server agent') : tr('The agent could not start'),
-                style: text.headlineSmall,
-              ),
+              Text(tr('The agent could not start'), style: text.headlineSmall),
               const SizedBox(height: 8),
               Text(tr('Details from the runtime are below.'), style: text.bodyMedium?.copyWith(color: p.muted)),
               const SizedBox(height: 20),
@@ -130,53 +127,38 @@ class _BootFailed extends StatelessWidget {
               const SizedBox(height: 16),
               FilledButton(onPressed: agent.boot, child: Text(tr('Try again'))),
               const SizedBox(height: 8),
-              // The server may be down or unreachable: the agent on this phone still works, and the server can be fixed.
-              if (server) ...[
-                OutlinedButton(
-                  onPressed: () =>
-                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
-                  child: Text(tr('Server agent settings')),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton(
-                  onPressed: () => agent.remote.use(false),
-                  child: Text(tr('Use the agent on this phone')),
-                ),
-                const SizedBox(height: 8),
-              ],
-              // The phone's store key: nothing to do with a server agent, which keeps its own.
-              if (!server)
-                OutlinedButton(
-                  onPressed: () async {
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text(tr('Reset saved keys?')),
-                        content: Text(
-                          tr(
-                            'The saved store key could not be unlocked. Resetting it makes all saved tokens unreadable; you will need to sign in again.',
-                          ),
+              // A server that cannot be reached has its own screen (ServerBootFailed); this one is the phone's.
+              OutlinedButton(
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(tr('Reset saved keys?')),
+                      content: Text(
+                        tr(
+                          'The saved store key could not be unlocked. Resetting it makes all saved tokens unreadable; you will need to sign in again.',
                         ),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-                          FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: context.palette.danger,
-                              foregroundColor: Colors.white,
-                            ),
-                            onPressed: () => Navigator.pop(context, true),
-                            child: Text(tr('Reset')),
-                          ),
-                        ],
                       ),
-                    );
-                    if (ok == true) {
-                      await agent.client.resetStoreKey();
-                      await agent.boot();
-                    }
-                  },
-                  child: Text(tr('Reset saved keys')),
-                ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: context.palette.danger,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => Navigator.pop(context, true),
+                          child: Text(tr('Reset')),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok == true) {
+                    await agent.client.resetStoreKey();
+                    await agent.boot();
+                  }
+                },
+                child: Text(tr('Reset saved keys')),
+              ),
             ],
           ),
         ),

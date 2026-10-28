@@ -4,6 +4,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
+import 'box_screen.dart';
 import 'kit.dart';
 import 'task_log.dart';
 import 'terminal_screen.dart';
@@ -56,7 +57,8 @@ class _ContainerScreenState extends State<ContainerScreen> {
   @override
   void initState() {
     super.initState();
-    it.refreshContainer().catchError((_) => it.container!);
+    // The box screen reads its own status on a server.
+    if (!widget.agent.remote.active) it.refreshContainer().catchError((_) => it.container!);
   }
 
   Future<void> _install() async {
@@ -107,6 +109,8 @@ class _ContainerScreenState extends State<ContainerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // On a server the container is a rootless Podman box, with its own screen (server_agent.md).
+    if (widget.agent.remote.active) return BoxScreen(agent: widget.agent);
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(

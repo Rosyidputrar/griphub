@@ -54,15 +54,31 @@ class ShellSession {
   bool get remote => remoteSession != null;
   final terminal = Terminal(maxLines: 10000);
   bool exited = false;
+
+  /// How the shell (or on a server, ssh) ended; null while it runs.
+  int? exitCode;
+
+  /// A server tab that lost its connection (ssh ends with 255 then), rather than one whose shell was exited: its tmux
+  /// session is still running there.
+  bool get connectionLost => remote && exitCode == 255;
   String _line = '';
 
   /// Tail of what the shell actually printed, for the two guards below.
   String _outputTail = '';
 
-  static Future<ShellSession> start(AgentController agent, String cwd, {String? title, bool linux = false}) async {
+  /// [rejoin]: on a server, the tmux session to join again (a tab whose connection dropped); otherwise a new one.
+  static Future<ShellSession> start(
+    AgentController agent,
+    String cwd, {
+    String? title,
+    bool linux = false,
+    String? rejoin,
+  }) async {
     final env = await agent.client.environment();
     final home = env['HOME']!;
-    if (agent.remote.active && agent.remote.setup != null) return _startRemote(agent, env, cwd, title, linux);
+    if (agent.remote.active && agent.remote.setup != null) {
+      return _startRemote(agent, env, cwd, title, linux, rejoin);
+    }
     // mksh reads $ENV for interactive shells: a short prompt and a few aliases.
     final rc = File('$home/.griphubrc');
     rc.writeAsStringSync(r'''
@@ -94,6 +110,7 @@ alias gs='git status'
     String cwd,
     String? title,
     bool linux,
+    String? rejoin,
   ) {
     final setup = agent.remote.setup!;
     final kind = linux ? 'box' : 'sh';
@@ -101,7 +118,7 @@ alias gs='git status'
     while (sessions.any((s) => !s.exited && s.remoteSession == 'griphub-$kind-$n')) {
       n++;
     }
-    final name = 'griphub-$kind-$n';
+    final name = rejoin ?? 'griphub-$kind-$n';
     final argv = setup.terminalArgv(cwd: cwd, session: name, box: linux);
     final shellEnv = {...env, 'TERM': 'xterm-256color'};
     final pty = Pty.start(
@@ -133,6 +150,7 @@ alias gs='git status'
     });
     pty.exitCode.then((code) {
       exited = true;
+      exitCode = code;
       terminal.write('\r\n[process exited with code $code]\r\n');
       changes.value++;
     });
@@ -155,6 +173,10 @@ alias gs='git status'
     type('$command\r');
   }
 
+  /// Lets go of a server tab's connection; its tmux session keeps running there (and can be joined again).
+  void detach() => pty.kill();
+
+  /// Ends the tab: its shell here, or on a server its tmux session too.
   void kill() {
     pty.kill();
     final end = remoteKill;
@@ -362,14 +384,20 @@ class _TerminalScreenState extends State<TerminalScreen> {
     focus.requestFocus();
   }
 
-  Future<ShellSession?> _newTab({String? command, bool linux = false, String? title, int? replace}) async {
+  Future<ShellSession?> _newTab({
+    String? command,
+    bool linux = false,
+    String? title,
+    int? replace,
+    String? rejoin,
+  }) async {
     setState(() {
       starting = true;
       error = null;
     });
     ShellSession s;
     try {
-      s = await ShellSession.start(agent, _cwd, title: title, linux: linux);
+      s = await ShellSession.start(agent, _cwd, title: title, linux: linux, rejoin: rejoin);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -398,14 +426,21 @@ class _TerminalScreenState extends State<TerminalScreen> {
   }
 
   /// Closes tab [i]; a shell that is still running is only killed once confirmed.
+  /// On a server, closing a tab ends its session there (even after the connection dropped), so it always asks.
   Future<void> _confirmClose(int i) async {
     final s = sessions[i];
-    if (!s.exited) {
+    if (!s.exited || s.remote) {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text(tr('Close this tab?')),
-          content: Text(tr('Its shell is still running and will be stopped.')),
+          title: Text(tr(s.remote ? 'Close this tab and end its session on the server?' : 'Close this tab?')),
+          content: Text(
+            tr(
+              s.remote
+                  ? 'The shell on the server stops, with whatever is running in it. To only step away, leave the tab open: it keeps running on the server.'
+                  : 'Its shell is still running and will be stopped.',
+            ),
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
             TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Close tab'))),
@@ -437,6 +472,12 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
     final i = sessions.indexOf(s);
     controller.clearSelection();
+    if (s.remote) {
+      // A server tab joins its tmux session again: what ran in it is still there.
+      s.detach();
+      await _newTab(linux: s.linux, title: s.title, replace: i, rejoin: s.remoteSession);
+      return;
+    }
     s.kill();
     await _newTab(linux: s.linux, title: s.title, command: s.linux ? 'box' : null, replace: i);
   }
@@ -614,7 +655,9 @@ class _TerminalScreenState extends State<TerminalScreen> {
             Text(tr('Terminal')),
             if (s != null)
               Text(
-                s.linux ? tr('Linux container') : s.cwd.replaceFirst(RegExp(r'^.*/files/home'), '~'),
+                s.linux
+                    ? tr(s.remote ? 'The agent\'s box' : 'Linux container')
+                    : s.cwd.replaceFirst(RegExp(r'^.*/files/home'), '~'),
                 style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.muted),
               ),
           ],
@@ -652,6 +695,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   )
           : Column(
               children: [
+                if (s.connectionLost) ServerTabLostBar(onReconnect: _restart),
                 Expanded(
                   child: TerminalPane(
                     key: _pane,
@@ -883,8 +927,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     child: ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Icon(LucideIcons.smartphone, size: 18),
-                      title: Text(tr('Android shell')),
+                      leading: Icon(agent.remote.active ? LucideIcons.server : LucideIcons.smartphone, size: 18),
+                      title: Text(tr(agent.remote.active ? 'Server shell' : 'Android shell')),
                     ),
                   ),
                   PopupMenuItem(
@@ -893,7 +937,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       leading: Icon(LucideIcons.box, size: 18),
-                      title: Text(tr('Linux shell (box)')),
+                      title: Text(tr(agent.remote.active ? 'Box shell (the agent\'s box)' : 'Linux shell (box)')),
                     ),
                   ),
                   PopupMenuItem(
@@ -1053,6 +1097,54 @@ class _KeyBar extends StatelessWidget {
               key('', onHistory, icon: LucideIcons.history),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A server tab whose connection dropped: its shell is still running on the server, one tap away.
+class ServerTabLostBar extends StatelessWidget {
+  const ServerTabLostBar({super.key, required this.onReconnect});
+
+  final VoidCallback onReconnect;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final message = Row(
+      children: [
+        Icon(LucideIcons.unplug, size: 16, color: p.warning),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            tr('Connection lost. The shell keeps running on the server.'),
+            style: TextStyle(fontSize: 12.5, color: p.text),
+          ),
+        ),
+      ],
+    );
+    final button = TextButton(onPressed: onReconnect, child: Text(tr('Reconnect')));
+    return Material(
+      color: p.warning.withValues(alpha: 0.12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+        // On a narrow phone the button goes under the message rather than squeezing it into a column of words.
+        child: LayoutBuilder(
+          builder: (context, box) => box.maxWidth < 340
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Padding(padding: const EdgeInsets.only(top: 4, right: 8), child: message),
+                    button,
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: message),
+                    button,
+                  ],
+                ),
         ),
       ),
     );

@@ -251,6 +251,26 @@ void filesUiSuite(FsVariant variant) {
       return results;
     }
 
+    testWidgets('a folder that cannot be listed says so with a way to try again, not "No folders here"', (
+      tester,
+    ) async {
+      Directory(p('gone')).createSync();
+      await open(tester);
+      Directory(p('gone')).deleteSync();
+      await tester.tap(find.text('gone'));
+      await pumpUi(tester);
+      await settle(tester);
+      expect(find.text("Can't open this folder"), findsOneWidget);
+      expect(find.text('No folders here'), findsNothing);
+
+      Directory(p('gone')).createSync();
+      await tester.tap(find.text('Try again'));
+      await pumpUi(tester);
+      await settle(tester);
+      expect(find.text("Can't open this folder"), findsNothing);
+      expect(find.text('No folders here'), findsOneWidget);
+    });
+
     testWidgets('lists folders only, marks git repositories, hides dot folders until asked', (tester) async {
       Directory(p('repo/.git')).createSync(recursive: true);
       Directory(p('plain')).createSync();

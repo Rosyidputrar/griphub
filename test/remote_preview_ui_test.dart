@@ -65,7 +65,7 @@ void main() {
       () =>
           openDevServer(context, agent, port, 'http://localhost:$port', opener: (c, t, u) async => opened.add((t, u))),
     );
-    expect(opened.single.$1, 'localhost:$port');
+    expect(opened.single.$1, 'server:$port', reason: 'the server\'s port, not this phone\'s');
     expect(opened.single.$2, startsWith('http://127.0.0.1:'));
     expect(opened.single.$2, isNot(contains(':$port/')), reason: "a local port of the phone, not the server's");
     expect(await tester.runAsync(() => RemoteRig.fetch(opened.single.$2)), (200, '<h1>dev</h1>'));

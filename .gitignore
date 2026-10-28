@@ -67,3 +67,6 @@ android/key.properties
 
 # Host test bundles (agent/test)
 /agent/build/
+
+# Written by a failing golden test
+test/golden/failures/

@@ -22,10 +22,11 @@ class BackupScreen extends StatefulWidget {
 }
 
 class _BackupScreenState extends State<BackupScreen> {
-  /// Remembered for the app's lifetime so Restore defaults to it.
-  static String? _lastBackup;
+  /// Remembered for the app's lifetime so Restore defaults to it: one for this phone, one for the server, since a path
+  /// on one means nothing on the other.
+  static final _lastBackup = <bool, String>{};
 
-  late final _path = TextEditingController(text: _lastBackup ?? '');
+  late final _path = TextEditingController(text: _lastBackup[_server] ?? '');
   bool _includeWorkspace = false;
   bool _backingUp = false;
   bool _restoring = false;
@@ -53,7 +54,7 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _backingUp = true);
     try {
       final r = await agent.features.backup(includeWorkspace: _includeWorkspace);
-      _lastBackup = r.path;
+      _lastBackup[_server] = r.path;
       if (mounted) {
         setState(() {
           _result = r;
@@ -73,6 +74,7 @@ class _BackupScreenState extends State<BackupScreen> {
     if (r == null) return;
     final local = await runTransfer<String>(
       context,
+      connection: widget.agent.client.connection,
       title: tr('Downloading the backup'),
       task: (h) => agent.fs.toPhoneFile(r.path, onProgress: h.onProgress, cancel: h.cancel),
     );
@@ -100,6 +102,7 @@ class _BackupScreenState extends State<BackupScreen> {
       final target = '$dir/.restore-$name';
       final ok = await runTransfer<bool>(
         context,
+        connection: widget.agent.client.connection,
         title: tr('Sending {name}').replaceAll('{name}', name),
         task: (h) async {
           await agent.fs.mkdir(dir);
@@ -135,8 +138,10 @@ class _BackupScreenState extends State<BackupScreen> {
         title: Text(tr('Restore backup?')),
         content: Text(
           tr(
-            'Chats, skills, templates, schedules and project memory are overwritten with the backup\'s copies. '
-            'This cannot be undone.',
+            _server
+                ? 'Chats, skills, templates, schedules and project memory on the server are overwritten with the backup\'s copies. This cannot be undone.'
+                : 'Chats, skills, templates, schedules and project memory are overwritten with the backup\'s copies. '
+                      'This cannot be undone.',
           ),
         ),
         actions: [
@@ -205,7 +210,7 @@ class _BackupScreenState extends State<BackupScreen> {
                 const SizedBox(height: 8),
                 PrimaryButton(
                   label: tr('Create backup'),
-                  icon: LucideIcons.download,
+                  icon: LucideIcons.archive,
                   busy: _backingUp,
                   onPressed: _backup,
                 ),
@@ -220,7 +225,12 @@ class _BackupScreenState extends State<BackupScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('${r.files} files', style: text.labelSmall),
+                              Text(
+                                _server
+                                    ? tr('Backup made on the server · {n} files').replaceAll('{n}', '${r.files}')
+                                    : tr('{n} files').replaceAll('{n}', '${r.files}'),
+                                style: text.labelSmall,
+                              ),
                               const SizedBox(height: 2),
                               SelectableText(
                                 r.path,
@@ -233,15 +243,15 @@ class _BackupScreenState extends State<BackupScreen> {
                       ],
                     ),
                   ),
-                  if (_server)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _download,
-                        icon: const Icon(LucideIcons.smartphone, size: 16),
-                        label: Text(tr('Download to this phone')),
-                      ),
+                  // The zip is on the server; keeping a copy on the phone is the step that makes it a backup.
+                  if (_server) ...[
+                    const SizedBox(height: 10),
+                    PrimaryButton(
+                      label: tr('Download to this phone'),
+                      icon: LucideIcons.smartphone,
+                      onPressed: _download,
                     ),
+                  ],
                 ],
                 const SizedBox(height: 12),
                 Row(

@@ -3,6 +3,7 @@
 // host are in host-process.test.mjs.
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -183,6 +184,18 @@ test("check runs a command through the launcher: yes, with the reason when not",
 	const r = await bad.box.check();
 	assert.equal(r.ok, false);
 	assert.match(r.message, /crun: cannot start/);
+});
+
+test("without an image every command is refused, saying what to do, and nothing runs on the server", async (t) => {
+	const r = rig(t, { image: false });
+	const ran = spawnSync(BOX, ["-c", "touch ran-outside"], { cwd: r.home, encoding: "utf8", env: process.env });
+	assert.equal(ran.status, 127);
+	assert.match(ran.stderr, /has not been built on this server yet/);
+	assert.match(ran.stderr, /Settings > The agent's box > Build the box/);
+	assert.ok(!existsSync(join(r.home, "ran-outside")), "the command did not run anywhere");
+	const c = await r.box.check();
+	assert.equal(c.ok, false);
+	assert.match(c.message, /has not been built/);
 });
 
 test("resetting throws the container away and keeps the image and the home folder", async (t) => {

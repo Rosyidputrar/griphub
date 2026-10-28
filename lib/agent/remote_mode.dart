@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'agent_controller.dart';
 import 'agent_fs.dart';
+import 'msg.dart';
 import 'port_forward.dart';
 import 'remote_fs.dart';
 import 'remote_profile.dart';
@@ -108,6 +109,34 @@ class RemoteMode extends ChangeNotifier {
   Future<String> bootstrapCommand({String? address}) async =>
       setup!.bootstrapCommand(await publicKey(), address: address);
 
+  String? _localStamp;
+  String? _stampDir;
+
+  /// The `.stamp` of the agent bundle this app carries (null without one). Read once per bundle folder.
+  String? get localStamp {
+    if (_stampDir != hostDir || _stampDir == null) {
+      _stampDir = hostDir;
+      final dir = hostDir;
+      try {
+        _localStamp = dir == null ? null : File('$dir/.stamp').readAsStringSync().trim();
+      } catch (_) {
+        _localStamp = null;
+      }
+    }
+    return _localStamp;
+  }
+
+  /// Whether the agent on the server is another version than the one this app carries: the server names the bundle it
+  /// came from when the link comes up (`hello_server.bundleStamp`; older hosts do not, and count as other). Null when it
+  /// cannot be told (not on a server, not connected yet, no bundle here).
+  bool? get serverOutdated {
+    if (!active) return null;
+    final hello = agent.client.serverHello;
+    final local = localStamp;
+    if (hello == null || local == null || local.isEmpty) return null;
+    return (hello['bundleStamp'] as String?)?.trim() != local;
+  }
+
   /// The setup script this app carries (the server/ folder in one file, built into the agent bundle), or null when
   /// the bundle has none.
   File? get setupScript {
@@ -125,14 +154,19 @@ class RemoteMode extends ChangeNotifier {
     return RemoteSetup.setupPaste(await script.readAsString(), await bootstrapCommand(address: address));
   }
 
-  /// Reads a pasted setup code and keeps the server (not yet in use). Throws [FormatException] with the reason.
+  /// Reads a pasted setup code and keeps the server, not in use yet: it is tested and has the agent installed before
+  /// the app switches to it. A server that was in use is let go (the app goes back to the agent on this phone), so the
+  /// chat never talks to the old server while the terminal and files already go to the new one. Throws
+  /// [FormatException] ([SetupCodeError]) with the reason.
   RemoteProfile saveCode(String text) {
-    final saved = RemoteProfile.fromSetupCode(SetupCode.parse(text)).copyWith(active: active);
+    final saved = RemoteProfile.fromSetupCode(SetupCode.parse(text));
+    final wasActive = active;
     setup!.write(saved);
     store!.save(saved);
     profile = saved;
     _apply();
     notifyListeners();
+    if (wasActive) unawaited(agent.restart());
     return saved;
   }
 
@@ -154,7 +188,9 @@ class RemoteMode extends ChangeNotifier {
   /// otherwise the service is restarted at once.
   Future<InstallResult> install({void Function(String line)? onProgress}) async {
     final dir = hostDir;
-    if (dir == null) return const InstallResult(ok: false, message: 'This app does not have an agent bundle to copy.');
+    if (dir == null) {
+      return const InstallResult(ok: false, says: [Msg('This app does not have an agent bundle to copy.')]);
+    }
     final client = agent.client;
     final connected = active && client.isRemote && client.connection.value.connected;
     final copied = await setup!.install(dir, env: _env, onProgress: onProgress, restart: !connected);
@@ -165,19 +201,25 @@ class RemoteMode extends ChangeNotifier {
         return InstallResult(
           ok: true,
           filesSent: copied.filesSent,
-          message: '${copied.message} The agent is restarting.',
+          says: [...copied.says, const Msg('The agent is restarting.')],
         );
       }
       return InstallResult(
         ok: true,
         filesSent: copied.filesSent,
-        message: '${copied.message} The agent restarts with the new version once it is done with the current work.',
+        says: [
+          ...copied.says,
+          const Msg('The agent restarts with the new version once it is done with the current work.'),
+        ],
       );
     } catch (e) {
       return InstallResult(
         ok: false,
         filesSent: copied.filesSent,
-        message: '${copied.message} Restarting the agent failed: $e',
+        says: [
+          ...copied.says,
+          Msg('Restarting the agent failed: {error}', {'error': e}),
+        ],
       );
     }
   }

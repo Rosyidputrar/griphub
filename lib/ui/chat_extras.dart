@@ -699,6 +699,18 @@ class DevServerBanner extends StatefulWidget {
 class _DevServerBannerState extends State<DevServerBanner> {
   final opening = <int>{};
 
+  /// Ports whose preview is being opened (on a server the port is forwarded to this phone first, which takes a moment).
+  final previewing = <int>{};
+
+  Future<void> _preview(int port, String url) async {
+    setState(() => previewing.add(port));
+    try {
+      await openDevServer(context, widget.agent, port, url);
+    } finally {
+      if (mounted) setState(() => previewing.remove(port));
+    }
+  }
+
   Future<void> _share(int port) async {
     final f = widget.agent.features;
     setState(() => opening.add(port));
@@ -749,17 +761,19 @@ class _DevServerBannerState extends State<DevServerBanner> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          f.tunnels[e.key] ?? 'localhost:${e.key}',
+                          // On a server, "localhost" would read as this phone.
+                          f.tunnels[e.key] ?? (widget.agent.client.isRemote ? 'server:${e.key}' : 'localhost:${e.key}'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.text),
                         ),
                       ),
-                      TextButton(
-                        // On a server the port is forwarded to this phone first.
-                        onPressed: () => openDevServer(context, widget.agent, e.key, e.value),
-                        child: Text(tr('Preview')),
-                      ),
+                      previewing.contains(e.key)
+                          ? const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                            )
+                          : TextButton(onPressed: () => _preview(e.key, e.value), child: Text(tr('Preview'))),
                       opening.contains(e.key)
                           ? const Padding(
                               padding: EdgeInsets.all(12),

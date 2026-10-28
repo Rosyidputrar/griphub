@@ -204,6 +204,12 @@ void main() {
     },
   );
 
+  test('a server is told the phone\'s time zone, so schedules run at the user\'s hours', () async {
+    final tz = backend.sent.where((c) => c['type'] == 'timezone_set').toList();
+    expect(tz, hasLength(1));
+    expect(tz.single['offsetMinutes'], DateTime.now().timeZoneOffset.inMinutes);
+  });
+
   test('on the phone boot does not ask for waiting approvals (its host lives and dies with the app)', () async {
     final b = FakeBackend()..startPlan.add(false);
     b.onCommand = (c) => switch (c['type']) {
@@ -220,5 +226,6 @@ void main() {
     expect(a.status, BootStatus.ready);
     expect(b.sent.map((c) => c['type']), isNot(contains('approvals_pending')));
     expect(b.sent.map((c) => c['type']), isNot(contains('resume')));
+    expect(b.sent.map((c) => c['type']), isNot(contains('timezone_set')), reason: 'the phone has the phone\'s clock');
   });
 }

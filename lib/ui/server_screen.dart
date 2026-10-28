@@ -8,6 +8,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/remote_profile.dart';
+import 'backup_screen.dart';
+import 'box_screen.dart';
 import 'i18n.dart';
 import 'kit.dart';
 import 'theme.dart';
@@ -36,23 +38,35 @@ class ConnectionChip extends StatelessWidget {
         final p = context.palette;
         final server = agent.remote.active;
         final c = agent.client.connection.value;
+        // Short, so the chat's title and buttons keep their room on a narrow phone; the whole state is in the tooltip
+        // and, while the link is down, in the banner under the bar.
         final label = !server
             ? tr('Phone')
             : switch (c.state) {
                 LinkState.connected => tr('Server'),
-                LinkState.connecting || LinkState.reconnecting => tr('Reconnecting'),
+                LinkState.connecting || LinkState.reconnecting => '…',
                 LinkState.offline => tr('Offline'),
+              };
+        final full = !server
+            ? tr('The agent on this phone')
+            : switch (c.state) {
+                LinkState.connected => tr('Connected to the server'),
+                LinkState.connecting => tr('Connecting to the server…'),
+                LinkState.reconnecting => tr('Reconnecting to the server'),
+                LinkState.offline => tr('Not connected to the server'),
               };
         return Padding(
           padding: const EdgeInsets.only(right: 4),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(99),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
-            child: Pill(
-              label,
-              color: server ? _stateColor(p, c) : p.muted,
-              dot: true,
-              icon: server ? LucideIcons.server : LucideIcons.smartphone,
+          child: Tooltip(
+            message: full,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(99),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
+              child: Pill(
+                label,
+                color: server ? _stateColor(p, c) : p.muted,
+                icon: server ? LucideIcons.server : LucideIcons.smartphone,
+              ),
             ),
           ),
         );
@@ -110,8 +124,8 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
         } else {
           title = c.attempt <= 1 && wait == null
               ? tr('Connecting to the server…')
-              : '${tr('Reconnecting to the server')}${wait != null && wait.inSeconds > 0 ? ' · ${wait.inSeconds} s' : '…'}';
-          action = tr('Retry now');
+              : '${tr('Reconnecting to the server')}${wait != null && wait.inSeconds > 0 ? ' · ${tr('{n} s').replaceAll('{n}', '${wait.inSeconds}')}' : '…'}';
+          action = tr('Retry');
         }
         return Material(
           color: color.withValues(alpha: 0.12),
@@ -153,6 +167,203 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
   }
 }
 
+/// Under the chat's connection banner: the agent on the server is not the version this app carries (the app was updated,
+/// the server was not), with the update one tap away. The update waits until the agent is done with its work.
+class ServerUpdateBanner extends StatefulWidget {
+  const ServerUpdateBanner({super.key, required this.agent});
+
+  final AgentController agent;
+
+  @override
+  State<ServerUpdateBanner> createState() => _ServerUpdateBannerState();
+}
+
+class _ServerUpdateBannerState extends State<ServerUpdateBanner> {
+  bool _updating = false;
+
+  /// After an update the host restarts once it is idle; until the new one says hello, the banner says so.
+  bool _waiting = false;
+
+  Future<void> _update() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _updating = true);
+    try {
+      final r = await widget.agent.remote.install();
+      if (!mounted) return;
+      setState(() => _waiting = r.ok);
+      messenger.showSnackBar(SnackBar(content: Text(trMsgs(r.says))));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final agent = widget.agent;
+    return ListenableBuilder(
+      listenable: Listenable.merge([agent.client.connection, agent.remote]),
+      builder: (context, _) {
+        if (!agent.client.connection.value.connected || agent.remote.serverOutdated != true) {
+          _waiting = false;
+          return const SizedBox.shrink();
+        }
+        final p = context.palette;
+        return Material(
+          color: p.accent.withValues(alpha: 0.10),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+            child: Row(
+              children: [
+                Icon(LucideIcons.circleArrowUp, size: 16, color: p.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _waiting
+                        ? tr('The server agent updates once it finishes its current work.')
+                        : tr('The agent on the server is not the version this app carries.'),
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                ),
+                if (_updating)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                else if (!_waiting)
+                  TextButton(onPressed: _update, child: Text(tr('Update'))),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// The app opened on a server it could not reach (the phone offline, the server down): unlike a link that drops later
+/// there is nothing to show yet. Says why in plain words, tries again on its own with the banner's backoff, and keeps
+/// the raw output under Details. The server settings and the agent on this phone are one tap away.
+class ServerBootFailed extends StatefulWidget {
+  const ServerBootFailed({super.key, required this.agent});
+
+  final AgentController agent;
+
+  @override
+  State<ServerBootFailed> createState() => _ServerBootFailedState();
+}
+
+class _ServerBootFailedState extends State<ServerBootFailed> {
+  late final DateTime _retryAt;
+  Timer? _tick;
+
+  AgentController get agent => widget.agent;
+
+  @override
+  void initState() {
+    super.initState();
+    _retryAt = DateTime.now().add(agent.client.backoff(agent.bootFailures));
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      if (!DateTime.now().isBefore(_retryAt)) {
+        _retry();
+      } else {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  void _retry() {
+    _tick?.cancel();
+    agent.boot();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final raw = agent.bootError ?? '';
+    final profile = agent.remote.profile;
+    final setup = agent.remote.setup;
+    final why = profile != null && setup != null
+        ? trMsg(setup.classify(profile, 255, '', raw).say)
+        : tr('Could not reach the server agent');
+    final wait = (_retryAt.difference(DateTime.now()).inMilliseconds / 1000).ceil();
+    return Scaffold(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 24),
+            Icon(LucideIcons.cloudOff, size: 36, color: p.warning),
+            const SizedBox(height: 14),
+            Text(tr('Could not reach the server agent'), style: text.headlineSmall),
+            const SizedBox(height: 10),
+            Text(why, style: text.bodyMedium),
+            const SizedBox(height: 10),
+            Text(tr('The agent keeps working on the server.'), style: text.bodySmall?.copyWith(color: p.muted)),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: p.warning)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    tr('Trying again in {n} s').replaceAll('{n}', '${wait < 1 ? 1 : wait}'),
+                    style: text.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            FilledButton(onPressed: _retry, child: Text(tr('Try now'))),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: () =>
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
+              child: Text(tr('Server agent settings')),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: () => agent.remote.use(false), child: Text(tr('Use the agent on this phone'))),
+            if (raw.trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  title: Text(tr('Details'), style: text.titleSmall),
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: p.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: p.border),
+                      ),
+                      child: SelectableText(
+                        raw.trim(),
+                        style: TextStyle(fontFamily: mono, fontSize: 11.5, height: 1.5, color: p.text),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Set up, check, install and switch to the agent on the user's server.
 class ServerScreen extends StatefulWidget {
   const ServerScreen({super.key, required this.agent});
@@ -190,6 +401,8 @@ class _ServerScreenState extends State<ServerScreen> {
     agent.client.connection.addListener(_onLink);
     _loadHealth();
     _checkVersion();
+    // A saved server not in use yet: test it at once, so the next step (install, or switch) is plain.
+    if (agent.remote.configured && !agent.remote.active) _test();
   }
 
   Future<void> _checkVersion() async {
@@ -232,7 +445,8 @@ class _ServerScreenState extends State<ServerScreen> {
       if (!mounted) return;
       setState(() {
         health = h;
-        topic.text = s.notifyTopic ?? '';
+        // Not set up yet: a fresh secret topic is ready, so Save is the only step.
+        topic.text = s.notifyTopic ?? (topic.text.isEmpty ? _newTopic() : topic.text);
         ntfyUrl.text = s.notifyUrl;
       });
     } catch (_) {}
@@ -246,7 +460,15 @@ class _ServerScreenState extends State<ServerScreen> {
         code.clear();
         changingServer = false;
         checked = null;
+        installOk = null;
+        upToDate = null;
+        health = null;
       });
+      // Straight on to step 3: whether the app gets in, and whether the agent is there yet.
+      _test();
+      _checkVersion();
+    } on SetupCodeError catch (e) {
+      setState(() => codeError = trMsg(e.say));
     } on FormatException catch (e) {
       setState(() => codeError = e.message);
     }
@@ -272,12 +494,12 @@ class _ServerScreenState extends State<ServerScreen> {
       installOk = null;
       installNote = tr('Preparing…');
     });
-    final r = await agent.remote.install(onProgress: (l) => mounted ? setState(() => installNote = l) : null);
+    final r = await agent.remote.install(onProgress: (l) => mounted ? setState(() => installNote = tr(l)) : null);
     if (!mounted) return;
     setState(() {
       installing = false;
       installOk = r.ok;
-      installNote = r.message;
+      installNote = trMsgs(r.says);
     });
     if (r.ok) {
       unawaited(_test());
@@ -287,18 +509,83 @@ class _ServerScreenState extends State<ServerScreen> {
 
   Future<void> _use(bool server) async {
     if (server) {
+      // Whatever the agent on this phone is doing stops with the switch.
+      final working = agent.working;
+      final text = Theme.of(context).textTheme;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          final p = context.palette;
+          return AlertDialog(
+            title: Text(tr('Use the server agent?')),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (working) ...[
+                    Text(
+                      tr('The agent on this phone is working. Switching now stops it.'),
+                      style: TextStyle(color: p.danger, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  Text(
+                    tr(
+                      'Chats, files and projects will be the ones on your server. The ones on this phone stay here, untouched, and come back when you switch back.',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    tr(
+                      'Models, API keys and accounts (GitHub, Cloudflare…) are not on the server: connect them again there. To take chats along, make a backup on this phone first and restore it on the server (Settings > Backup & restore).',
+                    ),
+                    style: text.bodySmall,
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      icon: const Icon(LucideIcons.archive, size: 16),
+                      label: Text(tr('Back up this phone first')),
+                      onPressed: () {
+                        Navigator.pop(context, false);
+                        Navigator.of(
+                          this.context,
+                        ).push(MaterialPageRoute(builder: (_) => BackupScreen(agent: agent)));
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+              FilledButton(
+                style: working
+                    ? FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white)
+                    : null,
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(tr(working ? 'Stop and switch' : 'Use the server')),
+              ),
+            ],
+          );
+        },
+      );
+      if (ok != true) return;
+    } else {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text(tr('Use the server agent?')),
+          title: Text(tr('Use the agent on this phone?')),
           content: Text(
             tr(
-              'Chats, files and projects will be the ones on your server. The ones on this phone stay here, untouched, and come back when you switch back.',
+              'The agent on the server keeps running: schedules, background tasks and notifications go on. What it asks you to approve shows again when you switch back to it. The chats on this phone come back.',
             ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Use the server'))),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Use this phone'))),
           ],
         ),
       );
@@ -316,8 +603,32 @@ class _ServerScreenState extends State<ServerScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Forget this server?')),
-        content: Text(
-          tr('The app deletes its key for the server and the saved address. Nothing on the server is touched.'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr('The app deletes its key for the server and the saved address. Nothing on the server is touched.'),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                tr(
+                  'The agent on the server keeps running, with its schedules and notifications, and the app goes back to the agent on this phone. To connect again, run the setup command on the server again.',
+                ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                  icon: const Icon(LucideIcons.copy, size: 16),
+                  label: Text(tr('Copy the commands that remove it from the server')),
+                  onPressed: () => _copy(removeCommands, tr('removal commands')),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
@@ -347,6 +658,53 @@ class _ServerScreenState extends State<ServerScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     }
     if (mounted) setState(() {});
+  }
+
+  /// What server/README.md ("Menghapus") says to run as root to take the agent off the server: everything of it goes,
+  /// chats and the workspace too.
+  static const removeCommands =
+      '# Removes the GripHub agent and everything of it (chats, ~/workspace, the box). Make a backup first.\n'
+      'runuser -u griphub -- env XDG_RUNTIME_DIR=/run/user/\$(id -u griphub) systemctl --user disable --now griphub-hostd\n'
+      'loginctl disable-linger griphub\n'
+      'userdel -r griphub\n';
+
+  bool _testingNotify = false;
+
+  Future<void> _testNotify() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _testingNotify = true);
+    String said;
+    try {
+      final r = (await agent.client.call<Map>('notify_test')).cast<String, dynamic>();
+      final detail = r['detail'] as String?;
+      said = switch (r['ok'] == true ? 'ok' : r['reason']) {
+        'ok' => tr('Sent. It should arrive in a few seconds; if not, check the topic in the ntfy app.'),
+        'off' => tr('Notifications are off. Save the topic first.'),
+        'config' => '${tr('The settings are not usable:')} ${tr(detail ?? '')}',
+        'http' => tr('The ntfy server refused it (status {status}).').replaceAll('{status}', detail ?? '?'),
+        _ => '${tr('The server could not reach ntfy:')} ${detail ?? ''}',
+      };
+    } on AgentError catch (e) {
+      said = tr(e.message);
+    }
+    if (!mounted) return;
+    setState(() => _testingNotify = false);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(said)));
+  }
+
+  /// Opens the topic in the ntfy app (subscribing to it there), or on the web without the app.
+  Future<void> _openNtfy() async {
+    final base = Uri.tryParse(ntfyUrl.text.trim());
+    final t = topic.text.trim();
+    if (base == null || t.isEmpty) return;
+    final host = base.host.isEmpty ? 'ntfy.sh' : base.host;
+    try {
+      await agent.client.openUrl('ntfy://$host/$t');
+    } catch (_) {
+      await agent.client.openUrl('${ntfyUrl.text.trim().replaceAll(RegExp(r'/+$'), '')}/$t');
+    }
   }
 
   static String _newTopic() {
@@ -414,26 +772,41 @@ class _ServerScreenState extends State<ServerScreen> {
                                 : tr('Set up a server to let the agent work around the clock.'),
                             style: text.bodySmall,
                           ),
+                          // Under the text, not beside it: a narrow phone keeps whole words in the title.
+                          if (mode.active) ...[
+                            const SizedBox(height: 8),
+                            Pill(
+                              switch (link.state) {
+                                LinkState.connected => tr('Connected'),
+                                LinkState.connecting => tr('Connecting…'),
+                                LinkState.reconnecting => tr('Reconnecting'),
+                                LinkState.offline => link.kicked ? tr('Another device') : tr('Offline'),
+                              },
+                              color: _stateColor(p, link),
+                              dot: true,
+                            ),
+                          ],
                         ],
                       ),
                     ),
-                    if (mode.active)
-                      Pill(
-                        switch (link.state) {
-                          LinkState.connected => tr('Connected'),
-                          LinkState.connecting || LinkState.reconnecting => tr('Reconnecting'),
-                          LinkState.offline => link.kicked ? tr('Another device') : tr('Offline'),
-                        },
-                        color: _stateColor(p, link),
-                        dot: true,
-                      ),
                   ],
                 ),
               ),
+              if (mode.active && !link.connected && link.reason != null && profile != null && mode.setup != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: _Result(
+                    ok: false,
+                    message: trMsg(mode.setup!.classify(profile, 255, '', link.reason!).say),
+                    detail: link.reason,
+                  ),
+                ),
               if (mode.active && health != null) _healthCard(context, health!),
+              if (mode.active && link.connected && health != null) _checklist(context),
               if (profile == null || changingServer) ..._setup(context),
               if (profile != null) ..._server(context, profile),
               if (mode.active && link.connected && agent.integrations.settings != null) ..._notifications(context),
+              ..._help(context),
             ],
           ),
         );
@@ -443,37 +816,87 @@ class _ServerScreenState extends State<ServerScreen> {
 
   Widget _healthCard(BuildContext context, Map<String, dynamic> h) {
     final p = context.palette;
-    String gb(num? bytes) => bytes == null ? '?' : '${(bytes / (1 << 30)).toStringAsFixed(1)} GB';
+    final text = Theme.of(context).textTheme;
+    String gb(num? bytes) => bytes == null ? '?' : '${localNumber((bytes / (1 << 30)).toStringAsFixed(1))} GB';
     final disk = (h['disk'] as Map?)?.cast<String, dynamic>() ?? const {};
     final mem = (h['memory'] as Map?)?.cast<String, dynamic>() ?? const {};
     final runs = (h['runs'] as Map?)?.cast<String, dynamic>() ?? const {};
     final uptime = Duration(seconds: (h['uptimeSec'] as num?)?.toInt() ?? 0);
     final low = disk['level'] != null && disk['level'] != 'ok';
-    String line(String k, String v) => '$k  $v';
+    final memoryHigh = mem['level'] != null && mem['level'] != 'ok';
+    // Where the agent's commands run. A box without an image refuses them all, so that is said, with the way out.
+    final box = (h['box'] as Map?)?.cast<String, dynamic>();
+    final boxMissing = box != null && box['available'] == true && box['installed'] != true;
+    final boxText = box == null
+        ? null
+        : box['available'] != true
+        ? tr('none · commands run on the server')
+        : box['installed'] != true
+        ? tr('not built · commands are refused')
+        : box['enabled'] == true
+        ? tr('ready · commands run inside it')
+        : tr('off · commands run on the server');
+    final rows = <(String, String, Color?)>[
+      if (upToDate != null)
+        (tr('Agent version'), upToDate! ? tr('Up to date') : tr('A newer one is in this app'), upToDate! ? null : p.warning),
+      (tr('Disk free'), '${gb(disk['freeBytes'] as num?)} ${tr('of')} ${gb(disk['totalBytes'] as num?)}', low ? p.warning : null),
+      (tr('Agent memory'), gb(mem['rssBytes'] as num?), memoryHigh ? p.warning : null),
+      (tr('Running'), '${runs['running'] ?? 0} · ${tr('queued')} ${runs['queued'] ?? 0}', null),
+      (tr('Subagents'), h['subagents'] == true ? tr('working') : tr('not active'), null),
+      (tr('Up for'), _upFor(uptime), null),
+      (tr('Node'), '${h['node'] ?? '?'}', null),
+      if (boxText != null) (tr('Box'), boxText, boxMissing ? p.warning : null),
+    ];
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: SurfaceCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(tr('Server health'), style: Theme.of(context).textTheme.titleSmall),
+            Text(tr('Server health'), style: text.titleSmall),
             const SizedBox(height: 8),
-            for (final l in [
-              line(tr('Disk free'), '${gb(disk['freeBytes'] as num?)} / ${gb(disk['totalBytes'] as num?)}'),
-              line(tr('Agent memory'), gb(mem['rssBytes'] as num?)),
-              line(tr('Running'), '${runs['running'] ?? 0} · ${tr('queued')} ${runs['queued'] ?? 0}'),
-              line(tr('Subagents'), h['subagents'] == true ? tr('working') : tr('idle')),
-              line(
-                tr('Up for'),
-                uptime.inHours >= 1 ? '${uptime.inHours} h ${uptime.inMinutes % 60} min' : '${uptime.inMinutes} min',
-              ),
-              line(tr('Node'), '${h['node'] ?? '?'}'),
-            ])
+            // Two columns, so a value that needs a second line wraps under itself, not under its name.
+            Table(
+              columnWidths: const {0: IntrinsicColumnWidth(), 1: FlexColumnWidth()},
+              defaultVerticalAlignment: TableCellVerticalAlignment.top,
+              children: [
+                for (final (name, value, color) in rows)
+                  TableRow(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 14, top: 3, bottom: 3),
+                        child: Text(name, style: text.bodySmall?.copyWith(color: p.muted)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Text(
+                          value,
+                          style: text.bodySmall?.copyWith(color: color ?? p.text, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+            if (boxMissing)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 1),
-                child: Text(
-                  l,
-                  style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
+                padding: const EdgeInsets.only(top: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tr('The agent cannot run commands until the box is built.'),
+                      style: TextStyle(color: p.warning, fontSize: 12.5),
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(LucideIcons.hammer, size: 16),
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).push(MaterialPageRoute(builder: (_) => BoxScreen(agent: agent))).then((_) => _loadHealth()),
+                      label: Text(tr('Build the box')),
+                    ),
+                  ],
                 ),
               ),
             if (low)
@@ -486,10 +909,26 @@ class _ServerScreenState extends State<ServerScreen> {
                   style: TextStyle(color: p.warning, fontSize: 12.5),
                 ),
               ),
+            if (memoryHigh)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  tr('The agent is using a lot of memory. Fewer subagents at once, or a restart, frees it.'),
+                  style: TextStyle(color: p.warning, fontSize: 12.5),
+                ),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  /// "2 h 5 min" / "2 j 5 mnt", or minutes alone under an hour.
+  static String _upFor(Duration d) {
+    final id = Appearance.instance.language == 'id';
+    if (d.inHours >= 24) return id ? '${d.inDays} hr ${d.inHours % 24} j' : '${d.inDays} d ${d.inHours % 24} h';
+    if (d.inHours >= 1) return id ? '${d.inHours} j ${d.inMinutes % 60} mnt' : '${d.inHours} h ${d.inMinutes % 60} min';
+    return id ? '${d.inMinutes} mnt' : '${d.inMinutes} min';
   }
 
   List<Widget> _setup(BuildContext context) {
@@ -511,17 +950,32 @@ class _ServerScreenState extends State<ServerScreen> {
         autocorrect: false,
         keyboardType: TextInputType.url,
         style: const TextStyle(fontFamily: mono, fontSize: 13.5),
-        decoration: InputDecoration(labelText: tr('Server address (name or IP)'), hintText: 'agent.example.com'),
-        onChanged: (_) => _loadCommand(),
+        decoration: InputDecoration(
+          labelText: tr('Server address (name or IP)'),
+          hintText: 'agent.example.com',
+          helperText: tr('Needed: the address this phone reaches the server at.'),
+          helperMaxLines: 2,
+        ),
+        onChanged: (_) {
+          setState(() {});
+          _loadCommand();
+        },
       ),
       const SizedBox(height: 10),
       if (command == null && setupError == null)
         const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
       else if (setupError != null)
         Text(setupError!, style: TextStyle(color: p.danger))
-      else
+      else ...[
+        // With the setup file in the app, this line is what the paste ends with; copying it alone would fail on a
+        // server that does not have the file yet, so only the full paste is copied (the button below).
+        if (agent.remote.setupScript != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(tr('What the paste runs at the end'), style: text.labelMedium),
+          ),
         Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
+          padding: EdgeInsets.fromLTRB(12, 10, agent.remote.setupScript != null ? 12 : 4, 10),
           decoration: BoxDecoration(
             color: p.surface,
             borderRadius: BorderRadius.circular(12),
@@ -535,29 +989,35 @@ class _ServerScreenState extends State<ServerScreen> {
                   style: TextStyle(fontFamily: mono, fontSize: 12, color: p.text),
                 ),
               ),
-              IconButton(
-                tooltip: tr('Copy'),
-                icon: const Icon(LucideIcons.copy, size: 18),
-                onPressed: () => _copy(command!, tr('command')),
-              ),
+              if (agent.remote.setupScript == null)
+                IconButton(
+                  tooltip: tr('Copy'),
+                  icon: const Icon(LucideIcons.copy, size: 18),
+                  onPressed: () => _copy(command!, tr('command')),
+                ),
             ],
           ),
         ),
+      ],
       if (command != null && agent.remote.setupScript != null) ...[
         const SizedBox(height: 10),
-        PrimaryButton(label: tr('Copy setup command'), icon: LucideIcons.clipboardCopy, onPressed: _copySetup),
+        PrimaryButton(
+          label: tr('Copy setup command'),
+          icon: LucideIcons.clipboardCopy,
+          onPressed: address.text.trim().isEmpty ? null : _copySetup,
+        ),
         const SizedBox(height: 6),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: _shareSetup,
+            onPressed: address.text.trim().isEmpty ? null : _shareSetup,
             icon: const Icon(LucideIcons.share2, size: 16),
             label: Text(tr('Share the setup file instead')),
           ),
         ),
         Text(
           tr(
-            'The setup command is the file and the line above in one paste. Or send the file to the server (for example with an SFTP app) and run the line above next to it.',
+            'The setup command is the setup file and that line in one paste. Or send the file to the server (for example with an SFTP app) and run that line next to it.',
           ),
           style: text.bodySmall,
         ),
@@ -586,6 +1046,16 @@ class _ServerScreenState extends State<ServerScreen> {
         },
       ),
       const SizedBox(height: 10),
+      if (changingServer && agent.remote.active)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Text(
+            tr(
+              'Saving goes back to the agent on this phone until the new server is tested and switched on. The current server keeps its chats and keeps running.',
+            ),
+            style: text.bodySmall?.copyWith(color: p.warning),
+          ),
+        ),
       Row(
         children: [
           Expanded(
@@ -601,6 +1071,10 @@ class _ServerScreenState extends State<ServerScreen> {
   List<Widget> _server(BuildContext context, RemoteProfile profile) {
     final p = context.palette;
     final mode = agent.remote;
+    // Until the server is in use the rows are the next steps of the setup, in order; switching waits for a test that
+    // found the agent running there.
+    String step(int n, String title) => mode.active ? title : '$n · $title';
+    final ready = mode.active || checked?.ok == true;
     return [
       SectionLabel(tr('Server')),
       SettingsGroup(
@@ -626,7 +1100,7 @@ class _ServerScreenState extends State<ServerScreen> {
           SettingsRow(
             icon: LucideIcons.plugZap,
             color: p.accent,
-            title: tr('Test connection'),
+            title: step(3, tr('Test connection')),
             subtitle: testing ? tr('Connecting…') : tr('Checks the key, the host key and the agent'),
             trailing: testing
                 ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
@@ -636,7 +1110,7 @@ class _ServerScreenState extends State<ServerScreen> {
           SettingsRow(
             icon: LucideIcons.download,
             color: p.accent,
-            title: tr('Install / update agent'),
+            title: step(4, tr('Install / update agent')),
             subtitle: installing
                 ? (installNote ?? '')
                 : upToDate == false
@@ -652,7 +1126,13 @@ class _ServerScreenState extends State<ServerScreen> {
       if (checked != null)
         Padding(
           padding: const EdgeInsets.only(top: 10),
-          child: _Result(ok: checked!.ok, message: tr(checked!.message), detail: checked!.detail),
+          child: _Result(
+            ok: checked!.ok,
+            // Reached, with the agent still to install: the next step, not a failure.
+            next: checked!.problem == ServerProblem.hostMissing,
+            message: trMsg(checked!.say),
+            detail: checked!.detail,
+          ),
         ),
       if (installOk != null && !installing)
         Padding(
@@ -665,10 +1145,14 @@ class _ServerScreenState extends State<ServerScreen> {
           SettingsRow(
             icon: LucideIcons.server,
             color: p.accent,
-            title: tr('Use the server agent'),
-            subtitle: mode.active ? tr('Chats and files are the server\'s') : tr('Chats and files are on this phone'),
-            trailing: Switch(value: mode.active, onChanged: _use),
-            onTap: () => _use(!mode.active),
+            title: step(5, tr('Use the server agent')),
+            subtitle: mode.active
+                ? tr('Chats and files are the server\'s')
+                : ready
+                ? tr('Chats and files are on this phone')
+                : tr('Test the connection and install the agent first'),
+            trailing: Switch(value: mode.active, onChanged: ready ? _use : null),
+            onTap: ready ? () => _use(!mode.active) : null,
           ),
           SettingsRow(
             icon: LucideIcons.refreshCw,
@@ -687,6 +1171,144 @@ class _ServerScreenState extends State<ServerScreen> {
             onTap: _forget,
           ),
         ],
+      ),
+    ];
+  }
+
+  /// Is everything in place? One look at what makes the server agent useful, each with its way to fix it.
+  Widget _checklist(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final h = health!;
+    final box = (h['box'] as Map?)?.cast<String, dynamic>();
+    final settings = agent.integrations.settings;
+    final items = <(bool, String, String?)>[
+      (true, tr('This phone reaches the server'), null),
+      if (upToDate != null)
+        (upToDate!, tr('The agent on the server is this app\'s version'), tr('Press Install / update agent.')),
+      if (box != null && box['available'] == true)
+        (box['installed'] == true, tr('The box is built'), tr('Build it: Settings > The agent\'s box.')),
+      (
+        agent.providers.any((x) => x.configured),
+        tr('A model is connected on the server'),
+        tr('The server keeps its own keys: connect one in Settings > Models & providers.'),
+      ),
+      (
+        settings?.notifyTopic != null && settings!.notifyEnabled,
+        tr('Notifications reach this phone'),
+        tr('Save a topic below, then send a test notification.'),
+      ),
+    ];
+    final done = items.where((i) => i.$1).length;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: SurfaceCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text(tr('Checklist'), style: text.titleSmall)),
+                Text(
+                  tr('{done} of {all} ready').replaceAll('{done}', '$done').replaceAll('{all}', '${items.length}'),
+                  style: text.bodySmall?.copyWith(color: done == items.length ? p.success : p.warning),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final (ok, what, fix) in items)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      ok ? LucideIcons.circleCheck : LucideIcons.circleDashed,
+                      size: 18,
+                      color: ok ? p.success : p.warning,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(what, style: text.bodyMedium),
+                          if (!ok && fix != null) Text(fix, style: text.bodySmall),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// What to do when something goes wrong, for someone who has never used a VPS: the repository with the server notes
+  /// is private, so the app carries them.
+  List<Widget> _help(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final entries = [
+      (
+        tr('Getting to the server\'s terminal'),
+        tr(
+          'Use the web console in your VPS provider\'s control panel, or an SSH app (Termius, JuiceSSH) with the address and the root password or key the provider gave you.',
+        ),
+      ),
+      (
+        tr('The paste "arrived damaged"'),
+        tr(
+          'The terminal changed the text on the way. Use "Share the setup file instead", or paste in another SSH app.',
+        ),
+      ),
+      (
+        tr('No sudo, or "run this as root"'),
+        tr('Log in as root, or as an account that may use sudo; the setup needs it once.'),
+      ),
+      (
+        tr('"rootless podman does not work", or the box is not built'),
+        tr(
+          'Paste the setup command again: it repairs Podman on Ubuntu 24.04. Then build the box in Settings > The agent\'s box.',
+        ),
+      ),
+      (
+        tr('"Could not reach" the server'),
+        tr(
+          'Check the address, that this phone is online, and that the provider\'s firewall lets SSH in (port 22).',
+        ),
+      ),
+      (
+        tr('"Host key" warning'),
+        tr('Do not continue unless you reinstalled the server; then run the setup again and paste the new code.'),
+      ),
+      (
+        tr('This phone was lost'),
+        tr(
+          'On the server, remove the line ending in griphub-app from /home/griphub/.ssh/authorized_keys. Then set up the new phone with the setup command.',
+        ),
+      ),
+    ];
+    return [
+      SectionLabel(tr('When something goes wrong')),
+      SurfaceCard(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: Column(
+            children: [
+              for (final (title, body) in entries)
+                ExpansionTile(
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                  childrenPadding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                  expandedAlignment: Alignment.centerLeft,
+                  title: Text(title, style: text.bodyMedium),
+                  children: [Text(body, style: text.bodySmall)],
+                ),
+            ],
+          ),
+        ),
       ),
     ];
   }
@@ -743,6 +1365,24 @@ class _ServerScreenState extends State<ServerScreen> {
           ),
         ],
       ),
+      if (s.notifyTopic != null)
+        Wrap(
+          spacing: 8,
+          children: [
+            TextButton.icon(
+              icon: _testingNotify
+                  ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(LucideIcons.bellRing, size: 16),
+              label: Text(tr('Send a test notification')),
+              onPressed: _testingNotify || !s.notifyEnabled ? null : _testNotify,
+            ),
+            TextButton.icon(
+              icon: const Icon(LucideIcons.externalLink, size: 16),
+              label: Text(tr('Open in ntfy')),
+              onPressed: _openNtfy,
+            ),
+          ],
+        ),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         title: Text(tr('Send notifications')),
@@ -755,16 +1395,23 @@ class _ServerScreenState extends State<ServerScreen> {
 }
 
 class _Result extends StatelessWidget {
-  const _Result({required this.ok, required this.message, this.detail});
+  const _Result({required this.ok, required this.message, this.detail, this.next = false});
 
   final bool ok;
+
+  /// Not done yet rather than wrong: shown as a step to take.
+  final bool next;
   final String message;
   final String? detail;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final color = ok ? p.success : p.danger;
+    final color = ok
+        ? p.success
+        : next
+        ? p.warning
+        : p.danger;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -775,7 +1422,15 @@ class _Result extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(ok ? LucideIcons.circleCheck : LucideIcons.circleAlert, size: 18, color: color),
+          Icon(
+            ok
+                ? LucideIcons.circleCheck
+                : next
+                ? LucideIcons.circleArrowRight
+                : LucideIcons.circleAlert,
+            size: 18,
+            color: color,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

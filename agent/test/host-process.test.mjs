@@ -382,6 +382,7 @@ test("server mode: the server's notes, files over fs_*, a preview, health, and n
 	assert.equal(h.transport, "daemon");
 	assert.ok(h.disk.freeBytes > 0 && ["ok", "low", "critical"].includes(h.disk.level));
 	assert.ok(h.memory.rssBytes > 0);
+	assert.deepEqual(h.box, { available: false, installed: false, enabled: false }, "no box on this server");
 	assert.equal(h.subagents, false);
 
 	// GitHub sync: off, with the reason, and it cannot be turned on.
@@ -417,6 +418,8 @@ test("server mode: the box is the agent's shell when the server has one, and the
 	assert.match(notes(), /inside an Ubuntu container as root/);
 	const s1 = (await c.call("container_status")).data;
 	assert.deepEqual([s1.available, s1.enabled], [true, true]);
+	// The health card shows where commands run; with no podman here the image is not built (commands are refused).
+	assert.deepEqual((await c.call("health")).data.box, { available: true, installed: false, enabled: true });
 	assert.deepEqual((await c.call("box_check")).data, { ok: true, message: "The box works: a command ran inside it." });
 	// Off: commands go straight to the server, and the agent is told.
 	assert.equal((await c.call("container_enable", { on: false })).data.enabled, false);
@@ -462,6 +465,11 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 	const set = await m.c.call("settings_set", { settings: { notify: { enabled: true, url: `http://127.0.0.1:${ntfy.address().port}`, topic } } });
 	assert.equal(set.ok, true, set.error);
 
+	// The test button: goes out although the app is open.
+	assert.deepEqual((await m.c.call("notify_test")).data, { ok: true });
+	assert.deepEqual(pushes.map((p) => [p.url, p.title]), [[`/${topic}`, "Test notification"]]);
+	pushes.length = 0;
+
 	// The app is open: no push.
 	const first = await startSubagent(m);
 	writeFileSync(m.mock.MOCK_RELEASE, "");
@@ -505,4 +513,20 @@ test("phone mode: the notes are exactly as before, sync is offered, and files wo
 	assert.equal((await call("health")).data.mode, "phone");
 	child.stdin.end();
 	assert.equal(await exited(child), 0);
+});
+
+test("server mode: schedules run on the phone's clock: the app gives its offset, and it holds after a restart", async (t) => {
+	const dir = home(t);
+	const first = await connected(t, dir, { TZ: "UTC" });
+	assert.equal((await first.c.call("health")).data.clock.offsetMinutes, 0, "a server on UTC");
+	assert.deepEqual((await first.c.call("timezone_set", { offsetMinutes: 420 })).data, { timeZone: "Etc/GMT-7" });
+	assert.equal((await first.c.call("health")).data.clock.offsetMinutes, 420, "WIB from now on");
+	// An offset that is not whole hours has no fixed zone: the server keeps the one it has.
+	assert.deepEqual((await first.c.call("timezone_set", { offsetMinutes: 330 })).data, { timeZone: "Etc/GMT-7" });
+	assert.match((await first.c.call("timezone_set", { offsetMinutes: "x" })).error, /whole number/);
+	first.d.child.kill("SIGTERM");
+	await exited(first.d.child);
+
+	const again = await connected(t, dir, { TZ: "UTC" });
+	assert.equal((await again.c.call("health")).data.clock.offsetMinutes, 420);
 });

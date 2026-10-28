@@ -85,6 +85,7 @@ function daemon(opts = {}) {
     replay: true,
     pingIntervalMs: 0,
     hostVersion: "9.9.9",
+    bundleStamp: "1.3.0 1700000000000",
     handle: async (cmd) => {
       calls.push(cmd);
       if (cmd.type === "boom") throw new FsError("EEXIST", "already there");
@@ -180,6 +181,7 @@ test("attaching says hello and then ready; nothing live arrives before resume", 
   assert.equal(hello.seq, 1);
   assert.equal(hello.firstSeq, 1);
   assert.equal(hello.hostVersion, "9.9.9");
+  assert.equal(hello.bundleStamp, "1.3.0 1700000000000", "the app compares it with its own bundle");
   hub.emit({ type: "event", n: 2 });
   assert.deepEqual(conn.types, ["hello_server", "ready"], "gated until the client subscribes");
 });

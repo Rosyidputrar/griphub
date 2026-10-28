@@ -13,15 +13,21 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 
 ## 1. Pasang
 
-- [ ] App: Pengaturan (Settings) → Data & keamanan → **Agent server** (Server agent) → isi alamat VPS →
-      **Salin perintah setup**.
+- [ ] App: Pengaturan → baris **Agent: HP ini** di atas (atau Data & keamanan → **Agent di VPS / server**) → isi
+      alamat VPS → **Salin perintah setup**.
 - [ ] VPS (aplikasi SSH, sebagai root atau akun dengan sudo): tempel. File terbongkar di `~/griphub-server` tanpa pesan
       "arrived damaged"; tidak ada peringatan "written for Ubuntu and Debian"; ada baris `host key:`. Selesai tanpa
       error dan mencetak `griphub1:…`. Catat berapa lama (paket, Node, image box).
 - [ ] Coba juga **Atau bagikan file setup**: file `griphub-setup.sh` bisa dikirim ke aplikasi lain.
-- [ ] App: tempel setup code → **Tes koneksi** (Test connection) → "Tersambung. Agent belum dipasang di server…".
-- [ ] App: **Pasang / perbarui agent** (Install / update agent) → selesai; **Pakai agent server** (Use the server agent) → chip di chat berubah menjadi **Server**.
+- [ ] Akhir output setup: tidak ada peringatan "the agent's box was not built" atau "building the box failed". Bila
+      ada, catat pesan podman; setelah itu app: Pengaturan → **Box agent** → **Bangun box**.
+- [ ] App: tempel setup code → **Simpan server**: tes berjalan sendiri → "Tersambung. Agent belum dipasang di server…"
+      (oranye), saklar **5 · Pakai agent server** masih terkunci.
+- [ ] App: **4 · Pasang / perbarui agent** → selesai, saklar terbuka; **5 · Pakai agent server** → dialog menyebut
+      model/kunci/akun yang perlu dihubungkan lagi → chip di chat berubah menjadi **Server**.
 - [ ] Bila CoderRa terpasang: CoderRa tetap tersambung dan bekerja seperti biasa setelah langkah ini.
+
+- [ ] Kartu **Daftar periksa** di layar Agent server: semua siap setelah model dihubungkan dan notifikasi disimpan.
 
 ## 2. Chat
 
@@ -38,9 +44,13 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
       lengkap.
 - [ ] Pindah Wi-Fi ↔ data seluler di tengah tugas: sama seperti di atas.
 
+- [ ] Mode pesawat, tutup app sepenuhnya, buka lagi: layar "Agent server tidak terjangkau" dengan alasan, hitung mundur;
+      matikan mode pesawat → app tersambung sendiri tanpa menekan apa pun.
+
 ## 4. Approval dan notifikasi
 
-- [ ] Agent server → **Notifikasi**: nyalakan. Pasang app **ntfy** di HP dan langganan topik yang ditampilkan.
+- [ ] Agent server → **Notifikasi**: topik sudah terisi → **Simpan**. Pasang app **ntfy**, **Buka di ntfy** (langganan
+      topiknya), lalu **Kirim notifikasi uji**: notifikasi datang walau app terbuka.
 - [ ] Minta sesuatu yang perlu persetujuan (mis. `git push` atau `rm -rf build`), lalu tutup app sebelum kartu
       approval muncul. Notifikasi "Approval needed" datang (judul notifikasi memang berbahasa Inggris); buka app → kartu approval ada → jawab → agent lanjut.
 - [ ] Notifikasi "Agent finished" datang saat tugas selesai dengan app tertutup, dan **tidak** datang saat app terbuka.
@@ -75,11 +85,13 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 ## 8. Terminal
 
 - [ ] Buka Terminal: prompt berbentuk `<folder> $` di folder proyek; `git status`, `ll` bekerja.
-- [ ] Jalankan `top` (atau `sleep 600`), mode pesawat 1 menit, kembali: tab tersambung ke sesi yang sama
-      (`top` masih jalan).
+- [ ] Jalankan `top` (atau `sleep 600`), mode pesawat 1 menit, kembali: bar "Koneksi terputus" muncul →
+      **Sambungkan lagi** → tab tersambung ke sesi yang sama (`top` masih jalan).
 - [ ] Tutup app, buka lagi Terminal: tab bergabung ke sesi tmux yang sama.
-- [ ] Tab **Shell Linux (box)**: masuk ke container box; `node -v` dan `git` ada.
+- [ ] Tab **Shell box (box agent)**: masuk ke container box; `node -v` dan `git` ada.
 - [ ] Tutup tab: di VPS `sudo -u griphub tmux ls` tidak lagi menampilkan sesi itu.
+
+- [ ] Jadwalkan tugas jam tertentu (mis. 5 menit lagi, jam HP): berjalan pada jam HP, bukan jam UTC server.
 
 ## 9. Backup
 
@@ -99,7 +111,8 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 
 ## 12. Kembali ke mode HP
 
-- [ ] **Pakai agent di HP ini** (Use the agent on this phone): chat HP lama masih ada dan terpisah dari chat server; Terminal membuka shell HP.
+- [ ] Matikan **Pakai agent server**: dialog menyebut yang tetap berjalan di server → **Pakai HP ini**: chat HP lama
+      masih ada dan terpisah dari chat server; Terminal membuka shell HP.
 - [ ] Kembali ke server: chat server, sesi tmux, dan approval yang menunggu muncul lagi.
 
 ## 13. Soak 24 jam
