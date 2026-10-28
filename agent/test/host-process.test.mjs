@@ -4,7 +4,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -325,4 +326,183 @@ test("server mode: SIGTERM stops a working subagent with its partial report befo
 	assert.equal(done.subagent.stopCode, "force");
 	assert.match(done.subagent.report ?? "", /Separuh laporan/, "the partial report survives");
 	assert.equal(await exited(m.d.child), 0);
+});
+
+// ---------------------------------------------------------------------------
+// Server mode, phase 2: what the server does differently (server_agent.md 4.3–4.8)
+
+const PHONE_FIXTURE_WS = "/data/user/0/id.griphub.agent/files/workspace";
+
+/** Starts a daemon, connects, and resumes; `hello` says where the agent's folder is. */
+async function connected(t, dir, extra = {}, nodeArgs = []) {
+	const d = daemon(t, dir, extra, nodeArgs);
+	await started(d);
+	const c = await dial(d.sock);
+	await c.until((r) => r.type === "ready");
+	await c.call("resume", { since: null });
+	const hello = (await c.call("hello")).data;
+	return { d, c, agentDir: hello.agentDir };
+}
+
+test("server mode: the server's notes, files over fs_*, a preview, health, and no GitHub sync", async (t) => {
+	const dir = home(t);
+	const { c, agentDir } = await connected(t, dir);
+	const ws = join(dir, "workspace");
+
+	const notes = readFileSync(join(agentDir, "AGENTS.md"), "utf8");
+	assert.match(notes, /on a Linux server/);
+	assert.match(notes, new RegExp(`The workspace directory is ${ws}\\.`));
+	assert.match(notes, /directly on the server as an unprivileged user/, "no box on this server");
+
+	// Files: write, list, read back; nothing outside the workspace and the skills.
+	mkdirSync(join(ws, "site"));
+	const wrote = await c.call("fs_write", { path: join(ws, "site", "index.html"), data: Buffer.from("<h1>Halo</h1>").toString("base64") });
+	assert.equal(wrote.ok, true, wrote.error);
+	const listed = await c.call("fs_list", { path: ws });
+	assert.deepEqual(listed.data.map((e) => [e.name, e.type]), [["site", "dir"]]);
+	const read = await c.call("fs_read", { path: join(ws, "site", "index.html") });
+	assert.equal(Buffer.from(read.data.data, "base64").toString(), "<h1>Halo</h1>");
+	const outside = await c.call("fs_read", { path: join(dir, ".griphub", "running") });
+	assert.deepEqual([outside.ok, outside.code], [false, "outside_root"]);
+	const skills = await c.call("fs_write", { path: join(agentDir, "skills", "x.md"), data: "" });
+	assert.equal(skills.ok, false, "the skills folder is read-only");
+
+	// A preview of the site, served on the loopback behind its token.
+	const p = await c.call("preview_serve", { dir: join(ws, "site") });
+	assert.equal(p.ok, true, p.error);
+	const page = await fetch(`http://127.0.0.1:${p.data.port}/${p.data.token}/`);
+	assert.equal(await page.text(), "<h1>Halo</h1>");
+	assert.equal((await fetch(`http://127.0.0.1:${p.data.port}/wrong/`)).status, 404);
+	assert.equal((await c.call("preview_serve", { dir: dir })).code, "outside_root");
+	assert.deepEqual((await c.call("preview_stop", { port: p.data.port })).data, { stopped: true });
+
+	// Health for the server screen.
+	const h = (await c.call("health")).data;
+	assert.equal(h.mode, "server");
+	assert.equal(h.transport, "daemon");
+	assert.ok(h.disk.freeBytes > 0 && ["ok", "low", "critical"].includes(h.disk.level));
+	assert.ok(h.memory.rssBytes > 0);
+	assert.equal(h.subagents, false);
+
+	// GitHub sync: off, with the reason, and it cannot be turned on.
+	const status = (await c.call("sync_status")).data;
+	assert.equal(status.enabled, false);
+	assert.match(status.unavailable, /server agent/);
+	assert.match((await c.call("sync_enable", { on: true })).error, /server agent/);
+
+	// Notifications start off, with ntfy.sh as the server to use.
+	const settings = (await c.call("settings_get")).data;
+	assert.deepEqual(settings.notify, { enabled: false, url: "https://ntfy.sh", topic: null });
+	assert.equal(settings.dns, "system");
+});
+
+test("server mode: the box is the agent's shell when the server has one, and the notes follow it", async (t) => {
+	const dir = home(t);
+	// Without a box: the status says so, and it cannot be turned on.
+	const none = await connected(t, dir);
+	const s0 = (await none.c.call("container_status")).data;
+	assert.deepEqual([s0.kind, s0.available, s0.enabled], ["podman", false, false]);
+	assert.match(s0.problem, /no box on this server/);
+	assert.match((await none.c.call("container_enable", { on: true })).error, /no box on this server/);
+	assert.match((await none.c.call("box_stop")).error, /no box on this server/);
+	none.d.child.kill("SIGTERM");
+	await exited(none.d.child);
+
+	// With one (a stand-in launcher): on by default, and the notes say commands run in the container.
+	const launcher = join(dir, "box-launcher");
+	writeFileSync(launcher, "#!/bin/sh\necho box-works\n");
+	chmodSync(launcher, 0o755);
+	const { c, agentDir } = await connected(t, dir, { GRIPHUB_BOX: launcher, PATH: `${join(dir, "no-podman")}:/usr/bin:/bin` });
+	const notes = () => readFileSync(join(agentDir, "AGENTS.md"), "utf8");
+	assert.match(notes(), /inside an Ubuntu container as root/);
+	const s1 = (await c.call("container_status")).data;
+	assert.deepEqual([s1.available, s1.enabled], [true, true]);
+	assert.deepEqual((await c.call("box_check")).data, { ok: true, message: "The box works: a command ran inside it." });
+	// Off: commands go straight to the server, and the agent is told.
+	assert.equal((await c.call("container_enable", { on: false })).data.enabled, false);
+	assert.match(notes(), /directly on the server/);
+	assert.equal((await c.call("container_enable", { on: true })).data.enabled, true);
+	assert.match(notes(), /inside an Ubuntu container/);
+});
+
+test("server mode: a background run nobody watches is refused a risky command, and says so", async (t) => {
+	const dir = home(t);
+	const ws = join(dir, "workspace");
+	mkdirSync(join(ws, "build"));
+	writeFileSync(join(ws, "build", "keep.txt"), "still here");
+	const tool = JSON.stringify({ name: "bash", arguments: { command: "rm -rf build" } });
+	const { c } = await connected(t, dir, { MOCK_TOOL: tool }, ["--import", mockRouter]);
+	assert.equal((await c.call("custom_provider_save", { provider: { apiKey: "sk-test", models: [{ id: "mock-model", name: "Mock" }] } })).ok, true);
+	assert.equal((await c.call("set_model", { provider: "griphub", model: "mock-model" })).ok, true);
+	const queued = await c.call("run_enqueue", { prompt: "Bersihkan build", dir: ws });
+	assert.equal(queued.ok, true, queued.error);
+	const done = await c.until((r) => r.type === "run_finished", 30_000, "for the run");
+	assert.equal(done.run.status, "done");
+	assert.match(done.run.summary, /nobody is watching this run/);
+	assert.equal(readFileSync(join(ws, "build", "keep.txt"), "utf8"), "still here");
+	assert.ok(!c.records.some((r) => r.type === "approval"), "nobody was asked");
+});
+
+test("server mode: with nobody looking, a finished subagent is pushed to ntfy; with the app open it is not", async (t) => {
+	// A stand-in ntfy server.
+	const pushes = [];
+	const ntfy = http.createServer((req, res) => {
+		let body = "";
+		req.on("data", (d) => (body += d));
+		req.on("end", () => {
+			pushes.push({ url: req.url, title: req.headers.title, body });
+			res.end("{}");
+		});
+	});
+	await new Promise((r) => ntfy.listen(0, "127.0.0.1", r));
+	t.after(() => ntfy.close());
+
+	const m = await withModel(t);
+	const topic = "griphub-0123456789abcdef";
+	const set = await m.c.call("settings_set", { settings: { notify: { enabled: true, url: `http://127.0.0.1:${ntfy.address().port}`, topic } } });
+	assert.equal(set.ok, true, set.error);
+
+	// The app is open: no push.
+	const first = await startSubagent(m);
+	writeFileSync(m.mock.MOCK_RELEASE, "");
+	await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === first);
+	await new Promise((r) => setTimeout(r, 300));
+	assert.deepEqual(pushes, []);
+
+	// The app goes away while a subagent works: its end is pushed, with nothing about the work in it.
+	rmSync(m.mock.MOCK_RELEASE);
+	await startSubagent(m);
+	m.c.socket.destroy();
+	await new Promise((r) => setTimeout(r, 200));
+	writeFileSync(m.mock.MOCK_RELEASE, "");
+	await waitFor(() => pushes.length > 0, 15_000);
+	assert.equal(pushes[0].url, `/${topic}`);
+	assert.equal(pushes[0].title, "Subagent finished");
+	assert.equal(pushes[0].body, "Open GripHub to see.");
+});
+
+test("phone mode: the notes are exactly as before, sync is offered, and files work the same way", async (t) => {
+	const dir = home(t);
+	const ws = join(dir, "workspace");
+	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready");
+	let id = 1;
+	const call = async (type, args = {}) => {
+		const n = id++;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	const { agentDir } = (await call("hello")).data;
+	const before = readFileSync(join(here, "fixtures", "agents-phone.md"), "utf8").replaceAll(PHONE_FIXTURE_WS, ws);
+	assert.equal(readFileSync(join(agentDir, "AGENTS.md"), "utf8"), before);
+	assert.equal((await call("sync_status")).data.unavailable, null);
+	assert.equal((await call("settings_get")).data.dns, "cloudflare");
+	assert.notEqual((await call("container_status")).data.kind, "podman");
+	assert.match((await call("box_check")).error ?? "", /./, "no box commands on the phone");
+	assert.equal((await call("fs_list", { path: ws })).ok, true);
+	assert.equal((await call("health")).data.mode, "phone");
+	child.stdin.end();
+	assert.equal(await exited(child), 0);
 });

@@ -14,6 +14,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { Cloudflare, type CloudflareAccount } from "./cloudflare.js";
 import { configureDns, validateCustomDohUrl, type DnsMode } from "./dns.js";
 import { maskKey, parseKeys } from "./keyring.js";
+import { checkConfig, type NotifyConfig } from "./notify.js";
 import { readSecureJson, writeSecureJson } from "./secure.js";
 
 export interface SshHost {
@@ -115,6 +116,11 @@ export interface AppSettings {
 	subagentNotifyApproval?: boolean;
 	/** Ongoing "subagent running" notification while subagents of other chats work; unset = on. */
 	subagentNotifyRunning?: boolean;
+	/**
+	 * Push notifications through ntfy while the app is closed (server agent only; notify.ts). Off until the user turns
+	 * them on; the app makes the random topic. An empty url means https://ntfy.sh.
+	 */
+	notify?: { enabled?: boolean; url?: string; topic?: string };
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
@@ -130,6 +136,18 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
+/** A server resolves names itself: no ISP block pages to get around, and DoH would only add a hop. */
+const SERVER_DEFAULT_SETTINGS: AppSettings = { dns: "system" };
+
+/** Where pushes go when the user turned them on without naming a server. */
+export const NTFY_DEFAULT_URL = "https://ntfy.sh";
+
+export interface IntegrationsOptions {
+	/** The host runs as a server agent (server_agent.md). */
+	server?: boolean;
+	/** On a server: the `box` launcher when the rootless container is set up, else null (commands run on the server). */
+	boxScript?: () => string | null;
+}
 
 /** Optional build-time override for the GitHub OAuth App Client ID (device flow enabled). Public by design; no secret is used. Empty means not configured. */
 const GITHUB_CLIENT_ID = process.env.GRIPHUB_GITHUB_CLIENT_ID ?? "";
@@ -169,6 +187,7 @@ export class Integrations {
 	constructor(
 		agentDir: string,
 		private readonly workspace: string,
+		private readonly options: IntegrationsOptions = {},
 	) {
 		const dir = join(agentDir, "griphub");
 		mkdirSync(dir, { recursive: true });
@@ -181,7 +200,14 @@ export class Integrations {
 	}
 
 	get settings(): AppSettings {
-		return { ...DEFAULT_SETTINGS, ...this.store.settings };
+		return { ...(this.options.server ? SERVER_DEFAULT_SETTINGS : DEFAULT_SETTINGS), ...this.store.settings };
+	}
+
+	/** Where to send pushes, or null while they are off or not set up. */
+	notifyConfig(): NotifyConfig | null {
+		const n = this.settings.notify;
+		if (n?.enabled !== true || !n.topic) return null;
+		return { url: n.url || NTFY_DEFAULT_URL, topic: n.topic };
 	}
 
 	/** Keys are write-only from the app's point of view: it only sees their last four characters. */
@@ -217,10 +243,19 @@ export class Integrations {
 			subagentNotifyFailed: subagentNotifyFailed ?? true,
 			subagentNotifyApproval: subagentNotifyApproval ?? true,
 			subagentNotifyRunning: subagentNotifyRunning ?? true,
+			// The topic is shown to its owner so they can subscribe to it; it is not a credential for anything else.
+			notify: { enabled: this.settings.notify?.enabled === true, url: this.settings.notify?.url || NTFY_DEFAULT_URL, topic: this.settings.notify?.topic ?? null },
 		};
 	}
 
 	updateSettings(patch: Partial<AppSettings>) {
+		if (patch.notify) {
+			const merged = { ...this.settings.notify, ...patch.notify };
+			const problem = checkConfig({ url: merged.url || NTFY_DEFAULT_URL, topic: merged.topic });
+			// Turning them off never needs a valid address.
+			if (merged.enabled === true && problem) throw new Error(`Notifications: ${problem}`);
+			patch = { ...patch, notify: merged };
+		}
 		const next: AppSettings = { ...this.settings };
 		for (const [k, v] of Object.entries(patch)) {
 			if (v === undefined) continue;
@@ -844,6 +879,7 @@ export class Integrations {
 
 	/** Commands in the Linux container (wrangler and npm live there), when it is installed. */
 	private containerRunner() {
+		if (this.options.server) return this.serverRunner();
 		const rootfs = process.env.GRIPHUB_ROOTFS;
 		const available = !!rootfs && existsSync(join(rootfs, "etc"));
 		return {
@@ -857,6 +893,27 @@ export class Integrations {
 						const alpine = !!rootfs && existsSync(join(rootfs, "etc", "alpine-release"));
 						const install = alpine ? "apk add nodejs npm" : "apt-get install -y nodejs npm";
 						throw new Error(`Node.js isn't installed in the Linux container. Ask the agent to install it (${install}), then deploy again.`);
+					}
+					throw e;
+				}
+			},
+		};
+	}
+
+	/**
+	 * On a server, `box -c` is the rootless container when it is set up (the same launcher the agent's shell uses), and
+	 * a plain shell on the server otherwise: Node.js is installed there for the host, so wrangler and npm can run.
+	 */
+	private serverRunner() {
+		const box = this.options.boxScript?.() ?? null;
+		return {
+			available: true,
+			run: async (cmd: string, args: string[], opts: { cwd: string; log?: Log }) => {
+				try {
+					return await run(cmd === "box" ? (box ?? "/bin/sh") : cmd, args, opts);
+				} catch (e) {
+					if (box && /\b(npx|npm): (command )?not found/.test((e as Error).message)) {
+						throw new Error("Node.js isn't installed in the box. Ask the agent to install it (apt-get install -y nodejs npm), then deploy again.");
 					}
 					throw e;
 				}

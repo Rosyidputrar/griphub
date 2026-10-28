@@ -5,6 +5,9 @@
 //
 // Each reply streams MOCK_TEXT, then holds the stream open until the file MOCK_RELEASE exists (or the request is
 // aborted), then ends the turn. Every chat request is counted in MOCK_LOG, one line each.
+//
+// With MOCK_TOOL set (JSON: {"name":"bash","arguments":{...}}) the first reply calls that tool instead, and the reply
+// after the tool's result repeats the result ("Tool said: ..."), so a test can see what the host did with the call.
 import { appendFileSync, existsSync } from "node:fs";
 
 const ROUTER = "https://griphubrouter.web.id/v1";
@@ -21,6 +24,19 @@ globalThis.fetch = async (input, init) => {
 	if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, "chat\n");
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
 	const enc = new TextEncoder();
+	const request = JSON.parse(typeof init?.body === "string" ? init.body : await new Response(init?.body ?? (input instanceof Request ? input.body : null)).text());
+	const last = request.messages?.at(-1);
+	if (process.env.MOCK_TOOL) {
+		const lines =
+			last?.role === "tool"
+				? [chunk({ role: "assistant", content: `Tool said: ${typeof last.content === "string" ? last.content : JSON.stringify(last.content)}` }, "stop")]
+				: (() => {
+						const { name, arguments: args } = JSON.parse(process.env.MOCK_TOOL);
+						const call = { index: 0, id: "call_1", type: "function", function: { name, arguments: JSON.stringify(args) } };
+						return [chunk({ role: "assistant", tool_calls: [call] }), chunk({}, "tool_calls")];
+					})();
+		return new Response(lines.join("") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+	}
 	const body = new ReadableStream({
 		async start(controller) {
 			controller.enqueue(enc.encode(chunk({ role: "assistant", content: process.env.MOCK_TEXT ?? "" })));

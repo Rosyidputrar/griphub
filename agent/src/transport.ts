@@ -8,7 +8,7 @@
  *
  * Daemon mode protocol, on top of the usual JSONL commands and records:
  *
- *   host -> app   {"type":"hello_server","protocol":1,"mode":"vps","epoch":"a1b2c3","seq":1042,"firstSeq":900,...}
+ *   host -> app   {"type":"hello_server","protocol":1,"mode":"server","epoch":"a1b2c3","seq":1042,"firstSeq":900,...}
  *                 {"type":"ready","version":"..."}
  *   app  -> host  {"id":1,"type":"resume","since":1040,"epoch":"a1b2c3"}    // or "since": null for "from now on"
  *   host -> app   {"seq":1041,...}, {"seq":1042,...}                      // what was missed, in order
@@ -28,6 +28,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, rmSync } from "node:fs";
 import net from "node:net";
 import { dirname } from "node:path";
+import { errorCode } from "./fs.js";
 
 export const PROTOCOL = 1;
 
@@ -62,11 +63,8 @@ export const REPLAYED_TYPES = new Set([
 	"models_changed",
 ]);
 
-/** A machine-readable reason carried by an error (`ENOENT`, `github_auth_expired`, ...), for the response's `code`. */
-export function errorCode(e: unknown): string | undefined {
-	const code = (e as { code?: unknown } | null)?.code;
-	return typeof code === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(code) ? code : undefined;
-}
+// A machine-readable reason carried by an error (`ENOENT`, `github_auth_expired`, ...), for the response's `code`.
+export { errorCode };
 
 // ---------------------------------------------------------------------------
 // Lines
@@ -258,7 +256,7 @@ export class Hub {
 				JSON.stringify({
 					type: "hello_server",
 					protocol: PROTOCOL,
-					mode: this.o.mode ?? "vps",
+					mode: this.o.mode ?? "server",
 					epoch: this.epoch,
 					seq: this.seq,
 					firstSeq: this.firstSeq(),

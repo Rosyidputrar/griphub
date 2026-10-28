@@ -1,6 +1,6 @@
 # server_agent.md — GripHub: agent berjalan di VPS (porting dari CoderRa)
 
-Status: rencana, belum ada kode. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
+Status: fase 1 dan 2 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 3–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
 (`seseegy/coderra` 5071362, dokumen `update_agent.md` plus kodenya). Mode server CoderRa sudah dipakai pemilik di
 VPS sungguhan dan berjalan baik. Yang diambil hanya **cara kerja server**; fitur agent tetap milik GripHub karena lebih
 maju (subagent asinkron, billing GripHub Router, approval, todo, GitHub sync, Cloudflare).
@@ -117,10 +117,20 @@ Keputusan: host mengirim ntfy (`notify.ts`) bila tidak ada klien atau klien di l
 "Task selesai/gagal", "Disk hampir penuh", "Host dimulai ulang". Toggle notifikasi subagent yang sudah ada di Settings
 (`subagentNotify*`) juga dipatuhi host. Saat app di depan, notifikasi lokal tetap seperti sekarang.
 
+Dikerjakan di fase 2: setiap record yang lewat `send()` di server diperiksa `notifyFor()` (approval, `agent_done`,
+`run_finished`, `subagent_finished`, `subagent_approval_request`), plus disk/memori dan restart tak terduga. Judulnya
+bahasa Inggris dan generik ("Agent finished", "Approval needed", "Subagent finished", "Subagent failed", "Subagent hit
+its limit", "Subagent needs approval", "Task finished/failed", "Disk is almost full", "Host restarted unexpectedly"),
+isi selalu "Open GripHub to see.", maksimal satu per jenis per menit. Pengaturan `notify {enabled, url, topic}` di
+`settings_set`: mati sampai `enabled: true`, topik divalidasi, URL kosong = `https://ntfy.sh`. Di HP notifier tidak
+pernah mengirim apa pun. Judul berbahasa Indonesia bisa menyusul bila app mengirim bahasanya ke host.
+
 ### 4.4 GitHub sync
 
 `sync.ts` menyalin chat dan proyek antar-HP lewat repo `griphub-sync`. Di mode server VPS adalah sumber kebenaran.
 Keputusan: sync **mati** di host mode server (layar Sync menjelaskan alasannya). Pindah data HP ↔ server lewat backup.
+Dikerjakan di fase 2: `SyncDeps.unavailable` berisi alasannya; `sync_status` membawa `unavailable`, `enabled` selalu
+false, `sync_enable {on:true}` dan `sync_now` ditolak dengan alasan itu, `schedule` tidak melakukan apa pun.
 
 ### 4.5 Kunci, token, dan provider
 
@@ -149,6 +159,13 @@ Chip "Konten yang ditempel" dan viewer lampiran membaca lewat `agent.fs`. Drafts
 - `container.ts` (proot) tidak dipakai di server; `PodmanBox` mengambil alih `container_*`.
 - `integrations.ts:847` menjalankan wrangler lewat `GRIPHUB_ROOTFS` (proot). Di server diarahkan ke `box -c`.
 - `mcp.ts:86` `/system/bin/sh` → `/bin/sh` di server. DNS bawaan `system` (bukan DoH Cloudflare) di server.
+
+Dikerjakan di fase 2: `container_*` di server memakai `PodmanBox` (status, rebuild image, reset, aktif/nonaktif sebagai
+shell, dengan `AGENTS.md` ikut ditulis ulang), ditambah `box_check`, `box_stop`, `box_wipe_home` (hanya server;
+perubahan ditolak saat agent, run, atau subagent sedang bekerja kecuali `force`). `server/box/box` dan `Containerfile`
+ikut dibawa di fase ini karena `PodmanBox` dan testnya memakainya; box meneruskan juga `CLOUDFLARE_API_TOKEN` dan
+`CLOUDFLARE_ACCOUNT_ID`. Deploy Cloudflare di server menjalankan `box -c` lewat box bila ada, selain itu `/bin/sh`.
+MCP menerima shell dan launcher box dari host.
 
 ### 4.9 Subagent CoderRa tidak boleh ikut terbawa
 
@@ -180,10 +197,19 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
 | --- | --- |
 | `keepAlive`/`setBusy` (foreground service HP) | Tidak dipanggil di mode server; agent hidup di VPS |
 | Layar Terminal (`terminal_pane.dart`, `flutter_pty`) | Mode server: `ssh -tt` ke sesi **tmux** `griphub-sh-N` / `griphub-box-N` |
-| Run background tanpa pengawasan | Mode `deny_risky` di host (pola CoderRa), juga untuk subagent saat tidak ada klien |
+| Run background tanpa pengawasan | Mode `deny_risky` di host (pola CoderRa) untuk run latar belakang di server: yang biasanya ditanyakan langsung ditolak, tool MCP tetap boleh. Di HP run latar belakang tetap tanpa guard seperti sekarang. **Subagent tidak** memakai `deny_risky` (berubah dari rencana awal): approval-nya bisa dipulihkan lewat `approvals_pending` (4.2) dan dikirim sebagai push, jadi subagent menunggu pengguna kembali alih-alih menyerah |
 | Daily budget, biaya per giliran, usage | Jalan di host, tidak berubah |
 | Pindah mode | Chat HP dan chat server terpisah (`agentDir` masing-masing); indikator "HP / Server" di header chat |
 | Versi host vs APK | `hello_server.hostVersion` dibandingkan `agent.stamp`; beda → banner "Perbarui agent di server" |
+
+### 4.11 Ditemukan saat fase 2
+
+- `AGENTS.md`: baris penanda berkata "hapus baris ini untuk menyimpan suntingan sendiri", tetapi host juga mengakui file
+  yang diawali kalimat pembuka GripHub, jadi file tanpa penanda tetap ditimpa. Sekarang hanya penanda yang menentukan
+  (setiap file yang pernah ditulis GripHub membawanya). Teks HP tetap identik byte per byte
+  (`agent/test/fixtures/agents-phone.md`).
+- Disk dijaga hanya di server (`health.start()`); di HP perintah `health` tetap menjawab, tetapi tidak ada notice
+  "disk hampir penuh" baru yang muncul tanpa diminta.
 
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 

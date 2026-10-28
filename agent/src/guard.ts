@@ -5,10 +5,14 @@
  */
 
 import { homedir } from "node:os";
-import { resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export type ApprovalMode = "ask_all" | "ask_risky" | "auto";
+/**
+ * When the agent must ask before acting. `deny_risky` is for runs nobody is watching (a server's background tasks):
+ * what `ask_risky` would ask about is refused outright instead, since there is nobody to answer.
+ */
+export type ApprovalMode = "ask_all" | "ask_risky" | "auto" | "deny_risky";
 
 /** An approval card as the host sends it. */
 export interface ApprovalRecord {
@@ -25,6 +29,12 @@ export interface GuardHooks {
 	/** Snapshot the working tree before the agent's first file change in a run. */
 	checkpoint(cwd: string, label: string): Promise<void>;
 	cwd(): string;
+}
+
+/** Whether [path] is [dir] or somewhere inside it (lexically; resolve links first where they matter). */
+export function isInside(path: string, dir: string): boolean {
+	const rel = relative(resolve(dir), resolve(dir, path));
+	return rel === "" || (rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel));
 }
 
 /** Tools that change nothing; never need approval and stay on in plan mode. */
@@ -49,7 +59,11 @@ const RISKY_BASH = [
 	/\bDROP\s+(TABLE|DATABASE)\b|\bTRUNCATE\b/i,
 ];
 
-function riskOf(toolName: string, input: Record<string, unknown>, cwd: string): string | null {
+/**
+ * Why a call deserves a second look, or null. `mcp` says whether tools from MCP servers count: a person is asked about
+ * them, but an unattended run may use the servers the user set up (as background runs always could).
+ */
+function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
 	if (READ_ONLY.has(toolName)) return null;
 	if (toolName === "bash") {
 		const cmd = String(input.command ?? "");
@@ -66,7 +80,7 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string): 
 		return null;
 	}
 	// Unknown/custom tools (MCP and friends) are treated as risky.
-	return toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
+	return mcp && toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
 }
 
 /** Summary line for the approval card. */
@@ -157,7 +171,13 @@ export class Guard {
 				};
 			}
 
-			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : null;
+			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : this.mode === "deny_risky" ? riskOf(event.toolName, input, cwd, false) : null;
+			if (risk && this.mode === "deny_risky") {
+				return {
+					block: true,
+					reason: `Refused: nobody is watching this run, so actions that need approval are not allowed (${risk}). Do not look for a way around this; finish what you safely can and say what is left for the user.`,
+				};
+			}
 			if (risk) {
 				// "Always allow" stores the FULL pattern. Storing only the
 				// first two words let `cd app && git push` also allow
