@@ -837,7 +837,11 @@ class _ServerScreenState extends State<ServerScreen> {
         ? tr('ready · commands run inside it')
         : tr('off · commands run on the server');
     final rows = <(String, String, Color?)>[
-      if (upToDate != null)
+      // A copied update waits for the chat, subagents and runs to end before the agent restarts: say so, because the files
+      // on the server are already the new ones while the process still runs the old.
+      if (h['restartPending'] == true)
+        (tr('Agent version'), tr('Update copied · restarts when the current work is done'), p.warning)
+      else if (upToDate != null)
         (tr('Agent version'), upToDate! ? tr('Up to date') : tr('A newer one is in this app'), upToDate! ? null : p.warning),
       (tr('Disk free'), '${gb(disk['freeBytes'] as num?)} ${tr('of')} ${gb(disk['totalBytes'] as num?)}', low ? p.warning : null),
       (tr('Agent memory'), gb(mem['rssBytes'] as num?), memoryHigh ? p.warning : null),

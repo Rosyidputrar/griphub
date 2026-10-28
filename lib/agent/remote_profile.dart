@@ -505,21 +505,33 @@ class RemoteSetup {
       );
     }
     onProgress?.call('Copying the agent...');
-    r = await _run(
-      [
-        rsync,
-        '-rltpz',
-        '--delete',
-        '--exclude=/server/',
-        '--itemize-changes',
-        '-e',
-        '$ssh -F $configPath',
-        '$hostDir/',
-        target,
-      ],
-      env: env,
-      timeout: const Duration(minutes: 10),
-    );
+    // The `.stamp` is what says which version the server has, so it goes last and alone: a copy that breaks off leaves
+    // the old stamp, and the app keeps saying there is an update. The files themselves are put in place together at the
+    // end (--delay-updates) and what is gone is removed after that (--delete-delay), so the host never finds half of
+    // each version.
+    final stampFile = File('$hostDir/.stamp');
+    final stampLast = stampFile.existsSync();
+    final sync = [
+      rsync,
+      '-rltpz',
+      '--delete',
+      '--delete-delay',
+      '--delay-updates',
+      '--exclude=/server/',
+      if (stampLast) '--exclude=/.stamp',
+      '--itemize-changes',
+      '-e',
+      '$ssh -F $configPath',
+    ];
+    r = await _run([...sync, '$hostDir/', target], env: env, timeout: const Duration(minutes: 10));
+    if (r.exitCode == 0 && stampLast) {
+      final stamp = await _run(
+        [rsync, '-ltpz', '--itemize-changes', '-e', '$ssh -F $configPath', stampFile.path, '$target.stamp'],
+        env: env,
+        timeout: const Duration(minutes: 2),
+      );
+      r = (exitCode: stamp.exitCode, stdout: '${r.stdout}\n${stamp.stdout}', stderr: stamp.stderr);
+    }
     if (r.exitCode != 0) {
       return InstallResult(
         ok: false,
@@ -540,7 +552,26 @@ class RemoteSetup {
         ],
       );
     }
+    // A host that is running is asked to restart when it has nothing in flight: it may be in the middle of a scheduled
+    // run or a subagent that nobody is watching. One that does not answer (not running, wedged) is restarted outright.
     onProgress?.call('Starting it...');
+    final asked = await _restartWhenIdle(env: env);
+    if (asked != null) {
+      return InstallResult(
+        ok: true,
+        filesSent: sent,
+        says: [
+          if (asked['restarting'] == true) ...[
+            sent == 0
+                ? const Msg('Already up to date. Restarted the agent.')
+                : Msg('Installed ({n} files). The agent was restarted.', {'n': sent}),
+          ] else ...[
+            sent == 0 ? const Msg('Already up to date.') : Msg('Copied ({n} files).', {'n': sent}),
+            const Msg('The agent restarts with the new version once it is done with the current work.'),
+          ],
+        ],
+      );
+    }
     r = await _run(
       [ssh, ..._base, '-T', RemoteProfile.alias, restartCommand],
       env: env,
@@ -567,6 +598,46 @@ class RemoteSetup {
             : Msg('Installed ({n} files). The agent was restarted.', {'n': sent}),
       ],
     );
+  }
+
+  /// Asks the host on the server to restart once nothing is in flight (`host_restart`), through the same
+  /// `griphub-attach` the app connects with. Returns its answer (`restarting`, or `pending`), or null when it gave none:
+  /// not running, an attach that cannot connect, or no reply in 20 seconds.
+  Future<Map<String, dynamic>?> _restartWhenIdle({Map<String, String>? env}) async {
+    final Process p;
+    try {
+      p = await Process.start(
+        ssh,
+        [..._base, '-T', RemoteProfile.alias, '$remoteDir/bin/griphub-attach'],
+        environment: env,
+      );
+    } on ProcessException {
+      return null;
+    }
+    final answer = Completer<Map<String, dynamic>?>();
+    final lines = p.stdout.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      try {
+        final m = jsonDecode(line);
+        if (m is Map && m['type'] == 'response' && m['id'] == 1 && !answer.isCompleted) {
+          answer.complete(m['ok'] == true && m['data'] is Map ? (m['data'] as Map).cast<String, dynamic>() : null);
+        }
+      } catch (_) {
+        // Not a record (a banner, a half line): wait for the answer.
+      }
+    }, onDone: () => answer.isCompleted ? null : answer.complete(null));
+    unawaited(p.stderr.drain<void>().catchError((_) {}));
+    unawaited(p.stdin.done.catchError((_) {}));
+    try {
+      p.stdin.writeln(jsonEncode({'id': 1, 'type': 'host_restart', 'whenIdle': true}));
+      return await answer.future.timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      await lines.cancel();
+      p.kill();
+    }
   }
 
   Future<({int exitCode, String stdout, String stderr})> _run(

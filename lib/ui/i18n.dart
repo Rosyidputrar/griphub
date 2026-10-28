@@ -1468,6 +1468,7 @@ const _id = <String, String>{
   'A server is set up; tap to switch': 'Server sudah disiapkan; ketuk untuk beralih',
   'Agent on a VPS / server': 'Agent di VPS / server',
   'Agent version': 'Versi agent',
+  'Update copied · restarts when the current work is done': 'Update sudah disalin · agent berjalan ulang setelah pekerjaan yang sekarang selesai',
   'Agent: this phone': 'Agent: HP ini',
   'Agent: your server': 'Agent: server Anda',
   'Backup made on the server · {n} files': 'Backup dibuat di server · {n} file',
