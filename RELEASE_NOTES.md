@@ -2,44 +2,36 @@
 
 ## Bahasa Indonesia
 
-**Chat**
-- Biaya setiap jawaban kini terlihat di samping tombol salin dan nama model: jumlah token dan perkiraan kredit untuk satu giliran. Biaya subagent ditampilkan terpisah. Ketuk untuk melihat rinciannya: jumlah request, token (termasuk cache), kredit, dan rupiah.
-- Teks panjang yang ditempel (lebih dari 1.000 karakter atau 15 baris) kini otomatis menjadi lampiran "Konten yang ditempel", jadi kolom ketik dan chat tetap rapi. Ketuk lampirannya untuk melihat isinya, atau pilih "Tempel sebagai teks".
-- Aplikasi tidak lagi menjadi berat saat agent menulis file panjang (misalnya halaman HTML). Selama menulis, yang ditampilkan hanya baris-baris terbaru beserta jumlah baris dan ukurannya; isi lengkapnya muncul setelah selesai. Live preview tetap tersedia.
-
-**Subagent**
-- Pesan yang diantrekan ke subagent yang sedang berjalan kini benar-benar terkirim. Sebelumnya subagent malah berhenti dengan status gagal.
-- Subagent tidak lagi dinyatakan gagal saat koneksi sempat terputus lalu berhasil dicoba ulang.
-
-**GitHub**
-- Login GitHub tidak lagi berhenti bekerja setelah beberapa jam dengan error "401 Bad credentials": sesi diperpanjang otomatis. Jika login sudah tidak berlaku, layar Akun menampilkannya dengan tombol "Masuk lagi".
-- Repository dengan nama yang sama dari pemilik berbeda (misalnya milikmu dan repo tempat kamu menjadi collaborator) tidak lagi tertukar. Masing-masing di-clone ke foldernya sendiri dan dibuka dengan benar.
-- Repository yang sudah ada di HP kini bisa ditarik perubahannya (lengkap dengan jumlah commit baru) dan pindah branch langsung dari daftar repository, termasuk branch yang baru dibuat di GitHub.
-
-**Tasks**
-- Task yang sudah selesai, gagal, atau dibatalkan bisa digeser ke kiri atau kanan untuk dihapus, dengan tombol Urungkan.
+**Baru: agent di server sendiri (VPS)**
+- Agent kini bisa berjalan di VPS milik Anda, 24 jam: tetap bekerja saat app ditutup atau HP mati. Buka Pengaturan → Agent di VPS / server.
+- Pemasangan tanpa mengunduh apa pun. Salin satu perintah dari app, tempel di terminal server (Ubuntu atau Debian), lalu tempel kode setup yang dicetaknya ke app. Langkahnya bernomor. Server langsung dites, dan agent baru bisa dipakai setelah terpasang dengan benar.
+- Chat, file, editor, pratinjau HTML, dev server, terminal, backup, dan lampiran semuanya bekerja di server. Chat di HP dan chat di server terpisah, dan Anda bisa beralih bolak-balik kapan saja.
+- Saat koneksi putus, app menyambung ulang sendiri dan menyusul chat tanpa pesan ganda. Pekerjaan agent di server tidak terhenti. Tab terminal tetap hidup di server; tekan Sambungkan lagi untuk kembali ke sesi yang sama.
+- Perintah agent berjalan di dalam box (container di server), bukan langsung di server. Bila box belum dibangun, app menunjukkannya beserta tombol Bangun box.
+- Notifikasi lewat app ntfy saat app tertutup: persetujuan diperlukan, agent selesai, tugas selesai. Notifikasi hanya berisi judul umum, tanpa isi chat. Ada tombol Kirim notifikasi uji.
+- Kartu kesehatan server, daftar periksa, dan panduan "Bila ada masalah" langsung di app.
+- Tugas terjadwal mengikuti jam HP. Bila agent di server lebih lama dari app, muncul banner dengan tombol Perbarui.
+- Saat beralih, app menyebut apa yang tidak ikut pindah (model, kunci API, akun) dan memperingatkan bila agent di HP sedang bekerja.
 
 **Lainnya**
-- Tombol pada notifikasi bawah (seperti Urungkan, Buka, Lihat) kini terbaca di tema gelap.
+- Saat file yang sedang diedit diubah agent, kini ada tombol Salin editan saya sebelum memilih Muat ulang atau Timpa.
+- Pemilih folder menampilkan status memuat, dan pesan dengan tombol Coba lagi bila folder tidak bisa dibuka.
+- Istilah dalam bahasa Indonesia dibuat lebih konsisten.
 
 ## English
 
-**Chat**
-- Each reply now shows what it cost next to the copy button and model name: tokens and estimated credits for the turn, with subagents shown apart. Tap it for the breakdown: requests, tokens (cache included), credits and rupiah.
-- Pasting long text (over 1,000 characters or 15 lines) now attaches it as "Pasted content", so the message box and the chat stay tidy. Tap it to see the text, or choose "Paste as text".
-- The app no longer slows down while the agent writes a long file (such as an HTML page). While writing, only the newest lines show, with the line count and size; the full file shows once it's done. Live preview still works.
-
-**Subagents**
-- A message queued for a running subagent is now actually sent; it used to make the subagent stop as failed.
-- A subagent is no longer reported as failed when the connection dropped and the retry succeeded.
-
-**GitHub**
-- GitHub sign-in no longer stops working after a few hours with "401 Bad credentials": the session renews itself. When a sign-in is no longer valid, Accounts says so, with a "Sign in again" button.
-- Repositories with the same name from different owners (say, yours and one you collaborate on) are no longer mixed up. Each is cloned into its own folder and opens correctly.
-- A repository already on the phone can now pull the latest changes (showing how many new commits) and switch branch right from the repository list, including branches created on GitHub since.
-
-**Tasks**
-- Finished, failed or cancelled tasks swipe away in either direction, with Undo.
+**New: the agent on your own server (VPS)**
+- The agent can now run on your own VPS, around the clock: it keeps working when the app is closed or the phone is off. Open Settings → Agent on a VPS / server.
+- Setup needs no downloads. Copy one command from the app, paste it into the server's terminal (Ubuntu or Debian), then paste the setup code it prints back into the app. The steps are numbered. The server is tested right away, and the agent can only be switched on once it is installed properly.
+- Chats, files, the editor, HTML previews, dev servers, the terminal, backups and attachments all work on the server. Phone chats and server chats are kept apart, and you can switch back and forth at any time.
+- When the connection drops, the app reconnects by itself and catches up on the chat without duplicates. The agent's work on the server carries on. Terminal tabs stay alive on the server; tap Reconnect to return to the same session.
+- The agent's commands run inside a box (a container on the server), not on the server itself. If the box is not built yet, the app says so and offers a Build the box button.
+- Notifications through the ntfy app while the app is closed: approval needed, agent finished, task finished. They carry only a generic title, never chat content. There is a Send a test notification button.
+- A server health card, a checklist and a "When something goes wrong" guide, right in the app.
+- Scheduled tasks follow the phone's clock. When the server's agent is older than the app, a banner offers to update it.
+- Switching says what does not come along (models, API keys, accounts) and warns when the phone's agent is still working.
 
 **Other**
-- Snackbar buttons (Undo, Open, View) are now readable in the dark theme.
+- When the agent changes a file you are editing, there is now a Copy my edits button before you choose Reload or Overwrite.
+- The folder picker shows when it is loading, and an error with Try again when a folder cannot be opened.
+- More consistent Indonesian wording.
