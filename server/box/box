@@ -53,7 +53,7 @@ create() {
 	podman run -d --name "$NAME" --hostname "$NAME" --init --network=host \
 		--memory "$MEMORY" --memory-swap "$SWAP" --cpus "$CPUS" \
 		-v "$BOXHOME:$HOME_DIR" -v "$WS:$WS" -e "HOME=$HOME_DIR" -w "$WS" \
-		"$IMAGE" sleep infinity >/dev/null
+		"$IMAGE" sleep infinity >/dev/null 9>&-
 }
 
 # Two calls arriving together on first use must not both try to create the container.
@@ -61,11 +61,11 @@ ensure_running() {
 	mkdir -p "$GRIPHUB_DIR" "$WS"
 	( umask 077; mkdir -p "$BOXHOME" )
 	exec 9>"$GRIPHUB_DIR/box.lock"
-	flock 9
+	flock -w 60 9 || { echo "box: another box operation is still running; try again in a minute" >&2; exit 75; }
 	case "$(state)" in
 		running) ;;
 		"") create ;;
-		*) podman start "$NAME" >/dev/null ;;
+		*) podman start "$NAME" >/dev/null 9>&- ;;
 	esac
 	exec 9>&-
 }
