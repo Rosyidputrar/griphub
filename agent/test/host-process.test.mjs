@@ -408,12 +408,36 @@ test("server mode: the box is the agent's shell when the server has one, and the
 	none.d.child.kill("SIGTERM");
 	await exited(none.d.child);
 
-	// With one (a stand-in launcher): on by default, and the notes say commands run in the container.
+	// With one (a stand-in launcher, and a stand-in podman whose image exists once IMAGE_MARK does).
 	const launcher = join(dir, "box-launcher");
 	writeFileSync(launcher, "#!/bin/sh\necho box-works\n");
 	chmodSync(launcher, 0o755);
-	const { c, agentDir } = await connected(t, dir, { GRIPHUB_BOX: launcher, PATH: `${join(dir, "no-podman")}:/usr/bin:/bin` });
+	const bin = join(dir, "fake-bin");
+	const mark = join(dir, "image-built");
+	mkdirSync(bin);
+	writeFileSync(
+		join(bin, "podman"),
+		`#!/bin/sh\ncase "$1 $2" in\n"--version "*) echo "podman version 5.0.0" ;;\n"image exists") [ -f "${mark}" ] ;;\n"build "*) touch "${mark}" ;;\n*) exit 1 ;;\nesac\n`,
+	);
+	chmodSync(join(bin, "podman"), 0o755);
+	const griphubDir = join(dir, ".griphub");
+	mkdirSync(join(griphubDir, "box"), { recursive: true });
+	writeFileSync(join(griphubDir, "box", "Containerfile"), "FROM scratch\n");
+	const { c, agentDir } = await connected(t, dir, { GRIPHUB_BOX: launcher, PATH: `${bin}:/usr/bin:/bin` });
 	const notes = () => readFileSync(join(agentDir, "AGENTS.md"), "utf8");
+
+	// The image was never built (the setup script could not run podman): commands must not go to a box that fails them
+	// all; they run on the server, and turning the box on says why it cannot be.
+	assert.match(notes(), /directly on the server/);
+	const s0b = (await c.call("container_status")).data;
+	assert.deepEqual([s0b.available, s0b.installed, s0b.enabled], [true, false, false]);
+	assert.match(s0b.problem, /image has not been built/);
+	assert.match((await c.call("container_enable", { on: true })).error, /image has not been built yet/);
+
+	// Rebuilding it from the app: from then on commands run in the container, and the notes say so.
+	const built = await c.call("container_install", { distro: "" });
+	assert.equal(built.ok, true, built.error);
+	assert.deepEqual([built.data.installed, built.data.enabled], [true, true]);
 	assert.match(notes(), /inside an Ubuntu container as root/);
 	const s1 = (await c.call("container_status")).data;
 	assert.deepEqual([s1.available, s1.enabled], [true, true]);
@@ -505,4 +529,21 @@ test("phone mode: the notes are exactly as before, sync is offered, and files wo
 	assert.equal((await call("health")).data.mode, "phone");
 	child.stdin.end();
 	assert.equal(await exited(child), 0);
+});
+
+test("server mode: an image built by hand on the server is picked up the next time the box is looked at", async (t) => {
+	const dir = home(t);
+	const launcher = join(dir, "box-launcher");
+	writeFileSync(launcher, "#!/bin/sh\necho box-works\n");
+	chmodSync(launcher, 0o755);
+	const bin = join(dir, "fake-bin");
+	const mark = join(dir, "image-built");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "podman"), `#!/bin/sh\ncase "$1 $2" in\n"--version "*) echo podman ;;\n"image exists") [ -f "${mark}" ] ;;\n*) exit 1 ;;\nesac\n`);
+	chmodSync(join(bin, "podman"), 0o755);
+	const { c, agentDir } = await connected(t, dir, { GRIPHUB_BOX: launcher, PATH: `${bin}:/usr/bin:/bin` });
+	assert.equal((await c.call("container_status")).data.enabled, false);
+	writeFileSync(mark, ""); // podman build ... on the server
+	assert.equal((await c.call("container_status")).data.enabled, true);
+	assert.match(readFileSync(join(agentDir, "AGENTS.md"), "utf8"), /inside an Ubuntu container/);
 });

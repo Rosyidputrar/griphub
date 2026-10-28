@@ -223,13 +223,24 @@ class _SettingsHubState extends State<SettingsHub> {
               SettingsGroup(
                 children: [
                   SettingsRow(
-                    icon: c?.distro == 'alpine' ? SimpleIcons.alpinelinux : SimpleIcons.debian,
-                    color: c?.distro == 'alpine' ? const Color(0xFF0D597F) : const Color(0xFFD70A53),
-                    title: tr('Linux container'),
+                    icon: c?.isBox == true
+                        ? LucideIcons.container
+                        : c?.distro == 'alpine'
+                        ? SimpleIcons.alpinelinux
+                        : SimpleIcons.debian,
+                    color: c?.isBox == true
+                        ? p.accent
+                        : c?.distro == 'alpine'
+                        ? const Color(0xFF0D597F)
+                        : const Color(0xFFD70A53),
+                    // On a server this is the agent's box (Podman), not a Linux on the phone.
+                    title: tr(c?.isBox == true ? 'The agent\'s box' : 'Linux container'),
                     subtitle: c == null
                         ? tr('Debian or Alpine with apt / apk')
                         : c.installed
                         ? '${c.image}${c.enabled ? ' · ${tr('agent shell')}' : ''}'
+                        : c.isBox
+                        ? tr('Not built · rebuild it on its screen')
                         : tr('Not installed · run apt, pip, npm and more'),
                     trailing: c?.enabled == true ? Pill(tr('On'), color: p.success, dot: true) : null,
                     onTap: () => _open(ContainerScreen(agent: agent)),

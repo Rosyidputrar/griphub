@@ -680,8 +680,33 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 }
 
 /** The agent's shell is the server's box (server only). */
+/**
+ * Whether the box can take commands: its launcher is installed and its image has been built. A launcher without an
+ * image fails every command ("the container image is missing"), so until the image exists commands run on the server.
+ */
+let boxImage = false;
+function boxUsable(): boolean {
+	return server && box.available && boxImage;
+}
+
 function boxIsShell(): boolean {
-	return server && box.available && integrations?.settings.containerShell !== false;
+	return boxUsable() && integrations?.settings.containerShell !== false;
+}
+
+/**
+ * Points the agent's shell at the box when it can take commands (and the user did not turn it off), and away from it
+ * when it cannot. [status] is a fresh box status; returns whether the shell changed (the session then needs reopening).
+ */
+async function followBox(status: { available: boolean; installed: boolean }): Promise<boolean> {
+	boxImage = status.available && status.installed;
+	const shell = settingsManager.getShellPath();
+	const want = boxIsShell() ? boxScript : undefined;
+	if (want === shell || (!want && shell !== boxScript)) return false;
+	if (!want) log("the box cannot take commands yet (no image); the agent's commands run directly on the server");
+	settingsManager.setShellPath(want);
+	ensureAgentsFile(); // the notes tell the agent where its commands run
+	await settingsManager.flush();
+	return true;
 }
 
 /** Keeps the environment notes current (agents-file.ts), unless the user has taken the file over. */
@@ -1399,13 +1424,18 @@ async function handle(cmd: Command): Promise<unknown> {
 
 		// Linux container. On the phone: container.ts (proot). On a server: the rootless Podman box (podmanbox.ts), which
 		// the setup script builds; the same commands serve both, so the screens do not need to know which one they talk to.
-		case "container_status":
-			return server ? box.status(settingsManager.getShellPath()) : container.status(settingsManager.getShellPath());
+		case "container_status": {
+			if (!server) return container.status(settingsManager.getShellPath());
+			// An image built since (from this screen, or by hand on the server) puts the agent's commands in the box.
+			if (await followBox(await box.status(settingsManager.getShellPath()))) await reopenSession().catch(() => {});
+			return box.status(settingsManager.getShellPath());
+		}
 		case "container_install": {
 			if (server) {
 				// "Install" on a server means building the image again.
 				guardBoxWork(cmd);
 				await box.rebuildImage(taskLog(cmd));
+				if (await followBox(await box.status(settingsManager.getShellPath()))) await reopenSession().catch(() => {});
 				return box.status(settingsManager.getShellPath());
 			}
 			await container.install(cmd.distro as Distro, taskLog(cmd), integrations.settings.dns);
@@ -1432,6 +1462,10 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "container_enable":
 			if (server) {
 				if (cmd.on && !box.available) throw new Error("There is no box on this server");
+				if (cmd.on && !boxUsable()) {
+					boxImage = (await box.status(undefined)).installed;
+					if (!boxImage) throw new Error("The box's image has not been built yet: rebuild it on this screen first");
+				}
 				settingsManager.setShellPath(cmd.on ? boxScript : undefined);
 				integrations.updateSettings({ containerShell: !!cmd.on });
 				ensureAgentsFile(); // the notes tell the agent where its commands run
@@ -1620,7 +1654,7 @@ async function main() {
 
 	// Route every lookup through DNS-over-HTTPS (configurable in settings; a server defaults to its own resolver).
 	installDohLookup();
-	integrations = new Integrations(agentDir, workspace, { server, boxScript: () => (box.available ? boxScript : null) });
+	integrations = new Integrations(agentDir, workspace, { server, boxScript: () => (boxUsable() ? boxScript : null) });
 	// After the settings: on a server they say whether bash runs in the box, which the notes describe.
 	ensureAgentsFile();
 	integrations.onChange = () => send({ type: "integrations", summary: integrations.summary() });
@@ -1638,7 +1672,7 @@ async function main() {
 	mcp = new Mcp(
 		join(stateDir, "mcp.json"),
 		() => send({ type: "mcp", servers: mcp.summary() }),
-		server ? { shell: "/bin/sh", box: () => (box.available ? boxScript : "/bin/sh") } : undefined,
+		server ? { shell: "/bin/sh", box: () => (boxUsable() ? boxScript : "/bin/sh") } : undefined,
 	);
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
 	// read its disk any other way; on the phone the same commands work too, inside the same folders.
@@ -1682,18 +1716,9 @@ async function main() {
 			};
 		},
 	});
-	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user
-	// turned that off. If the launcher went away, stop pointing at it.
-	if (server) {
-		const shell = settingsManager.getShellPath();
-		if (box.available && integrations.settings.containerShell !== false && shell !== boxScript) {
-			settingsManager.setShellPath(boxScript);
-			await settingsManager.flush();
-		} else if (shell === boxScript && !box.available) {
-			settingsManager.setShellPath(undefined);
-			await settingsManager.flush();
-		}
-	}
+	// On a server, bash runs inside the rootless container once it has been set up (server/box/box) and its image built,
+	// unless the user turned that off. Without the image (or the launcher), commands run directly on the server.
+	if (server) await followBox(await box.status(settingsManager.getShellPath()));
 	// Linux container is the agent's shell by default once installed.
 	else if (
 		container.status(undefined).installed &&
