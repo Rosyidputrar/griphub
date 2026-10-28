@@ -369,6 +369,35 @@ keluarnya.
   widget: layar box belum dibangun, membangun, gagal; kartu kesehatan; banner versi; golden: layar box belum dibangun,
   kartu kesehatan dengan baris Box, banner versi, bar tab terputus (terang/gelap, EN/ID, 320dp dengan teks 1.3).
 
+### 4.19 Alur setup dan peralihan (review UI/UX, kelompok 2)
+
+- **Langkah bernomor**: setelah **Simpan server** baris berikutnya menjadi "3 · Tes koneksi", "4 · Pasang / perbarui
+  agent", "5 · Pakai agent server". Server tersimpan langsung dites (juga setiap layar dibuka selama belum dipakai).
+  Saklar **Pakai agent server** terkunci sampai tes menemukan agent berjalan di server ("Tes koneksi dan pasang agent
+  dulu"). "Agent belum dipasang" tampil oranye sebagai langkah berikutnya, bukan merah.
+- **Beralih ke server**: dialog menyebut yang tidak ikut (model, kunci API, akun GitHub/Cloudflare) dan cara membawa
+  chat (backup di HP, pulihkan di server), dengan tombol **Backup HP ini dulu**. Bila agent di HP sedang bekerja (giliran
+  chat, subagent, run latar), dialog mengatakannya dengan merah dan tombolnya menjadi **Hentikan dan beralih**.
+- **Pakai server lain** saat server sedang dipakai: kode baru disimpan belum aktif dan app kembali ke agent HP, jadi chat
+  tidak lagi bicara ke server lama sementara terminal dan file sudah ke server baru. Formulir menyebutkannya sebelum
+  disimpan. Server lama tetap berjalan dengan chat-nya.
+- **Mode server, tersambung gagal saat app dibuka**: layar baru dengan alasan dalam kalimat biasa (hasil `classify`, mis.
+  "Tidak bisa menjangkau …"), "Agent tetap bekerja di server", hitung mundur dan coba lagi otomatis dengan backoff yang
+  sama dengan banner, **Coba sekarang**, pengaturan server, pakai agent HP; teks ssh mentah di balik **Detail**. Layar
+  gagal mode HP tidak berubah (hanya bagian servernya dibuang).
+- **Setup**: baris perintah tidak lagi punya ikon salin sendiri bila file setup ada di app (menyalin baris itu saja gagal di
+  server yang belum punya file-nya); labelnya "Yang dijalankan tempelan di akhir". Alamat server wajib: **Salin perintah
+  setup** dan **Bagikan file** menunggu alamat diisi.
+- **Bahasa**: pesan dari sisi agent dibawa sebagai `Msg` (kalimat Inggris dengan `{address}`, `{n}`, `{error}` dan
+  nilainya, `lib/agent/msg.dart`); layar menerjemahkan lalu mengisinya (`trMsg`). Berlaku untuk kesalahan kode setup
+  (`SetupCodeError`), hasil Tes koneksi termasuk peringatan host key berubah, progres dan hasil Pasang ("Sudah
+  terbaru"), pesan restart. Pesan box dari host, hasil Uji box, catatan chat dari app ("Tidak tersambung ke server."),
+  dan dua teks Files juga diterjemahkan.
+- Test: widget (penomoran, saklar terkunci lalu terbuka setelah pasang+tes, dialog sibuk, tombol backup, alasan offline di
+  layar server, server lain saat aktif, diagnosa dan kode setup dalam bahasa Indonesia, salin hanya tempelan penuh, layar
+  gagal boot: alasan, Detail, coba lagi otomatis dan Coba sekarang); `Msg` di `classify` dan `SetupCodeError`; golden:
+  langkah 3–5, dialog beralih saat sibuk, layar gagal boot, layar setup.
+
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 
 | Layar | Pemakaian `dart:io` | Perubahan |

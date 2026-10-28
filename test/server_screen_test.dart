@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:griphub_agent/agent/agent_backend.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/msg.dart';
 import 'package:griphub_agent/agent/remote_profile.dart';
+import 'package:griphub_agent/ui/kit.dart';
 import 'package:griphub_agent/ui/server_screen.dart';
 import 'package:griphub_agent/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -23,10 +25,12 @@ String setupCode([Map<String, Object?> over = const {}]) =>
 class StubSetup extends RemoteSetup {
   StubSetup(String home) : super(home: home, ssh: 'ssh');
 
-  ServerCheck result = const ServerCheck(ProblemNone.ok, 'Connected. The agent is running on the server.');
+  ServerCheck result = const ServerCheck(ProblemNone.ok, Msg('Connected. The agent is running on the server.'));
   InstallResult installResult = const InstallResult(
     ok: true,
-    message: 'Installed (12 files). The agent was restarted.',
+    says: [
+      Msg('Installed ({n} files). The agent was restarted.', {'n': 12}),
+    ],
     filesSent: 12,
   );
   var checks = 0;
@@ -353,18 +357,17 @@ void main() {
     testWidgets('testing the connection shows the verdict, with the way out when it is bad', (tester) async {
       configure(saved: true);
       await open(tester);
-      await tester.tap(find.text('Test connection'));
       await tester.pump();
-      await tester.pump();
+      // A saved server not in use is tested as soon as the screen opens.
       expect(find.text('Connected. The agent is running on the server.'), findsOneWidget);
       expect(setup.checks, 1);
 
       setup.result = const ServerCheck(
         ServerProblem.authRejected,
-        'The server did not accept this app\'s key.',
+        Msg('The server did not accept this app\'s key.'),
         detail: 'Permission denied (publickey).',
       );
-      await tester.tap(find.text('Test connection'));
+      await tester.tap(find.text('3 · Test connection'));
       await tester.pump();
       await tester.pump();
       expect(find.text('The server did not accept this app\'s key.'), findsOneWidget);
@@ -374,35 +377,191 @@ void main() {
     testWidgets('installing shows what it did, and tests the server afterwards', (tester) async {
       configure(saved: true);
       await open(tester);
-      await tester.tap(find.text('Install / update agent'));
+      await tester.pump();
+      expect(setup.checks, 1, reason: 'tested on opening');
+      await tester.tap(find.text('4 · Install / update agent'));
       await tester.pump();
       await tester.pump();
       expect(find.text('Installed (12 files). The agent was restarted.'), findsOneWidget);
       expect(setup.installs, 1);
-      expect(setup.checks, 1, reason: 'a successful install is followed by a check');
+      expect(setup.checks, 2, reason: 'a successful install is followed by a check');
 
       setup.installResult = const InstallResult(
         ok: false,
-        message: 'Copying failed: rsync: connection unexpectedly closed',
+        says: [
+          Msg('Copying failed: {error}', {'error': 'rsync: connection unexpectedly closed'}),
+        ],
       );
-      await tester.tap(find.text('Install / update agent'));
+      await tester.tap(find.text('4 · Install / update agent'));
       await tester.pump();
       await tester.pump();
       expect(find.text('Copying failed: rsync: connection unexpectedly closed'), findsOneWidget);
-      expect(setup.checks, 1);
+      expect(setup.checks, 2);
     });
 
     testWidgets('switching to the server asks first, and cancelling changes nothing', (tester) async {
       configure(saved: true);
       await open(tester);
+      await tester.pump();
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
       expect(find.text('Use the server agent?'), findsOneWidget);
       expect(find.textContaining('stay here, untouched'), findsOneWidget);
+      // What does not come along, and how chats can.
+      expect(find.textContaining('API keys and accounts'), findsOneWidget);
+      expect(find.text('Back up this phone first'), findsOneWidget);
+      expect(find.text('Use the server'), findsOneWidget);
+      expect(find.textContaining('Switching now stops it'), findsNothing, reason: 'nothing is running on the phone');
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(store.load()!.active, isFalse);
       expect(agent.client.isRemote, isFalse);
+    });
+
+    testWidgets('the switch waits for a test that finds the agent on the server', (tester) async {
+      setup.result = const ServerCheck(
+        ServerProblem.hostMissing,
+        Msg('Connected. The agent is not installed on the server yet: press Install / update.'),
+      );
+      configure(saved: true);
+      await open(tester);
+      await tester.pump();
+      expect(find.text('5 · Use the server agent'), findsOneWidget);
+      expect(find.text('Test the connection and install the agent first'), findsOneWidget);
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
+
+      setup.result = const ServerCheck(ProblemNone.ok, Msg('Connected. The agent is running on the server.'));
+      await tester.tap(find.text('4 · Install / update agent'));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull, reason: 'installed and tested');
+      expect(find.text('Chats and files are on this phone'), findsOneWidget);
+    });
+
+    testWidgets('switching while the phone\'s agent works says it stops, in red', (tester) async {
+      configure(saved: true);
+      await open(tester);
+      await tester.pump();
+      agent.busy = true;
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      expect(find.text('The agent on this phone is working. Switching now stops it.'), findsOneWidget);
+      expect(find.text('Stop and switch'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      agent.busy = false;
+    });
+
+    testWidgets('"Back up this phone first" opens the backup screen instead of switching', (tester) async {
+      configure(saved: true);
+      await open(tester);
+      await tester.pump();
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Back up this phone first'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('Use the server agent?'), findsNothing);
+      expect(find.byType(ServerScreen), findsNothing, reason: 'the backup screen is on top');
+      expect(store.load()!.active, isFalse);
+    });
+
+    testWidgets('a server in use that cannot be reached says why, in plain words, with the raw text under it', (
+      tester,
+    ) async {
+      configure(saved: true, active: true);
+      agent.client.connection.value = const Connection(
+        LinkState.reconnecting,
+        attempt: 2,
+        reason: 'ssh: connect to host agent.example.com port 22: Network is unreachable',
+      );
+      await open(tester);
+      expect(find.textContaining('Could not reach agent.example.com.'), findsOneWidget);
+      expect(find.text('ssh: connect to host agent.example.com port 22: Network is unreachable'), findsOneWidget);
+    });
+
+    testWidgets('a different server while one is in use: saving it goes back to the phone until it is tested', (
+      tester,
+    ) async {
+      backend.onCommand = (c) => switch (c['type']) {
+        'messages' || 'providers' || 'models' || 'sessions' => <Object?>[],
+        _ => <String, Object?>{'workspace': '/srv/work'},
+      };
+      configure(saved: true, active: true);
+      await open(tester);
+      await tester.ensureVisible(find.text('Use a different server'));
+      await tester.tap(find.text('Use a different server'));
+      await tester.pump();
+      expect(find.textContaining('Saving goes back to the agent on this phone'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Setup code'), setupCode({'host': 'new.example.com'}));
+      await tester.ensureVisible(find.text('Save server'));
+      await tester.tap(find.text('Save server'));
+      // The app lets go of the old server: the link stops, and the phone's agent starts after a short pause.
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      final saved = store.load()!;
+      expect([saved.host, saved.active], ['new.example.com', false]);
+      expect(agent.client.isRemote, isFalse, reason: 'the chat no longer talks to the old server');
+      expect(find.text('3 · Test connection'), findsOneWidget, reason: 'on to the next step');
+      expect(setup.checks, greaterThanOrEqualTo(1), reason: 'the new server is tested at once');
+    });
+
+    testWidgets('in Indonesian the diagnostics are Indonesian too, addresses filled in', (tester) async {
+      Appearance.instance.language = 'id';
+      addTearDown(() => Appearance.instance.language = 'en');
+      setup.result = const ServerCheck(
+        ServerProblem.unreachable,
+        Msg(
+          'Could not reach {address}. Check the address, the phone\'s connection, and that the server allows ssh on that port.',
+          {'address': 'agent.example.com'},
+        ),
+      );
+      configure(saved: true);
+      await open(tester);
+      await tester.pump();
+      expect(find.textContaining('Tidak bisa menjangkau agent.example.com.'), findsOneWidget);
+
+      await tester.tap(find.text('4 · Pasang / perbarui agent'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Terpasang (12 file). Agent sudah dijalankan ulang.'), findsOneWidget);
+    });
+
+    testWidgets('a bad setup code is explained in Indonesian', (tester) async {
+      Appearance.instance.language = 'id';
+      addTearDown(() => Appearance.instance.language = 'en');
+      configure();
+      await open(tester);
+      await tester.enterText(find.byType(TextField).last, setupCode({'port': 99999}));
+      await tester.tap(find.text('Simpan server'));
+      await tester.pump();
+      expect(find.text('Port di kode setup tidak valid: "99999".'), findsOneWidget);
+    });
+
+    testWidgets('the setup line has no copy of its own when the app carries the file: only the full paste', (
+      tester,
+    ) async {
+      File('${tmp.path}/host/server/griphub-setup.sh')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('#!/bin/sh\n');
+      configure();
+      await open(tester);
+      await tester.pump();
+      expect(find.text('What the paste runs at the end'), findsOneWidget);
+      expect(find.byTooltip('Copy'), findsNothing);
+      expect(
+        tester.widget<PrimaryButton>(find.widgetWithText(PrimaryButton, 'Copy setup command')).onPressed,
+        isNull,
+        reason: 'the address is needed first',
+      );
+      await tester.enterText(find.widgetWithText(TextField, 'Server address (name or IP)'), '85.9.194.68');
+      await tester.pump();
+      expect(
+        tester.widget<PrimaryButton>(find.widgetWithText(PrimaryButton, 'Copy setup command')).onPressed,
+        isNotNull,
+      );
     });
 
     testWidgets('forgetting a server asks first, then removes the key and the ssh files', (tester) async {
@@ -418,6 +577,59 @@ void main() {
       expect(store.load(), isNull);
       expect(File(setup.configPath).existsSync(), isFalse);
       expect(find.text('Setup code'), findsOneWidget, reason: 'back to the set-up steps');
+    });
+  });
+
+  group('ServerBootFailed', () {
+    testWidgets('opening the app on a server it cannot reach: why in plain words, and it tries again by itself', (
+      tester,
+    ) async {
+      configure(saved: true, active: true);
+      backend.onCommand = (c) => switch (c['type']) {
+        'messages' || 'providers' || 'models' || 'sessions' => <Object?>[],
+        _ => <String, Object?>{'workspace': '/srv/work'},
+      };
+      agent
+        ..status = BootStatus.failed
+        ..bootFailures = 1
+        ..bootError = 'ssh: connect to host agent.example.com port 22: Network is unreachable';
+      await show(tester, ServerBootFailed(agent: agent));
+      expect(find.text('Could not reach the server agent'), findsOneWidget);
+      expect(find.textContaining('Could not reach agent.example.com.'), findsOneWidget);
+      expect(find.text('The agent keeps working on the server.'), findsOneWidget);
+      expect(find.textContaining('Trying again in'), findsOneWidget);
+      expect(find.text('Use the agent on this phone'), findsOneWidget);
+      // The raw ssh output is there, but folded away.
+      expect(find.textContaining('Network is unreachable'), findsNothing);
+      await tester.tap(find.text('Details'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('ssh: connect to host agent.example.com port 22: Network is unreachable'), findsOneWidget);
+
+      expect(backend.starts, 0);
+      await tester.pump(const Duration(seconds: 1)); // the backoff (20 ms here) is over at the next tick
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(backend.starts, 1, reason: 'it tried again on its own');
+      expect(agent.status, BootStatus.ready);
+      expect(agent.bootFailures, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('"Try now" does not wait for the countdown', (tester) async {
+      configure(saved: true, active: true);
+      agent.client.backoff = (_) => const Duration(minutes: 1);
+      agent
+        ..status = BootStatus.failed
+        ..bootFailures = 3
+        ..bootError = 'ssh: connect to host agent.example.com port 22: Connection timed out';
+      await show(tester, ServerBootFailed(agent: agent));
+      expect(find.text('Trying again in 60 s'), findsOneWidget);
+      await tester.tap(find.text('Try now'));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(backend.starts, 1);
+      await tester.pumpWidget(const SizedBox());
     });
   });
 

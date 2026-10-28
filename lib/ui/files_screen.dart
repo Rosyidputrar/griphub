@@ -426,7 +426,7 @@ class _FilesScreenState extends State<FilesScreen> {
       count++;
     }
     if (count == 0) return;
-    _snack('Imported $count file${count == 1 ? '' : 's'}');
+    _snack(count == 1 ? tr('Imported 1 file') : tr('Imported {n} files').replaceAll('{n}', '$count'));
     await _load();
   }
 
@@ -563,7 +563,7 @@ class _FilesScreenState extends State<FilesScreen> {
           const SizedBox(height: 60),
           Icon(LucideIcons.folderX, size: 40, color: p.faint),
           const SizedBox(height: 12),
-          Text("Can't open this folder", textAlign: TextAlign.center, style: t.titleMedium),
+          Text(tr("Can't open this folder"), textAlign: TextAlign.center, style: t.titleMedium),
           const SizedBox(height: 4),
           Text(
             _error!,

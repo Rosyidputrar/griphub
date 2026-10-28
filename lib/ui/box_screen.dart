@@ -290,7 +290,7 @@ class _BoxScreenState extends State<BoxScreen> {
                     if (!c.installed)
                       _notBuilt(context)
                     else if (c.problem != null)
-                      Padding(padding: const EdgeInsets.only(top: 12), child: _Note(c.problem!, p.warning)),
+                      Padding(padding: const EdgeInsets.only(top: 12), child: _Note(tr(c.problem!), p.warning)),
                     if (c.usage != null) _usage(context, c),
                     SectionLabel(tr('Agent')),
                     // Greyed out until the box is built: none of these can do anything before that.
@@ -339,7 +339,7 @@ class _BoxScreenState extends State<BoxScreen> {
                     if (_checked != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 10),
-                        child: _Note(_checked!.message, _checked!.ok ? p.success : p.danger),
+                        child: _Note(tr(_checked!.message), _checked!.ok ? p.success : p.danger),
                       ),
                     SectionLabel(tr('Manage')),
                     SettingsGroup(
@@ -532,7 +532,7 @@ class _BoxScreenState extends State<BoxScreen> {
               const SizedBox(height: 14),
               Text(tr('There is no box on this server'), style: text.titleMedium),
               const SizedBox(height: 6),
-              Text(c.problem ?? '', style: text.bodySmall),
+              Text(tr(c.problem ?? ''), style: text.bodySmall),
               const SizedBox(height: 10),
               Text(
                 tr(

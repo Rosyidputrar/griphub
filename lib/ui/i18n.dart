@@ -1,9 +1,16 @@
 import '../agent/clock.dart';
+import '../agent/msg.dart';
 import 'theme.dart';
 
 /// Translates an English UI string into the chosen language. English text is the key, so a
 /// missing translation falls back to English instead of showing a placeholder.
 String tr(String en) => Appearance.instance.language == 'id' ? (_id[en] ?? en) : en;
+
+/// A [Msg] from the agent side in the app's language.
+String trMsg(Msg m) => m.fill(tr(m.en));
+
+/// Several [Msg]s as one paragraph.
+String trMsgs(Iterable<Msg> ms) => ms.map(trMsg).join(' ');
 
 /// Number text in the app's language: 7350 -> "7.350" and 0.978 -> "0,978" in
 /// Indonesian, "7,350" and "0.978" in English. A suffix (k, M) is kept.
@@ -1333,8 +1340,6 @@ const _id = <String, String>{
       'Di server (Ubuntu atau Debian), sebagai root atau akun dengan sudo: tempel perintah setup ke terminalnya. Perintah ini sudah membawa file setup dan kunci app ini; tidak ada yang perlu diunduh.',
   'Copy setup command': 'Salin perintah setup',
   'Share the setup file instead': 'Atau bagikan file setup',
-  'The setup command is the file and the line above in one paste. Or send the file to the server (for example with an SFTP app) and run the line above next to it.':
-      'Perintah setup berisi file setup dan baris di atas dalam satu tempelan. Atau kirim file-nya ke server (misalnya lewat app SFTP) lalu jalankan baris di atas di folder yang sama.',
   'setup command': 'perintah setup',
   // The box on a server (server_agent.md; from CoderRa)
   'Not connected to the server.': 'Tidak tersambung ke server.',
@@ -1408,4 +1413,54 @@ const _id = <String, String>{
   'The shell on the server stops, with whatever is running in it. To only step away, leave the tab open: it keeps running on the server.': 'Shell di server berhenti, beserta apa pun yang sedang berjalan di dalamnya. Kalau hanya ingin meninggalkannya, biarkan tab terbuka: shell tetap berjalan di server.',
   'Server shell': 'Shell server',
   "Box shell (the agent's box)": 'Shell box (box agent)',
+  // Server setup, switching and diagnostics in the app's language (server_agent.md 4.19)
+  'Already up to date.': 'Sudah terbaru.',
+  'Already up to date. Restarted the agent.': 'Sudah terbaru. Agent sudah dijalankan ulang.',
+  'Back up this phone first': 'Backup HP ini dulu',
+  'Connecting failed (exit code {code}).': 'Gagal menyambung (kode keluar {code}).',
+  'Copied ({n} files).': 'Tersalin ({n} file).',
+  'Copied {n} files, but starting the agent failed: {error}': '{n} file tersalin, tapi agent gagal dijalankan: {error}',
+  'Copying failed: {error}': 'Gagal menyalin: {error}',
+  'Copying the agent...': 'Menyalin agent...',
+  'Starting it...': 'Menjalankannya...',
+  'Could not prepare the server: {error}': 'Tidak bisa menyiapkan server: {error}',
+  "Could not reach {address}. Check the address, the phone's connection, and that the server allows ssh on that port.": 'Tidak bisa menjangkau {address}. Periksa alamatnya, koneksi HP, dan bahwa server mengizinkan ssh di port itu.',
+  'Installed ({n} files). The agent was restarted.': 'Terpasang ({n} file). Agent sudah dijalankan ulang.',
+  'Models, API keys and accounts (GitHub, Cloudflare…) are not on the server: connect them again there. To take chats along, make a backup on this phone first and restore it on the server (Settings > Backup & restore).': 'Model, kunci API, dan akun (GitHub, Cloudflare…) tidak ada di server: hubungkan lagi di sana. Untuk membawa chat, buat backup di HP ini dulu lalu pulihkan di server (Pengaturan > Backup & pemulihan).',
+  'Needed: the address this phone reaches the server at.': 'Wajib: alamat yang dipakai HP ini untuk menjangkau server.',
+  'Restarting the agent failed: {error}': 'Gagal menjalankan ulang agent: {error}',
+  'Saving goes back to the agent on this phone until the new server is tested and switched on. The current server keeps its chats and keeps running.': 'Menyimpan akan kembali ke agent di HP ini sampai server baru dites dan dinyalakan. Server yang sekarang tetap menyimpan chat-nya dan tetap berjalan.',
+  'Test the connection and install the agent first': 'Tes koneksi dan pasang agent dulu',
+  'That is not a setup code. It starts with "griphub1:" and the server script prints it at the end.': 'Itu bukan kode setup. Kode setup diawali "griphub1:" dan dicetak skrip server di bagian akhir.',
+  'The address in the setup code is not valid: "{value}".': 'Alamat di kode setup tidak valid: "{value}".',
+  'The agent is restarting.': 'Agent sedang dijalankan ulang.',
+  'The agent on this phone is working. Switching now stops it.': 'Agent di HP ini sedang bekerja. Beralih sekarang akan menghentikannya.',
+  'The agent restarts with the new version once it is done with the current work.': 'Agent berjalan ulang dengan versi baru setelah pekerjaan yang sekarang selesai.',
+  'The host key in the setup code is not valid.': 'Host key di kode setup tidak valid.',
+  'The port in the setup code is not valid: "{value}".': 'Port di kode setup tidak valid: "{value}".',
+  'The server at {address} does not have the host key from the setup code. Either the server was reinstalled, or something else is answering at that address. Do not continue unless you reinstalled it; then paste a fresh setup code.': 'Server di {address} tidak memiliki host key dari kode setup. Mungkin server dipasang ulang, atau ada pihak lain yang menjawab di alamat itu. Jangan lanjutkan kecuali Anda memang memasang ulang server; lalu tempel kode setup yang baru.',
+  'The server script could not tell its address. Run it again with --address <name or IP of the server>.': 'Skrip server tidak bisa mengetahui alamatnya. Jalankan lagi dengan --address <nama atau IP server>.',
+  'The setup code has no host key, so the app could not tell your server from an impostor. Install openssh-server on the server and run the script again.': 'Kode setup tidak berisi host key, jadi app tidak bisa membedakan server Anda dari peniru. Pasang openssh-server di server lalu jalankan skripnya lagi.',
+  'The setup code is damaged.': 'Kode setup rusak.',
+  'The setup code is damaged. Copy the whole line again, from "griphub1:" to the end.': 'Kode setup rusak. Salin lagi seluruh barisnya, dari "griphub1:" sampai akhir.',
+  'The setup command is the setup file and that line in one paste. Or send the file to the server (for example with an SFTP app) and run that line next to it.': 'Perintah setup berisi file setup dan baris itu dalam satu tempelan. Atau kirim file-nya ke server (misalnya lewat app SFTP) lalu jalankan baris itu di folder yang sama.',
+  'The user name in the setup code is not valid: "{value}".': 'Nama pengguna di kode setup tidak valid: "{value}".',
+  'There is no agent bundle to copy ({path} is missing).': 'Tidak ada bundle agent untuk disalin ({path} tidak ada).',
+  'This app does not have an agent bundle to copy.': 'App ini tidak membawa bundle agent untuk disalin.',
+  'This setup code is from a different version ({version}). Update the app or the server script.': 'Kode setup ini dari versi lain ({version}). Perbarui app atau skrip server.',
+  'What the paste runs at the end': 'Yang dijalankan tempelan di akhir',
+  "There is no box on this server (the setup script was run with --no-box, or has not been run). The agent's commands run directly on the server.": 'Tidak ada box di server ini (skrip setup dijalankan dengan --no-box, atau belum dijalankan). Perintah agent berjalan langsung di server.',
+  'Podman is not installed for this user, or does not start.': 'Podman tidak terpasang untuk pengguna ini, atau tidak mau berjalan.',
+  'Podman did not answer in time.': 'Podman tidak menjawab tepat waktu.',
+  'The box image has not been built. Rebuild it from this screen, or run the setup script again.': 'Image box belum dibangun. Bangun dari layar ini, atau jalankan skrip setup lagi.',
+  'There is no box on this server.': 'Tidak ada box di server ini.',
+  'The box works: a command ran inside it.': 'Box bekerja: sebuah perintah berjalan di dalamnya.',
+  'The box did not answer in three minutes. It may be building its container or stuck; try again, or reset it.': 'Box tidak menjawab dalam tiga menit. Mungkin sedang membuat container-nya atau macet; coba lagi, atau reset.',
+  'Imported 1 file': '1 file diimpor',
+  'Imported {n} files': '{n} file diimpor',
+  "Can't open this folder": 'Folder ini tidak bisa dibuka',
+  // Server boot screen
+  'Trying again in {n} s': 'Mencoba lagi dalam {n} dtk',
+  'Try now': 'Coba sekarang',
+  'Details': 'Detail',
 };

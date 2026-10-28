@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'agent_backend.dart';
+import 'msg.dart';
 
 // Adapted from CoderRa's server mode (seseegy/coderra lib/agent/remote_profile.dart); see server_agent.md.
 
@@ -30,8 +31,8 @@ class SetupCode {
     final lines = input.split(RegExp(r'\r?\n')).map((l) => l.trim()).toList();
     final at = lines.indexWhere((l) => l.contains(prefix));
     if (at < 0) {
-      throw const FormatException(
-        'That is not a setup code. It starts with "griphub1:" and the server script prints it at the end.',
+      throw SetupCodeError(
+        const Msg('That is not a setup code. It starts with "griphub1:" and the server script prints it at the end.'),
       );
     }
     var token = lines[at].substring(lines[at].indexOf(prefix));
@@ -44,12 +45,16 @@ class SetupCode {
     try {
       json = jsonDecode(utf8.decode(base64.decode(base64.normalize(token.substring(prefix.length)))));
     } catch (_) {
-      throw const FormatException('The setup code is damaged. Copy the whole line again, from "griphub1:" to the end.');
+      throw SetupCodeError(
+        const Msg('The setup code is damaged. Copy the whole line again, from "griphub1:" to the end.'),
+      );
     }
-    if (json is! Map) throw const FormatException('The setup code is damaged.');
+    if (json is! Map) throw SetupCodeError(const Msg('The setup code is damaged.'));
     if (json['v'] != 1) {
-      throw FormatException(
-        'This setup code is from a different version (${json['v']}). Update the app or the server script.',
+      throw SetupCodeError(
+        Msg('This setup code is from a different version ({version}). Update the app or the server script.', {
+          'version': json['v'],
+        }),
       );
     }
 
@@ -58,25 +63,38 @@ class SetupCode {
     final user = json['user'];
     final key = json['hostKey'];
     if (host is! String || host.startsWith('(')) {
-      throw const FormatException(
-        'The server script could not tell its address. Run it again with --address <name or IP of the server>.',
+      throw SetupCodeError(
+        const Msg(
+          'The server script could not tell its address. Run it again with --address <name or IP of the server>.',
+        ),
       );
     }
-    if (!_hostOk.hasMatch(host)) throw FormatException('The address in the setup code is not valid: "$host".');
+    if (!_hostOk.hasMatch(host)) {
+      throw SetupCodeError(Msg('The address in the setup code is not valid: "{value}".', {'value': host}));
+    }
     if (port is! int || port < 1 || port > 65535) {
-      throw FormatException('The port in the setup code is not valid: "$port".');
+      throw SetupCodeError(Msg('The port in the setup code is not valid: "{value}".', {'value': port}));
     }
     if (user is! String || !_userOk.hasMatch(user)) {
-      throw FormatException('The user name in the setup code is not valid: "$user".');
+      throw SetupCodeError(Msg('The user name in the setup code is not valid: "{value}".', {'value': user}));
     }
     if (key is! String || key.startsWith('(')) {
-      throw const FormatException(
-        'The setup code has no host key, so the app could not tell your server from an impostor. Install openssh-server on the server and run the script again.',
+      throw SetupCodeError(
+        const Msg(
+          'The setup code has no host key, so the app could not tell your server from an impostor. Install openssh-server on the server and run the script again.',
+        ),
       );
     }
-    if (!_keyOk.hasMatch(key)) throw const FormatException('The host key in the setup code is not valid.');
+    if (!_keyOk.hasMatch(key)) throw SetupCodeError(const Msg('The host key in the setup code is not valid.'));
     return SetupCode(host: host, port: port, user: user, hostKey: key);
   }
+}
+
+/// A setup code that cannot be used: a [FormatException] with the reason, which is also kept as a [Msg] for the screen.
+class SetupCodeError extends FormatException {
+  SetupCodeError(this.say) : super('$say');
+
+  final Msg say;
 }
 
 /// A server agent the user has set up.
@@ -123,12 +141,14 @@ class RemoteProfile {
 enum ServerProblem { none, unreachable, hostKeyChanged, authRejected, notInstalled, hostMissing, daemonDown, other }
 
 class ServerCheck {
-  const ServerCheck(this.problem, this.message, {this.detail});
+  const ServerCheck(this.problem, this.say, {this.detail});
 
   final ServerProblem problem;
 
   /// What to tell the user, and what to do about it.
-  final String message;
+  final Msg say;
+
+  String get message => '$say';
 
   /// Raw output, for the curious.
   final String? detail;
@@ -137,11 +157,15 @@ class ServerCheck {
 }
 
 class InstallResult {
-  const InstallResult({required this.ok, required this.message, this.filesSent = 0});
+  const InstallResult({required this.ok, required this.says, this.filesSent = 0});
 
   final bool ok;
-  final String message;
+
+  /// What happened, as sentences: the copy, then what became of the restart.
+  final List<Msg> says;
   final int filesSent;
+
+  String get message => says.join(' ');
 }
 
 /// Everything on this phone that makes ssh work for the server agent: a key of its own, the server's pinned host key,
@@ -366,26 +390,30 @@ class RemoteSetup {
       final state = RegExp(r'GRIPHUB:([a-z-]+)').firstMatch(stdout)?.group(1);
       switch (state) {
         case 'ok':
-          return const ServerCheck(ServerProblem.none, 'Connected. The agent is running on the server.');
+          return const ServerCheck(ServerProblem.none, Msg('Connected. The agent is running on the server.'));
         case 'daemon-down':
           return const ServerCheck(
             ServerProblem.daemonDown,
-            'Connected, but the agent is not running on the server. Start it with: systemctl --user start griphub-hostd (as the griphub user), or press Install / update.',
+            Msg(
+              'Connected, but the agent is not running on the server. Start it with: systemctl --user start griphub-hostd (as the griphub user), or press Install / update.',
+            ),
           );
         case 'host-missing':
           return const ServerCheck(
             ServerProblem.hostMissing,
-            'Connected. The agent is not installed on the server yet: press Install / update.',
+            Msg('Connected. The agent is not installed on the server yet: press Install / update.'),
           );
         case 'attach-missing':
           return const ServerCheck(
             ServerProblem.notInstalled,
-            'Connected, but the server is not set up (no griphub-attach). Run the server script on it first; the app shows the command.',
+            Msg(
+              'Connected, but the server is not set up (no griphub-attach). Run the server script on it first; the app shows the command.',
+            ),
           );
       }
       return ServerCheck(
         ServerProblem.other,
-        'Connected, but the server answered something unexpected.',
+        const Msg('Connected, but the server answered something unexpected.'),
         detail: stdout.trim(),
       );
     }
@@ -395,14 +423,19 @@ class RemoteSetup {
     ).hasMatch(err)) {
       return ServerCheck(
         ServerProblem.hostKeyChanged,
-        'The server at ${p.address} does not have the host key from the setup code. Either the server was reinstalled, or something else is answering at that address. Do not continue unless you reinstalled it; then paste a fresh setup code.',
+        Msg(
+          'The server at {address} does not have the host key from the setup code. Either the server was reinstalled, or something else is answering at that address. Do not continue unless you reinstalled it; then paste a fresh setup code.',
+          {'address': p.address},
+        ),
         detail: err,
       );
     }
     if (RegExp('Permission denied').hasMatch(err)) {
       return ServerCheck(
         ServerProblem.authRejected,
-        'The server did not accept this app\'s key. Run the server script with this app\'s public key (the app shows the command).',
+        const Msg(
+          'The server did not accept this app\'s key. Run the server script with this app\'s public key (the app shows the command).',
+        ),
         detail: err,
       );
     }
@@ -412,13 +445,16 @@ class RemoteSetup {
     ).hasMatch(err)) {
       return ServerCheck(
         ServerProblem.unreachable,
-        'Could not reach ${p.address}. Check the address, the phone\'s connection, and that the server allows ssh on that port.',
+        Msg(
+          'Could not reach {address}. Check the address, the phone\'s connection, and that the server allows ssh on that port.',
+          {'address': p.address},
+        ),
         detail: err,
       );
     }
     return ServerCheck(
       ServerProblem.other,
-      err.isEmpty ? 'Connecting failed (exit code $exitCode).' : err.split('\n').last,
+      err.isEmpty ? Msg('Connecting failed (exit code {code}).', {'code': exitCode}) : Msg(err.split('\n').last),
       detail: err,
     );
   }
@@ -447,7 +483,12 @@ class RemoteSetup {
     bool restart = true,
   }) async {
     if (!File('$hostDir/host.mjs').existsSync()) {
-      return InstallResult(ok: false, message: 'There is no agent bundle to copy ($hostDir/host.mjs is missing).');
+      return InstallResult(
+        ok: false,
+        says: [
+          Msg('There is no agent bundle to copy ({path} is missing).', {'path': '$hostDir/host.mjs'}),
+        ],
+      );
     }
     final target = '${RemoteProfile.alias}:$remoteDir/host/';
     var r = await _run(
@@ -455,17 +496,38 @@ class RemoteSetup {
       env: env,
       timeout: const Duration(seconds: 30),
     );
-    if (r.exitCode != 0) return InstallResult(ok: false, message: 'Could not prepare the server: ${r.stderr.trim()}');
+    if (r.exitCode != 0) {
+      return InstallResult(
+        ok: false,
+        says: [
+          Msg('Could not prepare the server: {error}', {'error': r.stderr.trim()}),
+        ],
+      );
+    }
     onProgress?.call('Copying the agent...');
     r = await _run(
-      [rsync, '-rltpz', '--delete', '--exclude=/server/', '--itemize-changes', '-e', '$ssh -F $configPath', '$hostDir/', target],
+      [
+        rsync,
+        '-rltpz',
+        '--delete',
+        '--exclude=/server/',
+        '--itemize-changes',
+        '-e',
+        '$ssh -F $configPath',
+        '$hostDir/',
+        target,
+      ],
       env: env,
       timeout: const Duration(minutes: 10),
     );
     if (r.exitCode != 0) {
       return InstallResult(
         ok: false,
-        message: 'Copying failed: ${(r.stderr.trim().isEmpty ? r.stdout : r.stderr).trim().split('\n').last}',
+        says: [
+          Msg('Copying failed: {error}', {
+            'error': (r.stderr.trim().isEmpty ? r.stdout : r.stderr).trim().split('\n').last,
+          }),
+        ],
       );
     }
     final sent = r.stdout.split('\n').where((l) => RegExp(r'^[<>c]f').hasMatch(l)).length;
@@ -473,7 +535,9 @@ class RemoteSetup {
       return InstallResult(
         ok: true,
         filesSent: sent,
-        message: sent == 0 ? 'Already up to date.' : 'Copied ($sent files).',
+        says: [
+          sent == 0 ? const Msg('Already up to date.') : Msg('Copied ({n} files).', {'n': sent}),
+        ],
       );
     }
     onProgress?.call('Starting it...');
@@ -486,15 +550,22 @@ class RemoteSetup {
       return InstallResult(
         ok: false,
         filesSent: sent,
-        message: 'Copied $sent files, but starting the agent failed: ${r.stderr.trim().split('\n').last}',
+        says: [
+          Msg('Copied {n} files, but starting the agent failed: {error}', {
+            'n': sent,
+            'error': r.stderr.trim().split('\n').last,
+          }),
+        ],
       );
     }
     return InstallResult(
       ok: true,
       filesSent: sent,
-      message: sent == 0
-          ? 'Already up to date. Restarted the agent.'
-          : 'Installed ($sent files). The agent was restarted.',
+      says: [
+        sent == 0
+            ? const Msg('Already up to date. Restarted the agent.')
+            : Msg('Installed ({n} files). The agent was restarted.', {'n': sent}),
+      ],
     );
   }
 

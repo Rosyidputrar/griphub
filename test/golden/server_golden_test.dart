@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/msg.dart';
 import 'package:griphub_agent/agent/remote_profile.dart';
 import 'package:griphub_agent/ui/box_screen.dart';
 import 'package:griphub_agent/ui/server_screen.dart';
@@ -32,6 +33,18 @@ class _StubSetup extends RemoteSetup {
 
   @override
   Future<String?> remoteStamp({Map<String, String>? env}) async => null;
+
+  ServerCheck result = const ServerCheck(
+    ServerProblem.hostMissing,
+    Msg('Connected. The agent is not installed on the server yet: press Install / update.'),
+  );
+
+  @override
+  Future<ServerCheck> check(
+    RemoteProfile p, {
+    Map<String, String>? env,
+    Duration timeout = const Duration(seconds: 30),
+  }) async => result;
 }
 
 const _looks = [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)];
@@ -53,14 +66,16 @@ void main() {
     agent = AgentController(AgentClient(backend: backend)..backoff = ((_) => const Duration(minutes: 1)));
   });
 
-  void configure({bool saved = false, bool active = false}) {
+  void configure({bool saved = false, bool active = false, ServerCheck? check}) {
     final store = RemoteProfileStore(File('${tmp.path}/home/.griphub/remote.json'));
     if (saved) store.save(RemoteProfile.fromSetupCode(SetupCode.parse(_code())).copyWith(active: active));
     // The setup script the agent bundle carries.
     File('${tmp.path}/host/server/griphub-setup.sh')
       ..createSync(recursive: true)
       ..writeAsStringSync('#!/bin/sh\n');
-    agent.remote.configure(setup: _StubSetup('${tmp.path}/home'), store: store, hostDir: '${tmp.path}/host');
+    final setup = _StubSetup('${tmp.path}/home');
+    if (check != null) setup.result = check;
+    agent.remote.configure(setup: setup, store: store, hostDir: '${tmp.path}/host');
   }
 
   for (final look in _looks) {
@@ -162,6 +177,46 @@ void main() {
       collectLayoutErrors(tester, 'server_update_${look.name}');
       await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_update_${look.name}')));
       expect(layoutErrors.where((e) => e.contains('server_update_${look.name}')), isEmpty);
+    });
+
+    testWidgets('server screen, saved and not in use yet: the next steps (${look.name})', (tester) async {
+      configure(saved: true);
+      await pumpLook(tester, look, ServerScreen(agent: agent), height: 1500);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      collectLayoutErrors(tester, 'server_steps_${look.name}');
+      await expectLater(find.byType(ServerScreen), matchesGoldenFile(golden('server_steps_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_steps_${look.name}')), isEmpty);
+    });
+
+    testWidgets('switch dialog, with the phone\'s agent at work (${look.name})', (tester) async {
+      configure(
+        saved: true,
+        check: const ServerCheck(ServerProblem.none, Msg('Connected. The agent is running on the server.')),
+      );
+      await pumpLook(tester, look, ServerScreen(agent: agent), height: 1100);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      agent.busy = true;
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+      collectLayoutErrors(tester, 'server_switch_${look.name}');
+      await expectLater(find.byType(AlertDialog), matchesGoldenFile(golden('server_switch_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_switch_${look.name}')), isEmpty);
+    });
+
+    testWidgets('opening the app on a server it cannot reach (${look.name})', (tester) async {
+      configure(saved: true, active: true);
+      agent
+        ..status = BootStatus.failed
+        ..bootFailures = 2
+        ..bootError = 'ssh: connect to host agentai.example.com port 22: Network is unreachable';
+      agent.client.backoff = (_) => const Duration(seconds: 8);
+      await pumpLook(tester, look, ServerBootFailed(agent: agent), height: 900);
+      collectLayoutErrors(tester, 'server_boot_${look.name}');
+      await expectLater(find.byType(ServerBootFailed), matchesGoldenFile(golden('server_boot_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_boot_${look.name}')), isEmpty);
+      await tester.pumpWidget(const SizedBox()); // stops the countdown
     });
 
     testWidgets('terminal tab, connection to the server lost (${look.name})', (tester) async {

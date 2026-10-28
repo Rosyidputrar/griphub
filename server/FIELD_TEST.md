@@ -21,8 +21,10 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 - [ ] Coba juga **Atau bagikan file setup**: file `griphub-setup.sh` bisa dikirim ke aplikasi lain.
 - [ ] Akhir output setup: tidak ada peringatan "the agent's box was not built" atau "building the box failed". Bila
       ada, catat pesan podman; setelah itu app: Pengaturan → **Box agent** → **Bangun box**.
-- [ ] App: tempel setup code → **Tes koneksi** (Test connection) → "Tersambung. Agent belum dipasang di server…".
-- [ ] App: **Pasang / perbarui agent** (Install / update agent) → selesai; **Pakai agent server** (Use the server agent) → chip di chat berubah menjadi **Server**.
+- [ ] App: tempel setup code → **Simpan server**: tes berjalan sendiri → "Tersambung. Agent belum dipasang di server…"
+      (oranye), saklar **5 · Pakai agent server** masih terkunci.
+- [ ] App: **4 · Pasang / perbarui agent** → selesai, saklar terbuka; **5 · Pakai agent server** → dialog menyebut
+      model/kunci/akun yang perlu dihubungkan lagi → chip di chat berubah menjadi **Server**.
 - [ ] Bila CoderRa terpasang: CoderRa tetap tersambung dan bekerja seperti biasa setelah langkah ini.
 
 ## 2. Chat
@@ -39,6 +41,9 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 - [ ] Ulangi dengan mode pesawat 5 menit (lebih lama dari buffer replay): app memuat ulang chat (resync), hasilnya
       lengkap.
 - [ ] Pindah Wi-Fi ↔ data seluler di tengah tugas: sama seperti di atas.
+
+- [ ] Mode pesawat, tutup app sepenuhnya, buka lagi: layar "Agent server tidak terjangkau" dengan alasan, hitung mundur;
+      matikan mode pesawat → app tersambung sendiri tanpa menekan apa pun.
 
 ## 4. Approval dan notifikasi
 
