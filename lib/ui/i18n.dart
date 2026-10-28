@@ -1286,7 +1286,7 @@ const _id = <String, String>{
   'Checks the key, the host key and the agent': 'Memeriksa kunci, host key, dan agent',
   'Install / update agent': 'Pasang / perbarui agent',
   'A newer agent is in this app: install it on the server': 'Agent yang lebih baru ada di app ini: pasang di server',
-  'Copies the agent to the server and restarts it': 'Menyalin agent ke server lalu menjalankannya ulang',
+  'Copies the agent, then restarts it when idle': 'Menyalin agent, lalu jalan ulang saat senggang',
   'Use the server agent': 'Pakai agent server',
   'Chats and files are the server\'s': 'Chat dan file milik server',
   'Chats and files are on this phone': 'Chat dan file ada di HP ini',

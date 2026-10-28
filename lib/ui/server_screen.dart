@@ -1119,7 +1119,7 @@ class _ServerScreenState extends State<ServerScreen> {
                 ? (installNote ?? '')
                 : upToDate == false
                 ? tr('A newer agent is in this app: install it on the server')
-                : tr('Copies the agent to the server and restarts it'),
+                : tr('Copies the agent, then restarts it when idle'),
             trailing: installing
                 ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : null,

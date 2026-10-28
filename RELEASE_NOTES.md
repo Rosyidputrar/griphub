@@ -14,6 +14,9 @@
 - Saat beralih, app menyebut apa yang tidak ikut pindah (model, kunci API, akun) dan memperingatkan bila agent di HP sedang bekerja.
 
 **Lainnya**
+- Server: perintah agent di dalam box tidak lagi macet setelah box pertama kali dibuat, dan box tetap hidup saat agent di server dijalankan ulang atau diperbarui.
+- Server: Perbarui kini ikut memperbarui berkas box di server, tidak hanya agent-nya. Agent dijalankan ulang setelah pekerjaan yang sedang berjalan selesai, juga saat app tidak terhubung, dan layar Server menunjukkan bahwa pembaruan sedang menunggu.
+- Server: bila penyalinan pembaruan terputus, versi lama tetap dianggap terpasang dan Anda bisa mencoba Perbarui lagi.
 - Saat file yang sedang diedit diubah agent, kini ada tombol Salin editan saya sebelum memilih Muat ulang atau Timpa.
 - Pemilih folder menampilkan status memuat, dan pesan dengan tombol Coba lagi bila folder tidak bisa dibuka.
 - Istilah dalam bahasa Indonesia dibuat lebih konsisten.
@@ -32,6 +35,9 @@
 - Switching says what does not come along (models, API keys, accounts) and warns when the phone's agent is still working.
 
 **Other**
+- Server: the agent's commands in the box no longer hang after the box is first created, and the box stays up when the server agent restarts or is updated.
+- Server: Update now also updates the box files on the server, not only the agent. The agent restarts once its current work is done, also when the app is not connected, and the Server screen shows that an update is waiting.
+- Server: if copying an update breaks off, the old version still counts as installed and you can tap Update again.
 - When the agent changes a file you are editing, there is now a Copy my edits button before you choose Reload or Overwrite.
 - The folder picker shows when it is loading, and an error with Try again when a folder cannot be opened.
 - More consistent Indonesian wording.
