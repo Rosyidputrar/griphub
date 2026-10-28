@@ -204,7 +204,7 @@ Setiap fase berakhir dengan PR sendiri, CI hijau, dan kondisi selesai yang bisa 
 | 4 | Dart transport: `AgentBackend`, `AgentClient` reconnect, `resync` (+ `refreshSubagents`, approvals, runs, integrations), Kotlin `startRemote`/`appInfo`, `RemoteProfile`/`RemoteMode`, layar Server agent, indikator koneksi | Test Dart melawan daemon Node asli lewat attach + sshd asli: putus berulang tanpa duplikat; subagent dan approval pulih; FakeHost lama tetap jalan; golden layar baru | 4–5 hari |
 | 5 | `AgentFs`/`RemoteFs` di semua layar bagian 5; unggah lampiran dan teks tempelan | Test layar dijalankan dua kali (LocalFs dan RemoteFs ke daemon asli); golden; dialog konflik editor | 5 hari |
 | 6 | Preview + forward, dev server, terminal tmux, backup unduh/unggah | Rantai penuh app → ssh → daemon → preview dengan CSS relatif; tmux bertahan setelah koneksi dibunuh | 3 hari |
-| 7 | Uji di VPS sungguhan (pemilik): bootstrap, install agent dari app, chat, subagent paralel, approval saat offline, notifikasi, deploy, 24 jam | Checklist uji lapangan lulus; catatan memori/disk | 1–2 hari + soak |
+| 7 | Uji di VPS sungguhan (pemilik): bootstrap, install agent dari app, chat, subagent paralel, approval saat offline, notifikasi, deploy, 24 jam; GripHub berdampingan dengan CoderRa di VPS yang sama; kebijakan privasi diperbarui | Checklist uji lapangan lulus; catatan memori/disk; `docs/privacy.html` menyebut mode server dan ntfy | 1–2 hari + soak |
 | 8 (opsional) | Operasi panjang: `longtask`, retry/fallback run headless, lanjut otomatis setelah crash, bar "Lanjutkan" | Test Node dengan model tiruan (pola CoderRa `pi_e2e`) | 3–4 hari |
 
 Total inti (fase 1–7): sekitar 3 minggu kerja.
@@ -228,10 +228,23 @@ Total inti (fase 1–7): sekitar 3 minggu kerja.
   bukan dieksekusi; test yang dibawa akan dijalankan di repo GripHub.
 - Kotlin GripHub (`AgentRuntime.kt`) berbeda dari CoderRa (paket `id.griphub.agent`); `startRemote` ditulis ulang, bukan disalin.
 
-## 9. Pertanyaan terbuka untuk pemilik
+## 9. Per pengguna: nilai bawaan, bukan keputusan proyek
 
-1. Nama user dan folder di server: `griphub` dan `~/.griphub` (usulan), atau tetap `coderra` agar VPS yang sudah ada
-   bisa dipakai ulang?
-2. VPS yang dipakai sekarang untuk CoderRa: dipasang ulang untuk GripHub, atau GripHub di VPS terpisah?
-3. ntfy: pakai `ntfy.sh` atau server sendiri?
-4. Fase 8 (supervisor 24 jam): ikut sekarang atau setelah fase 7?
+Mode server dipasang **per pengguna**: setiap pengguna app memakai VPS-nya sendiri, dengan kunci, data, dan token di sana.
+Developer tidak menjalankan server apa pun ("The app developer collects nothing and runs no server" di README tetap
+benar). Di dalam satu VPS, satu agent = satu akun Linux dengan folder, socket, dan unit systemd sendiri, jadi beberapa
+agent (mis. CoderRa dan GripHub) bisa berdampingan sebagai akun berbeda.
+
+| Hal | Bawaan | Diubah lewat |
+| --- | --- | --- |
+| Akun dan folder | `griphub`, `~/.griphub`, socket `~/.griphub/host.sock` | `bootstrap.sh --user NAME` |
+| Alias ssh di app | `griphub-vps`, berkas `~/.ssh/griphub_config` dan `griphub_known_hosts` | — (terpisah dari CoderRa) |
+| Notifikasi | Mati sampai pengguna menyalakan; topik acak 128 bit dibuat app; server `https://ntfy.sh` | Layar Server agent (URL server ntfy bisa diganti) |
+| Batas box | `--memory=2g --cpus=1.5` | `~/.griphub/box.conf` |
+
+Konsekuensi: `docs/privacy.html` (dan teks privasi di README) harus menyebut mode server dan ntfy (pihak ketiga,
+opsional, judul generik tanpa isi) sebelum mode server dirilis. Ditambahkan ke fase 7.
+
+## 10. Pertanyaan terbuka untuk pemilik
+
+1. Fase 8 (supervisor 24 jam): ikut sekarang atau setelah fase 7?
