@@ -573,6 +573,23 @@ class _ServerScreenState extends State<ServerScreen> {
         },
       );
       if (ok != true) return;
+    } else {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(tr('Use the agent on this phone?')),
+          content: Text(
+            tr(
+              'The agent on the server keeps running: schedules, background tasks and notifications go on. What it asks you to approve shows again when you switch back to it. The chats on this phone come back.',
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Use this phone'))),
+          ],
+        ),
+      );
+      if (ok != true) return;
     }
     await agent.remote.use(server);
     if (mounted) {
@@ -785,9 +802,11 @@ class _ServerScreenState extends State<ServerScreen> {
                   ),
                 ),
               if (mode.active && health != null) _healthCard(context, health!),
+              if (mode.active && link.connected && health != null) _checklist(context),
               if (profile == null || changingServer) ..._setup(context),
               if (profile != null) ..._server(context, profile),
               if (mode.active && link.connected && agent.integrations.settings != null) ..._notifications(context),
+              ..._help(context),
             ],
           ),
         );
@@ -1152,6 +1171,144 @@ class _ServerScreenState extends State<ServerScreen> {
             onTap: _forget,
           ),
         ],
+      ),
+    ];
+  }
+
+  /// Is everything in place? One look at what makes the server agent useful, each with its way to fix it.
+  Widget _checklist(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final h = health!;
+    final box = (h['box'] as Map?)?.cast<String, dynamic>();
+    final settings = agent.integrations.settings;
+    final items = <(bool, String, String?)>[
+      (true, tr('This phone reaches the server'), null),
+      if (upToDate != null)
+        (upToDate!, tr('The agent on the server is this app\'s version'), tr('Press Install / update agent.')),
+      if (box != null && box['available'] == true)
+        (box['installed'] == true, tr('The box is built'), tr('Build it: Settings > The agent\'s box.')),
+      (
+        agent.providers.any((x) => x.configured),
+        tr('A model is connected on the server'),
+        tr('The server keeps its own keys: connect one in Settings > Models & providers.'),
+      ),
+      (
+        settings?.notifyTopic != null && settings!.notifyEnabled,
+        tr('Notifications reach this phone'),
+        tr('Save a topic below, then send a test notification.'),
+      ),
+    ];
+    final done = items.where((i) => i.$1).length;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: SurfaceCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text(tr('Checklist'), style: text.titleSmall)),
+                Text(
+                  tr('{done} of {all} ready').replaceAll('{done}', '$done').replaceAll('{all}', '${items.length}'),
+                  style: text.bodySmall?.copyWith(color: done == items.length ? p.success : p.warning),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final (ok, what, fix) in items)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      ok ? LucideIcons.circleCheck : LucideIcons.circleDashed,
+                      size: 18,
+                      color: ok ? p.success : p.warning,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(what, style: text.bodyMedium),
+                          if (!ok && fix != null) Text(fix, style: text.bodySmall),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// What to do when something goes wrong, for someone who has never used a VPS: the repository with the server notes
+  /// is private, so the app carries them.
+  List<Widget> _help(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final entries = [
+      (
+        tr('Getting to the server\'s terminal'),
+        tr(
+          'Use the web console in your VPS provider\'s control panel, or an SSH app (Termius, JuiceSSH) with the address and the root password or key the provider gave you.',
+        ),
+      ),
+      (
+        tr('The paste "arrived damaged"'),
+        tr(
+          'The terminal changed the text on the way. Use "Share the setup file instead", or paste in another SSH app.',
+        ),
+      ),
+      (
+        tr('No sudo, or "run this as root"'),
+        tr('Log in as root, or as an account that may use sudo; the setup needs it once.'),
+      ),
+      (
+        tr('"rootless podman does not work", or the box is not built'),
+        tr(
+          'Paste the setup command again: it repairs Podman on Ubuntu 24.04. Then build the box in Settings > The agent\'s box.',
+        ),
+      ),
+      (
+        tr('"Could not reach" the server'),
+        tr(
+          'Check the address, that this phone is online, and that the provider\'s firewall lets SSH in (port 22).',
+        ),
+      ),
+      (
+        tr('"Host key" warning'),
+        tr('Do not continue unless you reinstalled the server; then run the setup again and paste the new code.'),
+      ),
+      (
+        tr('This phone was lost'),
+        tr(
+          'On the server, remove the line ending in griphub-app from /home/griphub/.ssh/authorized_keys. Then set up the new phone with the setup command.',
+        ),
+      ),
+    ];
+    return [
+      SectionLabel(tr('When something goes wrong')),
+      SurfaceCard(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: Column(
+            children: [
+              for (final (title, body) in entries)
+                ExpansionTile(
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                  childrenPadding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                  expandedAlignment: Alignment.centerLeft,
+                  title: Text(title, style: text.bodyMedium),
+                  children: [Text(body, style: text.bodySmall)],
+                ),
+            ],
+          ),
+        ),
       ),
     ];
   }

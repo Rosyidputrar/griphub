@@ -569,6 +569,17 @@ void main() {
       );
     });
 
+    testWidgets('carries its own troubleshooting, the lost phone included', (tester) async {
+      configure();
+      await open(tester);
+      await tester.scrollUntilVisible(find.text('This phone was lost'), 300, scrollable: find.byType(Scrollable).first);
+      expect(find.text('Getting to the server\'s terminal'), findsOneWidget);
+      await tester.tap(find.text('This phone was lost'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('authorized_keys'), findsOneWidget);
+    });
+
     testWidgets('forgetting a server asks first, then removes the key and the ssh files', (tester) async {
       configure(saved: true);
       setup.write(store.load()!);
@@ -771,6 +782,30 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(store.load(), isNotNull);
+    });
+
+    testWidgets('the checklist says what is ready and how to fix the rest', (tester) async {
+      await openConnected(tester, box: {'available': true, 'installed': false, 'enabled': true});
+      await tester.ensureVisible(find.text('Checklist'));
+      expect(find.text('This phone reaches the server'), findsOneWidget);
+      expect(find.text('Build it: Settings > The agent\'s box.'), findsOneWidget);
+      expect(find.text('A model is connected on the server'), findsOneWidget);
+      expect(find.textContaining('connect one in Settings > Models & providers'), findsOneWidget);
+      expect(find.text('Save a topic below, then send a test notification.'), findsOneWidget);
+      expect(find.text('1 of 4 ready'), findsOneWidget);
+    });
+
+    testWidgets('switching back to the phone asks, and says what keeps running on the server', (tester) async {
+      await openConnected(tester);
+      await tester.tap(find.byType(Switch).first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Use the agent on this phone?'), findsOneWidget);
+      expect(find.textContaining('schedules, background tasks and notifications go on'), findsOneWidget);
+      expect(find.textContaining('shows again when you switch back'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(store.load()!.active, isTrue, reason: 'cancelled');
     });
 
     testWidgets('warns when the disk is getting full', (tester) async {

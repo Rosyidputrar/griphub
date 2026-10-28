@@ -108,7 +108,7 @@ void main() {
         _ => null,
       };
       await tester.runAsync(() => agent.client.start());
-      await pumpLook(tester, look, ServerScreen(agent: agent), height: 1900);
+      await pumpLook(tester, look, ServerScreen(agent: agent), height: 2600);
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
       await tester.pump();

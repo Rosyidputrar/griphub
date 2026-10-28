@@ -5,7 +5,7 @@
 #
 # It creates an unprivileged user (griphub) with no sudo, installs what the host needs, sets up the rootless container
 # the agent's shell runs in, installs the systemd user service, and lets the app's key in over ssh. It prints a setup code
-# at the end; paste that into the app (Settings > Server agent) and the app takes it from there, copying the host over
+# at the end; paste that into the app (Settings > Agent on a VPS / server) and the app takes it from there, copying the host over
 # and starting it.
 #
 # Safe to run again: existing users, keys and settings are kept, the rest is brought up to date.
@@ -84,7 +84,7 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
-[ -n "$PUBKEY" ] || die "--pubkey is required: the app's ssh public key (the app shows it under Settings > Server agent)"
+[ -n "$PUBKEY" ] || die "--pubkey is required: the app's ssh public key (the app shows it under Settings > Agent on a VPS / server)"
 # One line, a key type we know, base64 key material, optional comment. No leading options: they would be ours to set.
 [[ "$PUBKEY" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com)\ [A-Za-z0-9+/]+=*(\ [^[:cntrl:]]*)?$ ]] \
 	|| die "--pubkey does not look like a single ssh public key line (for example: ssh-ed25519 AAAA... name)"
@@ -123,6 +123,17 @@ case "$(uname -m)" in
 	aarch64) NODE_ARCH=arm64 ;;
 	*) die "unsupported CPU: $(uname -m)" ;;
 esac
+
+# Room for the agent: say so up front rather than fail halfway (a box build, or the agent killed for memory later).
+# GRIPHUB_TEST_MEM_KB / GRIPHUB_TEST_DISK_KB stand in for the machine in the tests.
+mem_kb=${GRIPHUB_TEST_MEM_KB:-$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)}
+disk_kb=${GRIPHUB_TEST_DISK_KB:-$(df -Pk / 2>/dev/null | awk 'NR == 2 {print $4}' || true)}
+if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 1900000 ]; then
+	warn "this machine has $((mem_kb / 1024)) MB of memory; the agent wants at least 2 GB (4 GB with the box is comfortable)"
+fi
+if [ -n "$disk_kb" ] && [ "$disk_kb" -lt 5242880 ]; then
+	warn "only $((disk_kb / 1024)) MB free on /; packages, Node and the box image need about 5 GB"
+fi
 
 for f in griphub-attach griphub-hostd.service box/box box/Containerfile; do
 	[ -f "$HERE/$f" ] || die "$HERE/$f is missing: run this from a complete copy of the server/ folder"
@@ -401,7 +412,7 @@ setup_code() {
 	code=griphub1:$(printf '%s' "$json" | base64 -w0)
 
 	echo
-	echo "Done. In the app, open Settings > Server agent and paste this setup code:"
+	echo "Done. In the app, open Settings > Agent on a VPS / server and paste this setup code:"
 	echo
 	echo "  $code"
 	echo

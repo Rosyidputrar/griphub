@@ -428,6 +428,23 @@ keluarnya.
   (HP dan server), label dev server, backup server, salin editan (HP dan server), Pengaturan di HP/server; golden
   diperbarui (kesehatan, banner, dialog editor, pemilih folder, setup).
 
+### 4.21 Yang belum ada untuk pengguna VPS pertama kali (kelompok 3 bagian B)
+
+- **Daftar periksa** di layar Agent server (saat tersambung): server terjangkau, versi agent sama dengan app, box
+  dibangun, ada model terhubung di server (server menyimpan kuncinya sendiri), notifikasi tersimpan dan menyala; yang
+  belum siap disertai cara memperbaikinya, dan "n dari m siap".
+- **Bila ada masalah** di app (repo privat, jadi catatan server ikut di APK): membuka terminal server (web console
+  penyedia atau app SSH), tempelan "arrived damaged", tanpa sudo, Podman/box, tidak terjangkau, host key, HP hilang.
+- **Kembali ke HP** sekarang bertanya dan menyebut yang tetap berjalan di server (jadwal, tugas latar, notifikasi) dan
+  bahwa permintaan persetujuan dari server muncul lagi setelah beralih kembali. Banner server di HP untuk persetujuan
+  yang menunggu tidak dibuat: mode HP tidak tersambung ke server, dan notifikasi ntfy "Approval needed" sudah memberi
+  tahu.
+- **bootstrap.sh** memperingatkan di awal bila RAM < ~2 GB atau sisa disk di `/` < 5 GB (peringatan, bukan penolakan;
+  `GRIPHUB_TEST_MEM_KB`/`GRIPHUB_TEST_DISK_KB` untuk test) dan menyebut menu baru "Agent on a VPS / server".
+- **HP hilang**: `server/README.md` dan app menjelaskan cara mencabut kunci app di server (`sed` baris `griphub-app`).
+- Test: daftar periksa (1 dari 4 siap, perbaikannya), bantuan (entri HP hilang), dialog kembali ke HP; bootstrap mesin
+  kecil vs `agentai`; golden layar tersambung dengan daftar periksa.
+
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 
 | Layar | Pemakaian `dart:io` | Perubahan |
