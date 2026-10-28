@@ -223,17 +223,39 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
       );
       if (prompt == null) return;
-      // Queue before the call: the host may echo the message before the
-      // call returns, and the queue drains in transcript order.
-      agent.queueSentAttachments(prompt.files);
-      ok = await agent.sendWith(prompt.text, images: prompt.images);
-      if (!ok) agent.retractSentAttachments(prompt.files);
+      // The controller queues the files before the call (the host may echo the
+      // message before it returns) and drops them on refusal or cancel.
+      ok = await agent.sendWith(prompt.text, images: prompt.images, attachments: prompt.files);
     }
     if (!mounted || !ok) return;
     input.clear();
     setState(() => attachments.clear());
     _saveFiles();
     followBottom = true;
+  }
+
+  /// Cancels a waiting follow-up; "Edit" puts its text back in the composer.
+  Future<void> _cancelQueued(QueuedPrompt q) async {
+    HapticFeedback.selectionClick();
+    final text = await agent.cancelQueued(q.id);
+    if (text == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(tr('Message cancelled')),
+        action: SnackBarAction(
+          label: tr('Edit'),
+          onPressed: () {
+            if (input.text.trim().isEmpty) {
+              input.text = text;
+              input.selection = TextSelection.collapsed(offset: text.length);
+            } else {
+              _insert('\n$text');
+            }
+            focus.requestFocus();
+          },
+        ),
+      ),
+    );
   }
 
   /// Long-press on send: hand the task to a background agent instead.
@@ -539,10 +561,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
+    final queued = agent.queuedPrompts;
     return ListView.builder(
       controller: scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: entries.length + subs.length + (retry ? 1 : 0) + (activity != null ? 1 : 0),
+      itemCount: entries.length + subs.length + (activity != null ? 1 : 0) + queued.length + (retry ? 1 : 0),
       itemBuilder: (context, i) {
         if (i < entries.length) {
           final e = entries[i];
@@ -583,6 +606,18 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         if (activity != null && si == subs.length) {
           return Padding(padding: const EdgeInsets.only(top: 14), child: AgentActivity(label: activity));
+        }
+        // Follow-ups waiting for the current turn to end, oldest first.
+        final qi = si - subs.length - (activity != null ? 1 : 0);
+        if (qi < queued.length) {
+          return Padding(
+            padding: EdgeInsets.only(top: qi == 0 ? 28 : 10),
+            child: QueuedMessageView(
+              key: ValueKey('queued-${queued[qi].id}'),
+              prompt: queued[qi],
+              onCancel: () => _cancelQueued(queued[qi]),
+            ),
+          );
         }
         return Padding(
           padding: const EdgeInsets.only(top: 10),

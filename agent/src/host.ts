@@ -71,6 +71,7 @@ import {
 	writeZip,
 } from "./workbench.js";
 import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
+import { PromptQueue } from "./promptqueue.js";
 import { Router } from "./router.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
@@ -478,10 +479,18 @@ function assertIdle() {
 	if (session?.isStreaming || fallbackPending) throw new Error(BUSY_SWITCH);
 }
 
+/** Follow-ups queued while the agent works (promptqueue.ts). */
+const promptQueue = new PromptQueue(
+	(items) => send({ type: "prompt_queue", sessionId: session?.sessionId ?? null, items }),
+	(message) => send({ type: "error", message }),
+);
+
 async function openSession(sessionManager: SessionManager) {
 	unsubscribe?.();
 	guard.cancelAll();
 	session?.dispose();
+	// Queued follow-ups belong to the chat being left (pi drops them with it).
+	promptQueue.clear();
 	const result = await buildSession(sessionManager, {
 		interactive: true,
 		onLimit: (reason) => send({ type: "notice", message: reason }),
@@ -497,6 +506,11 @@ async function openSession(sessionManager: SessionManager) {
 
 /** Hooks on the active chat: model fallback and "done" notifications. */
 function onSessionEvent(event: AgentSessionEvent) {
+	if ((event as any).type === "queue_update") promptQueue.sync(((event as any).followUp ?? []).length);
+	// A turn that ends with nothing running drops what was still waiting (abort).
+	if ((event as any).type === "agent_settled" && !session?.isStreaming) {
+		promptQueue.sync(session?.getFollowUpMessages().length ?? 0);
+	}
 	if (event.type === "message_start" && lastPrompt) {
 		const m = (event as any).message;
 		if (m?.role === "user" && messageText(m).includes(lastPrompt.text)) lastPrompt = null;
@@ -984,11 +998,17 @@ async function handle(cmd: Command): Promise<unknown> {
 				: cmd.text;
 			// The agent may git push from its shell; don't hold the prompt for it.
 			void integrations.githubFresh();
+			// While the agent works, a follow-up waits for the turn's boundary; the
+			// app shows it as a waiting bubble and can cancel it (prompt_queue_remove).
+			const behavior = s.isStreaming ? (cmd.behavior ?? "followUp") : undefined;
+			if (behavior === "followUp") {
+				const id = await promptQueue.add(s, text, cmd.text, cmd.images);
+				return id ? { queued: id } : null;
+			}
 			// Don't await the run; progress arrives as events.
-			s.prompt(text, {
-				images: cmd.images,
-				streamingBehavior: s.isStreaming ? (cmd.behavior ?? "followUp") : undefined,
-			}).catch((e) => send({ type: "error", message: String(e?.message ?? e) }));
+			s.prompt(text, { images: cmd.images, streamingBehavior: behavior }).catch((e) =>
+				send({ type: "error", message: String(e?.message ?? e) }),
+			);
 			return null;
 		}
 		case "retry": {
@@ -1013,6 +1033,11 @@ async function handle(cmd: Command): Promise<unknown> {
 			}
 			return null;
 		}
+		case "prompt_queue":
+			return promptQueue.list();
+		case "prompt_queue_remove":
+			// "queueId", not "id": every command's id is its request id.
+			return promptQueue.remove(s, String(cmd.queueId ?? ""));
 		case "steer":
 			await s.steer(cmd.text);
 			return null;
