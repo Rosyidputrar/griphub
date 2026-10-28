@@ -14,6 +14,7 @@ import 'chat_extras.dart';
 import 'container_screen.dart';
 import 'server_screen.dart';
 import 'kit.dart';
+import 'links.dart';
 import 'i18n.dart';
 import 'illustration.dart';
 import 'image_gen_screen.dart';
@@ -418,6 +419,15 @@ class _SettingsHubState extends State<SettingsHub> {
                     title: tr('Backup & restore'),
                     subtitle: tr('Chats, skills and schedules in one file'),
                     onTap: () => _open(BackupScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.link,
+                    color: const Color(0xFF6366F1),
+                    title: tr('Trusted domains'),
+                    subtitle: look.trustedDomains.isEmpty
+                        ? tr('Links ask before leaving the app')
+                        : tr('{n} open without asking').replaceAll('{n}', '${look.trustedDomains.length}'),
+                    onTap: () => _open(const TrustedDomainsScreen()),
                   ),
                   SettingsRow(
                     icon: LucideIcons.fingerprint,

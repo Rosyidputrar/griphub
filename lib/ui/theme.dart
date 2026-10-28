@@ -157,6 +157,10 @@ class Appearance extends ValueNotifier<ThemeMode> {
         for (final e in (saved['favoriteModels'] as List? ?? []))
           if (e is String) e,
       ];
+      trustedDomains = [
+        for (final e in (saved['trustedDomains'] as List? ?? []))
+          if (e is String && e.isNotEmpty) e,
+      ];
     } catch (_) {}
   }
 
@@ -208,6 +212,25 @@ class Appearance extends ValueNotifier<ThemeMode> {
 
   bool isFavorite(String key) => favoriteModels.contains(key);
 
+  /// Hosts whose links open without asking first ("Always trust this domain").
+  List<String> trustedDomains = [];
+
+  bool isTrusted(String host) => trustedDomains.contains(host.toLowerCase());
+
+  void trustDomain(String host) {
+    final h = host.toLowerCase();
+    if (h.isEmpty || trustedDomains.contains(h)) return;
+    trustedDomains = [...trustedDomains, h]..sort();
+    _save();
+    notifyListeners();
+  }
+
+  void untrustDomain(String host) {
+    trustedDomains = trustedDomains.where((d) => d != host.toLowerCase()).toList();
+    _save();
+    notifyListeners();
+  }
+
   void toggleFavorite(String key) {
     favoriteModels = List.of(favoriteModels);
     if (!favoriteModels.remove(key)) favoriteModels.add(key);
@@ -249,6 +272,7 @@ class Appearance extends ValueNotifier<ThemeMode> {
           'terminalFontSize': terminalFontSize,
           'deployTargets': deployTargets,
           'favoriteModels': favoriteModels,
+          'trustedDomains': trustedDomains,
         }),
       );
     } catch (_) {}

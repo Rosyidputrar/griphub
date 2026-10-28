@@ -52,17 +52,20 @@ class Attachment {
   bool get isPasted => name == pastedName;
 }
 
-/// Pasting more than this many characters, or lines, attaches the text as a file instead.
+/// Pasting more than this many characters, or at least this many lines, attaches the text as a file instead.
 const longPasteChars = 1000;
-const longPasteLines = 15;
+const longPasteLines = 10;
 
-/// Whether [text] is long enough to become an attachment when pasted.
-bool isLongPaste(String text) => text.length > longPasteChars || '\n'.allMatches(text).length >= longPasteLines;
+/// Whether [text] is long enough to become an attachment when pasted: more
+/// than [longPasteChars] characters, or [longPasteLines] lines or more (a
+/// trailing line break does not count as a line).
+bool isLongPaste(String text) =>
+    text.length > longPasteChars || '\n'.allMatches(text.trimRight()).length + 1 >= longPasteLines;
 
 /// Turns a long paste into an attachment: the field is left as it was and [onLongPaste] gets the text.
 ///
 /// A paste is told apart from typing by size: one edit that inserts more than [longPasteChars] characters or
-/// [longPasteLines] lines. Keyboards insert a word or a suggestion at a time, and text the app sets itself
+/// at least [longPasteLines] lines. Keyboards insert a word or a suggestion at a time, and text the app sets itself
 /// (voice input, shared text, a restored draft) never goes through input formatters.
 class LongPasteFormatter extends TextInputFormatter {
   LongPasteFormatter(this.onLongPaste);

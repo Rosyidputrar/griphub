@@ -343,7 +343,7 @@ class AgentController extends ChangeNotifier {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
     try {
-      await client.call('prompt', {'text': trimmed});
+      _noteQueued(await client.call<Object?>('prompt', {'text': trimmed}));
       return true;
     } on AgentError catch (e) {
       _addNotice(e.message, error: true);
@@ -443,6 +443,11 @@ class AgentController extends ChangeNotifier {
     for (final m in messages.cast<Map>()) {
       _addMessage(m.cast<String, dynamic>(), fromHistory: true);
     }
+    // Follow-ups still waiting (after a reconnect, or the app came back).
+    try {
+      final q = await client.call<Object?>('prompt_queue');
+      if (q is List) _applyQueue({'items': q});
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -479,15 +484,72 @@ class AgentController extends ChangeNotifier {
 
   /// Sends with images (base64) attached; files are referenced by path in [text].
   /// Same false-on-refusal contract as [send].
-  Future<bool> sendWith(String text, {List<Map<String, String>> images = const []}) async {
+  ///
+  /// [attachments] ride along with the message's echo (see
+  /// [queueSentAttachments]); queued here so a cancelled follow-up can drop them.
+  Future<bool> sendWith(
+    String text, {
+    List<Map<String, String>> images = const [],
+    List<SentAttachment> attachments = const [],
+  }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && images.isEmpty) return false;
+    queueSentAttachments(attachments);
     try {
-      await client.call('prompt', {'text': trimmed.isEmpty ? 'See the attached image.' : trimmed, 'images': images});
+      final r = await client.call<Object?>('prompt', {
+        'text': trimmed.isEmpty ? 'See the attached image.' : trimmed,
+        'images': images,
+      });
+      _noteQueued(r, attachments);
       return true;
     } on AgentError catch (e) {
+      retractSentAttachments(attachments);
       _addNotice(e.message, error: true);
       return false;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Follow-ups waiting for the agent
+
+  /// Messages sent while the agent works, waiting for the turn's boundary
+  /// (never steered in). Shown as dimmed bubbles; each can be cancelled.
+  List<QueuedPrompt> queuedPrompts = const [];
+
+  /// Attachments of each queued follow-up, by queue id, so cancelling drops them too.
+  final _queuedAttachments = <String, List<SentAttachment>>{};
+
+  void _noteQueued(Object? result, [List<SentAttachment> attachments = const []]) {
+    final id = result is Map ? result['queued'] as String? : null;
+    if (id != null && attachments.isNotEmpty) _queuedAttachments[id] = attachments;
+  }
+
+  void _applyQueue(Map<String, dynamic> record) {
+    final sid = record['sessionId'] as String?;
+    if (sid != null && sessionId != null && sid != sessionId) return;
+    queuedPrompts = [for (final i in (record['items'] as List? ?? const []).whereType<Map>()) QueuedPrompt(i.cast())];
+    final live = {for (final q in queuedPrompts) q.id};
+    _queuedAttachments.removeWhere((id, _) => !live.contains(id));
+    notifyListeners();
+  }
+
+  /// Cancels one waiting follow-up; the others keep their order. Returns its
+  /// text (for "Edit"), or null when it had already been sent.
+  Future<String?> cancelQueued(String id) async {
+    final q = queuedPrompts.where((q) => q.id == id).firstOrNull;
+    if (q == null) return null;
+    // Gone from the screen at once; the host confirms with a prompt_queue record.
+    queuedPrompts = queuedPrompts.where((x) => x.id != id).toList();
+    notifyListeners();
+    try {
+      await client.call('prompt_queue_remove', {'queueId': id});
+      final files = _queuedAttachments.remove(id);
+      if (files != null) retractSentAttachments(files);
+      return q.text;
+    } on AgentError catch (e) {
+      // Already delivered: it is in the chat now.
+      _addNotice(e.message);
+      return null;
     }
   }
 
@@ -636,6 +698,8 @@ class AgentController extends ChangeNotifier {
         final message = record['message'] as String? ?? '';
         if (!message.startsWith('No models available')) _addNotice(message);
       // The host changed session state on its own (e.g. a fallback model).
+      case 'prompt_queue':
+        _applyQueue(record);
       case 'state':
         _applyState((record['state'] as Map).cast<String, dynamic>());
         notifyListeners();
@@ -812,6 +876,8 @@ class AgentController extends ChangeNotifier {
     tools.clear();
     _streaming = null;
     _pendingAttachments.clear();
+    queuedPrompts = const [];
+    _queuedAttachments.clear();
   }
 
   void _setBusy(bool value) {

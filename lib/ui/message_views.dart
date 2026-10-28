@@ -4,7 +4,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
@@ -19,6 +18,7 @@ import 'code_view.dart';
 import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
+import 'links.dart';
 import 'i18n.dart';
 import 'theme.dart';
 import 'todo_views.dart';
@@ -190,7 +190,119 @@ class UserBubble extends StatelessWidget {
         border: Border.all(color: p.accent.withValues(alpha: 0.18)),
       ),
       // Plain text so the long-press menu wins over text selection ("Select text" in the menu covers that).
-      child: Text(text, style: Theme.of(context).textTheme.bodyLarge),
+      // Links are tappable; the rest stays plain so the long-press menu wins.
+      child: LinkifiedText(text, style: Theme.of(context).textTheme.bodyLarge),
+    );
+  }
+}
+
+/// A follow-up waiting for the agent's current turn to end: the user's
+/// bubble, dimmed, with "Waiting for its turn" and a cancel button. When the
+/// turn reaches its boundary it is sent and the normal bubble takes its place.
+class QueuedMessageView extends StatefulWidget {
+  const QueuedMessageView({super.key, required this.prompt, required this.onCancel});
+  final QueuedPrompt prompt;
+  final VoidCallback onCancel;
+
+  @override
+  State<QueuedMessageView> createState() => _QueuedMessageViewState();
+}
+
+class _QueuedMessageViewState extends State<QueuedMessageView> with SingleTickerProviderStateMixin {
+  late final _enter = AnimationController(vsync: this, duration: Motion.normal)..forward();
+
+  @override
+  void dispose() {
+    _enter.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final q = widget.prompt;
+    if (Motion.reduced(context)) _enter.value = 1;
+    final curve = CurvedAnimation(parent: _enter, curve: Motion.curve);
+    return FadeTransition(
+      opacity: curve,
+      child: SlideTransition(
+        position: Tween(begin: const Offset(0, 0.15), end: Offset.zero).animate(curve),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+            child: Semantics(
+              label: tr('Waiting for its turn'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Opacity(
+                    opacity: 0.55,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: p.raised,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(Radii.lg),
+                          topRight: Radius.circular(Radii.lg),
+                          bottomLeft: Radius.circular(Radii.lg),
+                          bottomRight: Radius.circular(Radii.sm),
+                        ),
+                        border: Border.all(color: p.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (q.images > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(LucideIcons.image, size: 14, color: p.muted),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    q.images == 1 ? tr('1 image') : tr('{n} images').replaceAll('{n}', '${q.images}'),
+                                    style: text.bodySmall,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          Text(stripAttachedNote(q.text), maxLines: 6, overflow: TextOverflow.ellipsis, style: text.bodyLarge),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.clock, size: 13, color: p.faint),
+                      const SizedBox(width: 4),
+                      Text(tr('Waiting for its turn'), style: text.labelSmall),
+                      const SizedBox(width: 2),
+                      TextButton.icon(
+                        onPressed: widget.onCancel,
+                        style: TextButton.styleFrom(
+                          foregroundColor: p.danger,
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          textStyle: text.labelMedium,
+                        ),
+                        icon: const Icon(LucideIcons.x, size: 14),
+                        label: Text(tr('Cancel')),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -583,7 +695,7 @@ class MarkdownText extends StatelessWidget {
       extensionSet: md.ExtensionSet.gitHubFlavored,
       builders: {'pre': _CodeBlockBuilder(context)},
       onTapLink: (text, href, title) {
-        if (href != null) Clipboard.setData(ClipboardData(text: href));
+        if (href != null) openLink(context, href, label: text);
       },
       styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
         p: body,
@@ -650,10 +762,21 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
   }
 }
 
+/// The model's thinking, never all at once: a short preview, and the rest
+/// in a bounded panel that scrolls to the end.
+///
+/// - Collapsed: [previewLines] lines. While it streams, the newest lines
+///   (the tail follows the text); once done, the first lines, fading out.
+/// - Expanded (tap): at most [maxLines] lines tall, scrolling inside with a
+///   scrollbar; while it streams it stays pinned to the end unless the user
+///   scrolls up. Long reasoning no longer pushes the answer off screen.
 class ThinkingView extends StatefulWidget {
   const ThinkingView({super.key, required this.text, required this.live});
   final String text;
   final bool live;
+
+  static const previewLines = 3;
+  static const maxLines = 12;
 
   @override
   State<ThinkingView> createState() => _ThinkingViewState();
@@ -661,16 +784,124 @@ class ThinkingView extends StatefulWidget {
 
 class _ThinkingViewState extends State<ThinkingView> {
   bool open = false;
+  final _scroll = ScrollController();
+
+  /// Following the end while the text streams (off once the user scrolls up).
+  bool _follow = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(() {
+      if (!_scroll.hasClients) return;
+      final p = _scroll.position;
+      _follow = p.pixels >= p.maxScrollExtent - 24;
+    });
+  }
+
+  @override
+  void didUpdateWidget(ThinkingView old) {
+    super.didUpdateWidget(old);
+    if (open && widget.live && _follow && widget.text != old.text) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _toggle() {
+    setState(() {
+      open = !open;
+      _follow = true;
+    });
+    if (open && widget.live) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final label = Theme.of(context).textTheme.labelMedium;
+    final theme = Theme.of(context).textTheme;
+    final label = theme.labelMedium;
+    final style = theme.bodySmall?.copyWith(color: p.muted, height: 1.5);
+    final scaler = MediaQuery.textScalerOf(context);
+    final lineHeight = scaler.scale(style?.fontSize ?? 12.5) * (style?.height ?? 1.5);
+    final body = widget.text.trim();
+    final lines = '\n'.allMatches(body).length + 1;
+    final decoration = BoxDecoration(border: Border(left: BorderSide(color: p.border, width: 2)));
+
+    final Widget panel;
+    if (body.isEmpty) {
+      panel = const SizedBox(width: double.infinity);
+    } else if (open) {
+      panel = Container(
+        key: const ValueKey('open'),
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.only(left: 12),
+        constraints: BoxConstraints(maxHeight: lineHeight * ThinkingView.maxLines),
+        decoration: decoration,
+        child: Scrollbar(
+          controller: _scroll,
+          thumbVisibility: lines > ThinkingView.maxLines,
+          child: SingleChildScrollView(
+            controller: _scroll,
+            padding: const EdgeInsets.only(right: 8),
+            // A selection area, not SelectableText: that one claims the drag, so the panel would not scroll.
+            child: SelectionArea(child: Text(body, style: style)),
+          ),
+        ),
+      );
+    } else {
+      // The preview: the newest lines while thinking, the first ones after.
+      final preview = SizedBox(
+        height: lineHeight * ThinkingView.previewLines.clamp(1, lines),
+        child: ClipRect(
+          child: OverflowBox(
+            alignment: widget.live ? Alignment.bottomLeft : Alignment.topLeft,
+            maxHeight: double.infinity,
+            child: Text(body, style: style?.copyWith(color: p.faint)),
+          ),
+        ),
+      );
+      panel = GestureDetector(
+        key: const ValueKey('preview'),
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggle,
+        child: Container(
+          margin: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.only(left: 12),
+          decoration: decoration,
+          child: lines > ThinkingView.previewLines
+              ? ShaderMask(
+                  blendMode: BlendMode.dstIn,
+                  shaderCallback: (r) => LinearGradient(
+                    begin: widget.live ? Alignment.bottomCenter : Alignment.topCenter,
+                    end: widget.live ? Alignment.topCenter : Alignment.bottomCenter,
+                    colors: const [Colors.black, Colors.black, Colors.transparent],
+                    stops: const [0, 0.55, 1],
+                  ).createShader(r),
+                  child: preview,
+                )
+              : preview,
+        ),
+      );
+    }
+
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         InkWell(
-          onTap: () => setState(() => open = !open),
+          onTap: body.isEmpty ? null : _toggle,
           borderRadius: BorderRadius.circular(Radii.sm),
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -678,6 +909,10 @@ class _ThinkingViewState extends State<ThinkingView> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(tr(widget.live ? 'Thinking' : 'Thought process'), style: label),
+                if (lines > ThinkingView.previewLines) ...[
+                  const SizedBox(width: 6),
+                  Text(tr('{n} lines').replaceAll('{n}', '$lines'), style: label?.copyWith(color: p.faint)),
+                ],
                 const SizedBox(width: 4),
                 AnimatedRotation(
                   turns: open ? 0.25 : 0,
@@ -692,37 +927,7 @@ class _ThinkingViewState extends State<ThinkingView> {
           duration: Motion.of(context, Motion.normal),
           curve: Motion.curve,
           alignment: Alignment.topLeft,
-          child: open
-              ? Container(
-                  margin: const EdgeInsets.only(top: 6),
-                  padding: const EdgeInsets.only(left: 12),
-                  decoration: BoxDecoration(
-                    border: Border(left: BorderSide(color: p.border, width: 2)),
-                  ),
-                  child: SelectableText(
-                    widget.text.trim(),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.muted),
-                  ),
-                )
-              : widget.live
-              // While the model thinks, show the newest lines as they stream.
-              ? Container(
-                  margin: const EdgeInsets.only(top: 6),
-                  padding: const EdgeInsets.only(left: 12),
-                  constraints: const BoxConstraints(maxHeight: 96),
-                  decoration: BoxDecoration(
-                    border: Border(left: BorderSide(color: p.border, width: 2)),
-                  ),
-                  child: SingleChildScrollView(
-                    reverse: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    child: Text(
-                      widget.text.trim(),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.faint),
-                    ),
-                  ),
-                )
-              : const SizedBox(width: double.infinity),
+          child: panel,
         ),
       ],
     );

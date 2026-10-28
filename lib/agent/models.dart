@@ -531,3 +531,14 @@ String _replyText(AssistantEntry e) => [
   for (final b in e.orderedBlocks)
     if (b.kind == BlockKind.text && b.text.trim().isNotEmpty) b.text.trim(),
 ].join('\n\n');
+
+/// A follow-up sent while the agent works, waiting for the turn's boundary.
+class QueuedPrompt {
+  QueuedPrompt(Map<String, dynamic> j)
+    : id = j['id'] as String? ?? '',
+      text = j['text'] as String? ?? '',
+      images = (j['images'] as num?)?.toInt() ?? 0;
+  final String id;
+  final String text;
+  final int images;
+}

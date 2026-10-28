@@ -25,8 +25,10 @@ void main() {
     expect((await edit(v('hal'), v('halo'))).text, 'halo');
     final short = 'x' * longPasteChars;
     expect((await edit(v(''), v(short))).text, short, reason: 'exactly the limit is not "more than"');
-    final lines = List.filled(longPasteLines, 'a').join('\n');
-    expect((await edit(v(''), v(lines))).text, lines, reason: '15 lines is not more than 15');
+    final lines = List.filled(longPasteLines - 1, 'a').join('\n');
+    expect((await edit(v(''), v(lines))).text, lines, reason: '9 lines stay text');
+    final trailing = '${List.filled(longPasteLines - 1, 'a').join('\n')}\n';
+    expect((await edit(v(''), v(trailing))).text, trailing, reason: 'a trailing line break is not a 10th line');
     expect(pasted, isEmpty);
   });
 
@@ -37,8 +39,8 @@ void main() {
     expect(pasted, [long]);
   });
 
-  test('more than 15 short lines becomes an attachment', () async {
-    final log = List.generate(16, (i) => 'E$i').join('\n');
+  test('10 short lines become an attachment', () async {
+    final log = List.generate(10, (i) => 'E$i').join('\n');
     expect(log.length, lessThan(longPasteChars));
     final r = await edit(v(''), v(log));
     expect(r.text, '');

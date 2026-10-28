@@ -11,11 +11,14 @@ import 'ui/predictive_back.dart';
 import 'ui/server_screen.dart';
 import 'ui/i18n.dart';
 import 'ui/kit.dart';
+import 'ui/links.dart';
 import 'ui/theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized().addObserver(PredictiveBack.instance);
-  final agent = AgentController(AgentClient())..translate = tr;
+  final client = AgentClient();
+  externalUrlOpener = client.openUrl;
+  final agent = AgentController(client)..translate = tr;
   // The saved server (if the user set one up and uses it) decides where boot connects.
   unawaited(agent.remote.load().catchError((_) {}).whenComplete(agent.boot));
   runApp(GripHubApp(agent: agent));
