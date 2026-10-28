@@ -42,7 +42,7 @@ import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import 'illustration.dart';
-import 'preview_screen.dart';
+import 'preview_open.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
@@ -317,11 +317,10 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     }
   }
 
-  void _preview() {
-    final dir = widget.path.substring(0, widget.path.lastIndexOf('/').clamp(0, widget.path.length));
-    // A page on a server cannot load its pictures and styles by path on the phone (server_agent.md, phase 6).
-    HtmlPreviewScreen.open(context, title: _name, source: () => _controller.text, baseDir: _fs.isLocal ? dir : null);
-  }
+  /// The text as it stands in the editor (saved or not), with its pictures and styles from next to the file: on this
+  /// phone by path, on a server through the server.
+  void _preview() =>
+      openTextPreview(context, widget.agent, title: _name, path: widget.path, source: () => _controller.text);
 
   Future<void> _copyAll() async {
     await Clipboard.setData(ClipboardData(text: _controller.text));

@@ -17,7 +17,15 @@ import 'theme.dart';
 /// A shell with the agent's toolchain (git, ssh, node…). Sessions outlive the
 /// screen, so leaving and coming back resumes the same tabs.
 class ShellSession {
-  ShellSession._(this.pty, this.cwd, this.title, {required this.linux});
+  ShellSession._(
+    this.pty,
+    this.cwd,
+    this.title, {
+    required this.linux,
+    this.remoteSession,
+    this.remoteKill,
+    this.remoteEnv = const {},
+  });
 
   /// Every open tab, in strip order.
   static final sessions = <ShellSession>[];
@@ -37,6 +45,13 @@ class ShellSession {
 
   /// Started with `box`: the Linux container, where cd-to-project doesn't apply.
   final bool linux;
+
+  /// With a server agent: the name of the tmux session on the server this tab shows, and how to end it.
+  final String? remoteSession;
+  final List<String>? remoteKill;
+  final Map<String, String> remoteEnv;
+
+  bool get remote => remoteSession != null;
   final terminal = Terminal(maxLines: 10000);
   bool exited = false;
   String _line = '';
@@ -47,6 +62,7 @@ class ShellSession {
   static Future<ShellSession> start(AgentController agent, String cwd, {String? title, bool linux = false}) async {
     final env = await agent.client.environment();
     final home = env['HOME']!;
+    if (agent.remote.active && agent.remote.setup != null) return _startRemote(agent, env, cwd, title, linux);
     // mksh reads $ENV for interactive shells: a short prompt and a few aliases.
     final rc = File('$home/.griphubrc');
     rc.writeAsStringSync(r'''
@@ -64,6 +80,47 @@ alias gs='git status'
       columns: 80,
     );
     final session = ShellSession._(pty, cwd, title ?? (linux ? 'linux' : 'sh'), linux: linux);
+    session._wire();
+    return session;
+  }
+
+  /// A tab on the server (server_agent.md, phase 6): ssh with a terminal, into a tmux session there. The shell keeps
+  /// running when the connection drops or the app is closed; the next tab with the same session name (the first one
+  /// after a restart gets the first name again) picks it up where it was. Closing a tab ends its session on the server.
+  /// Adapted from CoderRa's server mode.
+  static ShellSession _startRemote(
+    AgentController agent,
+    Map<String, String> env,
+    String cwd,
+    String? title,
+    bool linux,
+  ) {
+    final setup = agent.remote.setup!;
+    final kind = linux ? 'box' : 'sh';
+    var n = 1;
+    while (sessions.any((s) => !s.exited && s.remoteSession == 'griphub-$kind-$n')) {
+      n++;
+    }
+    final name = 'griphub-$kind-$n';
+    final argv = setup.terminalArgv(cwd: cwd, session: name, box: linux);
+    final shellEnv = {...env, 'TERM': 'xterm-256color'};
+    final pty = Pty.start(
+      argv.first,
+      arguments: argv.skip(1).toList(),
+      workingDirectory: env['HOME'],
+      environment: shellEnv,
+      rows: 40,
+      columns: 80,
+    );
+    final session = ShellSession._(
+      pty,
+      cwd,
+      title ?? (linux ? 'linux' : 'sh'),
+      linux: linux,
+      remoteSession: name,
+      remoteKill: setup.killTerminalArgv(name),
+      remoteEnv: shellEnv,
+    );
     session._wire();
     return session;
   }
@@ -98,11 +155,21 @@ alias gs='git status'
     type('$command\r');
   }
 
-  void kill() => pty.kill();
+  void kill() {
+    pty.kill();
+    final end = remoteKill;
+    if (end != null) {
+      // Best effort: if the server cannot be reached the session simply stays there until it is.
+      unawaited(
+        Process.run(end.first, end.skip(1).toList(), environment: remoteEnv).then<void>((_) {}, onError: (Object _) {}),
+      );
+    }
+  }
 
   /// True when the screen's last non-empty line looks like this app's shell
   /// prompt (`<dir> $`, no user@host): a local shell waiting for input, not
-  /// ssh (remote prompts carry @), vim, or a REPL.
+  /// ssh (remote prompts carry @), vim, or a REPL. A server tab's shell has
+  /// the same prompt (RemoteSetup.shellRc).
   bool get atShellPrompt {
     final buf = terminal.buffer;
     for (var i = buf.height - 1; i >= 0 && i >= buf.height - 50; i--) {
@@ -211,6 +278,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
     // Long-press (or drag) selects text; the selection toolbar follows it.
     controller.addListener(_refreshSelection);
     ShellSession.changes.addListener(_changed);
+    _dropOtherMode();
     final command = widget.command;
     if (command != null || session == null) starting = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -223,6 +291,23 @@ class _TerminalScreenState extends State<TerminalScreen> {
         _select(ShellSession.selected.clamp(0, sessions.length - 1));
       }
     });
+  }
+
+  /// Tabs of the other agent (this phone's shells after switching to the server, or the server's after switching back)
+  /// are closed here. A server tab only lets go of its connection: its tmux session stays on the server, and the first
+  /// tab after switching back joins it again.
+  void _dropOtherMode() {
+    final server = agent.remote.active;
+    final other = [
+      for (final s in sessions)
+        if (s.remote != server) s,
+    ];
+    if (other.isEmpty) return;
+    for (final s in other) {
+      s.pty.kill();
+      sessions.remove(s);
+    }
+    ShellSession.selected = 0;
   }
 
   void _changed() {
@@ -301,7 +386,8 @@ class _TerminalScreenState extends State<TerminalScreen> {
     }
     final index = sessions.indexOf(s);
     ShellSession.changes.value++;
-    if (command != null) s.run(command);
+    // A server tab for the container already is the container's shell; typing `box` into it would nest one.
+    if (command != null && !(s.remote && s.linux)) s.run(command);
     if (!mounted) return s;
     starting = false;
     _select(index);

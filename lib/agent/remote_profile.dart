@@ -294,13 +294,28 @@ class RemoteSetup {
 
   static String _sh(String s) => "'${s.replaceAll("'", r"'\''")}'";
 
+  /// What the server's shell reads first: the login profile (PATH and the rest), then the prompt and aliases of the
+  /// app's own shell on the phone. The terminal screen recognises a shell waiting for input by that prompt
+  /// (`<folder> $`), before it types `cd` into a tab or sends a command on the user's behalf.
+  static const shellRc = [
+    '[ -f /etc/profile ] && . /etc/profile',
+    '[ -f "\$HOME/.profile" ] && . "\$HOME/.profile"',
+    r"PS1='${PWD##*/} $ '",
+    "alias ll='ls -la'",
+    "alias la='ls -A'",
+    "alias gs='git status'",
+  ];
+
   /// A terminal on the server: ssh with a terminal, running (or re-joining) a tmux session called [session], so that a
   /// lost connection or a closed app leaves the shell running and the next tab with the same name picks it up. With
-  /// [box] the shell is the agent's own container (what the agent's commands run in), otherwise a login shell.
+  /// [box] the shell is the agent's own container (what the agent's commands run in), otherwise bash with [shellRc].
   List<String> terminalArgv({required String cwd, required String session, bool box = false}) {
     final home = remoteDir.startsWith('/') ? remoteDir : '\$HOME/$remoteDir';
-    final inner = box ? '"$home/bin/box"' : 'bash -l';
-    final command = 'tmux new-session -A -s ${_sh(session)} -c ${_sh(cwd)} ${_sh(inner)}';
+    final rc = '$home/shellrc';
+    final inner = box ? '"$home/bin/box"' : 'bash --rcfile "$rc" -i';
+    final command =
+        'mkdir -p "$home" && printf \'%s\\n\' ${shellRc.map(_sh).join(' ')} > "$rc"; '
+        'tmux new-session -A -s ${_sh(session)} -c ${_sh(cwd)} ${_sh(inner)}';
     return [ssh, ..._base, '-tt', RemoteProfile.alias, command];
   }
 

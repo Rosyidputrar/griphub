@@ -554,7 +554,7 @@ class _ChatScreenState extends State<ChatScreen> {
               e,
               tools: agent.tools,
               cwd: agent.cwd,
-              fs: agent.fs,
+              agent: agent,
               live: agent,
               modelLabel: agent.modelLabel,
               subagentCard: placed.cardFor,

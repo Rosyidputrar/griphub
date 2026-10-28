@@ -7,11 +7,15 @@ import 'code_view.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
+import 'transfer_dialog.dart';
 
 /// Back up and restore chats, skills, templates, schedules and project memory as a zip.
 class BackupScreen extends StatefulWidget {
-  const BackupScreen({super.key, required this.agent});
+  const BackupScreen({super.key, required this.agent, this.pickFile});
   final AgentController agent;
+
+  /// Chooses a zip on the phone; tests replace the system file picker.
+  final Future<String?> Function()? pickFile;
 
   @override
   State<BackupScreen> createState() => _BackupScreenState();
@@ -27,7 +31,13 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _restoring = false;
   ({String path, int files})? _result;
 
+  /// A zip put on the server by "Choose file", to be removed again once it is restored.
+  String? _uploaded;
+
   AgentController get agent => widget.agent;
+
+  /// With the agent on a server, backups are made and restored there (server_agent.md, phase 6).
+  bool get _server => !agent.fs.isLocal;
 
   @override
   void dispose() {
@@ -57,14 +67,63 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
-  Future<void> _choose() async {
+  /// Brings the backup that was made on the server to this phone, and puts it in Downloads.
+  Future<void> _download() async {
+    final r = _result;
+    if (r == null) return;
+    final local = await runTransfer<String>(
+      context,
+      title: tr('Downloading the backup'),
+      task: (h) => agent.fs.toPhoneFile(r.path, onProgress: h.onProgress, cancel: h.cancel),
+    );
+    if (local == null) return;
     try {
-      final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['zip']);
-      final path = files.firstOrNull?.path;
-      if (path != null && mounted) setState(() => _path.text = path);
+      _snack('${tr('Saved to')} ${await agent.client.saveToDownloads(local)}');
     } catch (e) {
       _snack('$e');
     }
+  }
+
+  Future<void> _choose() async {
+    try {
+      final picked = widget.pickFile != null
+          ? await widget.pickFile!()
+          : (await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['zip'])).firstOrNull?.path;
+      if (picked == null || !mounted) return;
+      if (!_server) {
+        setState(() => _path.text = picked);
+        return;
+      }
+      // The backup has to be where the agent is: put it on the server, restore from there.
+      final name = picked.split('/').last;
+      final dir = '${agent.info['workspace'] ?? ''}/backups';
+      final target = '$dir/.restore-$name';
+      final ok = await runTransfer<bool>(
+        context,
+        title: tr('Sending {name}').replaceAll('{name}', name),
+        task: (h) async {
+          await agent.fs.mkdir(dir);
+          await agent.fs.upload(picked, target, onProgress: h.onProgress, cancel: h.cancel);
+          return true;
+        },
+      );
+      if (ok == true && mounted) {
+        await _dropUploaded(keep: target);
+        setState(() {
+          _uploaded = target;
+          _path.text = target;
+        });
+      }
+    } catch (e) {
+      _snack('$e');
+    }
+  }
+
+  /// Removes the zip "Choose file" sent to the server (unless it is [keep], the one just sent again under that name).
+  Future<void> _dropUploaded({String? keep}) async {
+    final u = _uploaded;
+    _uploaded = null;
+    if (u != null && u != keep) await agent.fs.delete(u).catchError((Object _) {});
   }
 
   Future<void> _restore() async {
@@ -94,6 +153,7 @@ class _BackupScreenState extends State<BackupScreen> {
     setState(() => _restoring = true);
     try {
       final r = await agent.features.restoreBackup(path);
+      if (path == _uploaded) await _dropUploaded();
       _snack(
         [
           tr('Restored {n} files').replaceAll('{n}', '${r.restored}'),
@@ -173,6 +233,15 @@ class _BackupScreenState extends State<BackupScreen> {
                       ],
                     ),
                   ),
+                  if (_server)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _download,
+                        icon: const Icon(LucideIcons.smartphone, size: 16),
+                        label: Text(tr('Download to this phone')),
+                      ),
+                    ),
                 ],
                 const SizedBox(height: 12),
                 Row(
@@ -201,7 +270,11 @@ class _BackupScreenState extends State<BackupScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        tr('Enter the path of a backup zip, or choose one from your phone.'),
+                        _server
+                            ? tr(
+                                'Enter the path of a backup zip on the server, or choose one from your phone (it is sent to the server first).',
+                              )
+                            : tr('Enter the path of a backup zip, or choose one from your phone.'),
                         style: text.bodyMedium,
                       ),
                     ),

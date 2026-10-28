@@ -20,7 +20,7 @@ import 'editor_screen.dart';
 import 'files_screen.dart';
 import 'git_screen.dart';
 import 'kit.dart';
-import 'preview_screen.dart';
+import 'preview_open.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
 import 'theme.dart';
@@ -756,7 +756,8 @@ class _DevServerBannerState extends State<DevServerBanner> {
                         ),
                       ),
                       TextButton(
-                        onPressed: () => HtmlPreviewScreen.openUrl(context, title: 'localhost:${e.key}', url: e.value),
+                        // On a server the port is forwarded to this phone first.
+                        onPressed: () => openDevServer(context, widget.agent, e.key, e.value),
                         child: Text(tr('Preview')),
                       ),
                       opening.contains(e.key)

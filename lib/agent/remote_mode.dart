@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'agent_controller.dart';
 import 'agent_fs.dart';
+import 'port_forward.dart';
 import 'remote_fs.dart';
 import 'remote_profile.dart';
 
@@ -28,6 +29,35 @@ class RemoteMode extends ChangeNotifier {
 
   /// The phone's own folder for files fetched from the server (to share, save or open them on the phone).
   Directory? phoneCache;
+
+  PortForwards? _forwards;
+
+  /// The ports of the server that are reachable from this phone while the server is in use.
+  PortForwards? get forwards {
+    final s = setup;
+    if (s == null || !active) return null;
+    return _forwards ??= PortForwards(setup: s, env: env);
+  }
+
+  /// Where a dev server on the server's [port] can be opened on this phone, or null if there is no server agent in use.
+  Future<String?> devServerUrl(int port) async {
+    final f = forwards;
+    if (f == null) return null;
+    return 'http://127.0.0.1:${await f.open(port)}/';
+  }
+
+  /// A URL the phone can open for the web page [path] on the server (and the files next to it): the host serves the
+  /// folder (`preview_serve`), and the app reaches it through a forward. [root] is the folder to serve when it contains
+  /// [path] (the project, so `../style.css` from a subfolder works); otherwise the page's own folder.
+  Future<String?> previewUrl(String path, {String? root}) async {
+    final f = forwards;
+    if (f == null) return null;
+    final base = (root != null && path.startsWith(root.endsWith('/') ? root : '$root/')) ? root : parentPath(path);
+    final served = (await agent.client.call<Map>('preview_serve', {'dir': base})).cast<String, dynamic>();
+    final local = await f.open(served['port'] as int);
+    final rel = path.substring(base.length).split('/').where((p) => p.isNotEmpty).map(Uri.encodeComponent).join('/');
+    return 'http://127.0.0.1:$local/${served['token']}/$rel';
+  }
 
   /// Whether the app is set to use the server.
   bool get active => profile?.active == true;
@@ -160,6 +190,10 @@ class RemoteMode extends ChangeNotifier {
   }
 
   void _apply() {
+    // Forwards belong to the server they were opened for.
+    final old = _forwards;
+    _forwards = null;
+    if (old != null) unawaited(old.closeAll());
     final p = profile;
     final s = setup;
     final client = agent.client;

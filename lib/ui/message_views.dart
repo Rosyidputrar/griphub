@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import '../agent/models.dart';
 import '../agent/pricing.dart';
@@ -15,6 +16,7 @@ import '../agent/sent_attachments.dart';
 import '../agent/updater.dart';
 import 'attachment_viewer.dart';
 import 'code_view.dart';
+import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -199,7 +201,7 @@ class AssistantMessageView extends StatelessWidget {
     super.key,
     required this.tools,
     this.cwd,
-    this.fs = const LocalFs(),
+    this.agent,
     this.live,
     this.modelLabel,
     this.subagentCard,
@@ -212,8 +214,8 @@ class AssistantMessageView extends StatelessWidget {
   /// Where relative tool paths resolve, for previews.
   final String? cwd;
 
-  /// The agent's files (on the phone or a server), for previews of what a tool wrote.
-  final AgentFs fs;
+  /// The agent, for previews of what a tool wrote (its files are on the phone or a server). Null: on this phone.
+  final AgentController? agent;
 
   /// Fires as the agent streams; live previews re-render on it.
   final Listenable? live;
@@ -256,7 +258,7 @@ class AssistantMessageView extends StatelessWidget {
             card ??
                 (b.toolName == 'todo_write'
                     ? TodoCard(block: b, run: tools[b.toolCallId])
-                    : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, fs: fs, live: live)),
+                    : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, agent: agent, live: live)),
           );
       }
     }
@@ -766,18 +768,11 @@ class _LiveTail extends StatelessWidget {
 }
 
 class ToolCallView extends StatefulWidget {
-  const ToolCallView({
-    super.key,
-    required this.block,
-    required this.run,
-    this.cwd,
-    this.fs = const LocalFs(),
-    this.live,
-  });
+  const ToolCallView({super.key, required this.block, required this.run, this.cwd, this.agent, this.live});
   final Block block;
   final ToolRun? run;
   final String? cwd;
-  final AgentFs fs;
+  final AgentController? agent;
   final Listenable? live;
 
   @override
@@ -803,7 +798,7 @@ class _ToolCallViewState extends State<ToolCallView> {
   String _htmlSource() {
     final args = widget.block.liveArgs;
     final file = _absolute(args?['path'] as String?);
-    if (widget.fs.isLocal && widget.block.args != null && file != null) {
+    if (_local && widget.block.args != null && file != null) {
       try {
         final f = File(file);
         if (f.existsSync()) return f.readAsStringSync();
@@ -812,22 +807,34 @@ class _ToolCallViewState extends State<ToolCallView> {
     return args?['content'] as String? ?? '';
   }
 
+  /// Whether the agent's files are on this phone.
+  bool get _local => widget.agent?.fs.isLocal ?? true;
+
   Future<void> _preview(String path, {required bool writing}) async {
     final file = _absolute(path);
-    final fs = widget.fs;
-    var source = _htmlSource;
-    // On a server the written file is read once, over the link; while it streams the preview shows what came so far.
-    if (!fs.isLocal && !writing && file != null && widget.block.args != null) {
-      final streamed = widget.block.liveArgs?['content'] as String? ?? '';
-      final html = await fs.readString(file).catchError((Object _) => streamed);
-      if (!mounted) return;
-      source = () => html;
+    final agent = widget.agent;
+    // On a server: the written page opens as the server serves it; while it streams, the text so far, with its pictures
+    // and styles from the server.
+    if (!_local && agent != null && file != null) {
+      if (writing || widget.block.args == null) {
+        await openTextPreview(
+          context,
+          agent,
+          title: path.split('/').last,
+          path: file,
+          source: _htmlSource,
+          live: widget.live,
+        );
+      } else {
+        await openFilePreview(context, agent, title: path.split('/').last, path: file);
+      }
+      return;
     }
     await HtmlPreviewScreen.open(
       context,
       title: path.split('/').last,
-      source: source,
-      baseDir: file == null || !fs.isLocal ? null : File(file).parent.path,
+      source: _htmlSource,
+      baseDir: file == null ? null : File(file).parent.path,
       // Re-render as it streams; a finished file is static.
       live: writing ? widget.live : null,
     );

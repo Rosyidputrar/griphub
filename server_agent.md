@@ -1,6 +1,6 @@
 # server_agent.md — GripHub: agent berjalan di VPS (porting dari CoderRa)
 
-Status: fase 1–5 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 6–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
+Status: fase 1–6 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 7 (uji di VPS) belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
 (`seseegy/coderra` 5071362, dokumen `update_agent.md` plus kodenya). Mode server CoderRa sudah dipakai pemilik di
 VPS sungguhan dan berjalan baik. Yang diambil hanya **cara kerja server**; fitur agent tetap milik GripHub karena lebih
 maju (subagent asinkron, billing GripHub Router, approval, todo, GitHub sync, Cloudflare).
@@ -276,6 +276,33 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
   memanggil `fs_*`). Golden dialog transfer dan pemilih folder server (6). Test CoderRa untuk fitur yang tidak ada di
   GripHub (hapus proyek dari pemilih folder, dialog konflik versi CoderRa) tidak dibawa. Mutasi: 5 dari 6 tertangkap;
   cek keberadaan `AGENTS.md` lewat disk HP tidak teramati karena di test "server" memakai disk yang sama.
+
+### 4.15 Dikerjakan di fase 6
+
+- `port_forward.dart` (dari CoderRa): satu proses `ssh -N -L` per port server, dibuka saat dibutuhkan, dipakai ulang,
+  dibuat lagi bila mati (koneksi putus), ditutup saat server berganti atau tidak dipakai. Kunci app hanya boleh
+  meneruskan ke `127.0.0.1` server (`permitopen`), sisi HP juga hanya loopback.
+- Pratinjau HTML di mode server: host menyajikan folder proyek (`preview_serve`, token acak), app membukanya lewat
+  forward, jadi CSS/JS/gambar relatif ikut (termasuk `../style.css` dari subfolder). Teks yang belum menjadi file
+  (editor yang belum disimpan, halaman yang masih ditulis agent) memakai alamat itu sebagai `baseUrl`, jadi asetnya juga
+  termuat. Dipakai di Files, editor, dan kartu tool `write`/`edit`.
+- Dev server: tombol Pratinjau di banner `dev_server` meneruskan port server dulu. Batasnya sama dengan CoderRa: dev
+  server harus mendengarkan di `127.0.0.1` server. Tautan publik (tunnel) tetap fitur host dan tidak diubah di fase ini.
+- Terminal: di mode server tiap tab adalah `ssh -tt` ke sesi tmux `griphub-sh-N` / `griphub-box-N`. Koneksi putus atau
+  app ditutup tidak menghentikan shell; tab pertama setelahnya bergabung lagi. Menutup tab mengakhiri sesinya di server.
+  Shell server memakai prompt dan alias yang sama dengan shell HP (`<folder> $`, `RemoteSetup.shellRc`) setelah membaca
+  profil login, jadi penjaga "cd ke proyek" dan "kirim perintah" tetap mengenali prompt. Tab dari mode lain ditutup
+  saat layar Terminal dibuka (tab server hanya melepas koneksinya; sesi tmux tetap ada).
+- Backup: di mode server backup dibuat di server (`workspace/backups`), lalu "Unduh ke HP ini" membawanya ke HP
+  (progres, batal) dan menyimpannya ke Downloads. "Pilih file" mengirim zip dari HP ke server dulu
+  (`backups/.restore-<nama>`), dan salinan itu dihapus setelah dipulihkan.
+- Test: forward (sekali per port, bersamaan tetap satu, tutup satu/semua, mati lalu dibuat lagi, port tanpa pendengar,
+  aturan `permitopen` server, ditutup saat setup diterapkan ulang), pratinjau (aset relatif, root proyek, di luar folder
+  dan tanpa token tetap tertutup, edit langsung terlihat, dev server), helper layar termasuk `baseUrl` teks yang belum
+  disimpan (total 15); tmux dengan sshd asli lewat `script` (7, termasuk prompt server); backup dengan rig server asli
+  (4). Mutasi: 6/6 tertangkap. CI app memasang `tmux` dan `unzip`.
+- Belum diuji di sini: `Pty` (flutter_pty) dan WebView hanya ada di HP, jadi kode layar Terminal dan tampilan pratinjau
+  diuji di fase 7; yang diuji di sini adalah perintah ssh/tmux, forward, dan alamat yang diberikan ke layar.
 
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 

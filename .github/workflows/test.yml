@@ -73,7 +73,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # The server agent tests talk to the real Node host (built for the tests) through the real attach program, and
-      # run the whole ssh chain through a private sshd on loopback with rsync (throwaway keys).
+      # run the whole ssh chain through a private sshd on loopback with rsync (throwaway keys): port forwards for
+      # previews and dev servers, terminal tabs on tmux, and backups brought over.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
@@ -86,8 +87,11 @@ jobs:
           npm ci
           node test/build-harness.mjs
 
-      - name: Install sshd and rsync
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server openssh-client rsync
+      # tmux for the terminal tabs on a server, unzip to check a backup brought to the phone.
+      - name: Install sshd, rsync, tmux and unzip
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          openssh-server openssh-client rsync tmux unzip
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:

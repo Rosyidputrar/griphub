@@ -1321,4 +1321,11 @@ const _id = <String, String>{
   'Type': 'Jenis',
   'Path': 'Lokasi',
   'Projects live in the workspace on your server. To bring in files from your phone, open a project and use Files → Import from phone.': 'Proyek disimpan di workspace di server Anda. Untuk memasukkan file dari HP, buka sebuah proyek lalu pakai Files → Impor dari HP.',
+  // Previews, terminal and backups on the server (server_agent.md, phase 6)
+  'Could not reach port {port} on the server': 'Port {port} di server tidak bisa dijangkau',
+  'Downloading the backup': 'Mengunduh backup',
+  'Sending {name}': 'Mengirim {name}',
+  'Download to this phone': 'Unduh ke HP ini',
+  'Enter the path of a backup zip on the server, or choose one from your phone (it is sent to the server first).':
+      'Masukkan lokasi zip backup di server, atau pilih dari HP Anda (dikirim ke server dulu).',
 };
