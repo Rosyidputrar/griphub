@@ -36,3 +36,36 @@ export async function waitFor(what, ok, ms = 30_000) {
 		await new Promise((r) => setTimeout(r, 25));
 	}
 }
+
+/** Connects to a daemon's socket and collects the records it sends. */
+export async function dial(path) {
+	const net = await import("node:net");
+	const socket = net.connect(path);
+	socket.setEncoding("utf8");
+	const records = [];
+	let rest = "";
+	let ended = false;
+	socket.on("data", (chunk) => {
+		rest += chunk;
+		let nl;
+		while ((nl = rest.indexOf("\n")) >= 0) {
+			const line = rest.slice(0, nl);
+			rest = rest.slice(nl + 1);
+			if (line.trim()) records.push(JSON.parse(line));
+		}
+	});
+	socket.on("close", () => (ended = true));
+	await new Promise((resolve, reject) => {
+		socket.once("connect", resolve);
+		socket.once("error", reject);
+	});
+	const send = (record) => socket.write(`${JSON.stringify(record)}\n`);
+	const until = async (test, ms = 2000) => {
+		const t0 = Date.now();
+		while (!test()) {
+			if (Date.now() - t0 > ms) throw new Error(`timed out; got ${JSON.stringify(records.map((r) => r.type))}`);
+			await new Promise((r) => setTimeout(r, 5));
+		}
+	};
+	return { socket, records, send, until, get ended() { return ended; } };
+}

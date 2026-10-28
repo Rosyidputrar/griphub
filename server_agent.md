@@ -1,6 +1,6 @@
 # server_agent.md — GripHub: agent berjalan di VPS (porting dari CoderRa)
 
-Status: fase 1 dan 2 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 3–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
+Status: fase 1–3 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 4–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
 (`seseegy/coderra` 5071362, dokumen `update_agent.md` plus kodenya). Mode server CoderRa sudah dipakai pemilik di
 VPS sungguhan dan berjalan baik. Yang diambil hanya **cara kerja server**; fitur agent tetap milik GripHub karena lebih
 maju (subagent asinkron, billing GripHub Router, approval, todo, GitHub sync, Cloudflare).
@@ -210,6 +210,20 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
   (`agent/test/fixtures/agents-phone.md`).
 - Disk dijaga hanya di server (`health.start()`); di HP perintah `health` tetap menjawab, tetapi tidak ada notice
   "disk hampir penuh" baru yang muncul tanpa diminta.
+
+### 4.12 Dikerjakan di fase 3
+
+- `server/`: `bootstrap.sh`, `griphub-attach`, `griphub-hostd.service`, `box/`, `test/`, `README.md` (bahasa Indonesia,
+  termasuk contoh server 8 GB). Nama: akun `griphub`, `~/.griphub`, prefix setup code `griphub1:`, `GRIPHUB_STORE_KEY`.
+- Unit: heap host 1,5 GB, `MemoryMax=2G` (CoderRa 1 GB / 1,25 GB; subagent GripHub berjalan di heap host),
+  `GRIPHUB_MEMORY_WARN_BYTES` 1,6 GB, `TimeoutStopSec=20` (host menghentikan subagent dulu, maksimal 5 detik),
+  `GIT_PAGER`/`PAGER` seperti di HP. Server lebih besar menaikkan batas lewat `systemctl --user edit`.
+- Diuji: `bootstrap.sh` sungguhan di container Ubuntu 24.04 dan Debian 13 (35 pemeriksaan); rantai ssh dengan sshd asli
+  (8 test; di CI wajib jalan lewat `GRIPHUB_REQUIRE_SSHD=1`); unit dengan systemd asli di container (6 test; di CI
+  di-skip karena tidak ada user manager); keselarasan nama dan path antara skrip, unit, host dan box
+  (`server-scripts.test.mjs`); shellcheck bersih. Job CI `server` menjalankan shellcheck dan bootstrap di container.
+- Belum: box dengan Podman sungguhan (di sandbox, Podman rootless bertingkat ditolak `/dev/net/tun`), `--harden-ssh`,
+  AppArmor. Diuji di fase 7 di `agentai`.
 
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 

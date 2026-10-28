@@ -1,0 +1,50 @@
+# GripHub agent host, as a systemd *user* service of the griphub account (rootless Podman needs that user's runtime
+# folder, and `loginctl enable-linger griphub` keeps it running without anyone logged in).
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now griphub-hostd
+#
+# It is not started until the app has copied the host to ~/.griphub/host (ConditionPathExists below). After that the app
+# restarts it with `host_restart`: the host exits and Restart=always brings up a fresh process.
+#
+# Memory: subagents run inside the host's own process, so it gets more room than CoderRa's (1.5 GB heap, 2 GB at most).
+# On a bigger server raise both with `systemctl --user edit griphub-hostd` (see server/README.md).
+#
+# Adapted from CoderRa's server mode (seseegy/coderra server/coderra-hostd.service).
+[Unit]
+Description=GripHub agent host
+ConditionPathExists=%h/.griphub/host/host.mjs
+After=network-online.target
+# Stop flapping if it keeps dying right away; the app will show it is not running.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# GRIPHUB_STORE_KEY lives here. A missing file is an error on purpose: without the key, tokens would be written in the clear.
+EnvironmentFile=%h/.griphub/env
+Environment=GRIPHUB_MODE=server
+Environment=GRIPHUB_DIR=%h/.griphub
+Environment=PI_CODING_AGENT_DIR=%h/.pi/agent
+Environment=GRIPHUB_WORKSPACE=%h/workspace
+Environment=PI_SKIP_VERSION_CHECK=1
+Environment=PI_TELEMETRY=0
+Environment=GIT_PAGER=cat
+Environment=PAGER=cat
+Environment=NODE_OPTIONS=--max-old-space-size=1536
+# Warn (notice and push) well before MemoryMax stops the host.
+Environment=GRIPHUB_MEMORY_WARN_BYTES=1717986918
+Environment=PATH=%h/.griphub/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/node %h/.griphub/host/host.mjs --listen %h/.griphub/host.sock
+Restart=always
+RestartSec=2
+# The host stops subagents (5 s) before it exits, so each keeps its partial report.
+TimeoutStopSec=20
+# The host's own memory. The box (container) has its own limit, set in ~/.griphub/box.conf (server/box/box).
+MemoryMax=2G
+CPUWeight=200
+# No NoNewPrivileges=: the host starts `box`, which starts rootless podman, which needs the setuid newuidmap/newgidmap
+# helpers, and no_new_privs would stop them from working.
+
+[Install]
+WantedBy=default.target
