@@ -100,8 +100,10 @@ menunggu selamanya.
 
 Keputusan:
 - `Guard.pendingApprovals()` menyimpan record lengkapnya (seperti CoderRa `guard.ts:108`).
-- `SubagentManager`: record subagent membawa `approval` yang sedang menunggu (id, tool, ringkasan, alasan, key) dan
-  `subagent_list` ikut mengirimnya; Dart `SubagentState` membaca field itu.
+- `SubagentManager.pendingApprovals()` mengembalikan approval subagent yang menunggu sebagai record
+  `subagent_approval_request` (dengan `subagentId`), persis kartu yang dikirim live. Jadi Dart cukup mengalirkan hasilnya
+  ke handler yang sudah ada; record subagent tidak perlu field baru. (Diputuskan saat fase 1 dikerjakan, menggantikan
+  rencana awal field `approval` di record subagent.)
 - Perintah `approvals_pending` mengembalikan approval chat **dan** subagent. `resync()` memanggilnya.
 - Test: approval muncul saat klien tidak tersambung, buffer dibuang (`gap`), lalu approval tetap bisa dijawab dari app.
 
@@ -165,6 +167,12 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
   parsialnya tersimpan.
 - Test fase 1: `host_restart {whenIdle:true}` menunggu sampai subagent terakhir selesai; SIGTERM menghasilkan subagent
   berstatus `stopped` dengan laporan parsial, bukan hilang.
+- Dikerjakan di fase 1: `SubagentManager.busy()` dan `stopAll(timeout)`. Saat `stopAll` berjalan, flag `closing`
+  mencegah subagent `queued` mengambil slot yang baru kosong dan menolak `start()` baru. Batas tunggu 5 detik di server,
+  500 ms di HP (Kotlin membunuh host 1,5 detik setelah stdin ditutup). Ditemukan dan diperbaiki sekalian: stop saat
+  subagent masih "Starting…" (sesi sedang dibuat) dulu diabaikan; sekarang `begin()` memeriksanya begitu sesi jadi.
+- Test e2e memakai host asli dengan `fetch` tiruan untuk GripHub Router (`agent/test/fixtures/mock-router.mjs`, dimuat
+  lewat `node --import`); kunci provider di `providers.ts` tidak dilonggarkan.
 
 ### 4.10 Lain-lain
 
@@ -223,7 +231,9 @@ Total inti (fase 1–7): sekitar 3 minggu kerja.
 
 - Volume record subagent di jaringan seluler buruk (4.1): diukur di fase 1 dengan banjir sintetis.
 - Memori VPS dengan beberapa subagent paralel (semua dalam satu heap host): diukur di fase 7; batas paralel subagent
-  (`MAX_RUNNING = 3`) mungkin perlu diturunkan di server 4 GB.
+  (`MAX_RUNNING = 3`) mungkin perlu diturunkan di server 4 GB. VPS pemilik (`agentai`: 4 CPU, RAM 8 GB, disk 100 GB)
+  cukup longgar: heap host bisa dinaikkan ke ±2 GB (`--max-old-space-size`) dan box ke ±4 GB lewat `box.conf`, sisanya
+  untuk sistem dan CoderRa yang berdampingan.
 - Tes CoderRa belum dijalankan di sesi ini (pengaman sesi menolak menjalankan kode repo lain). Kode CoderRa dibaca,
   bukan dieksekusi; test yang dibawa akan dijalankan di repo GripHub.
 - Kotlin GripHub (`AgentRuntime.kt`) berbeda dari CoderRa (paket `id.griphub.agent`); `startRemote` ditulis ulang, bukan disalin.

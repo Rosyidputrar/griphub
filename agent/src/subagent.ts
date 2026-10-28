@@ -319,6 +319,8 @@ export class SubagentManager {
 	private readonly waiting: string[] = [];
 	private next = 1;
 	private nextQueue = 1;
+	/** Set by [stopAll]: the host is going away, so nothing new starts (a freed slot must not start a queued one). */
+	private closing = false;
 
 	constructor(hooks: SubagentHooks) {
 		this.hooks = hooks;
@@ -339,6 +341,52 @@ export class SubagentManager {
 		return rt.completion;
 	}
 
+	/**
+	 * Approvals the subagents are waiting on, as the `subagent_approval_request` records that asked for them, so an app
+	 * that reconnects (server agent) can show the cards again even when the replay no longer holds them.
+	 */
+	pendingApprovals(): object[] {
+		const out: object[] = [];
+		for (const [id, rt] of this.runtimes) {
+			for (const a of rt.guard.pendingApprovals()) out.push({ ...a, type: "subagent_approval_request", subagentId: id });
+		}
+		return out;
+	}
+
+	/** Whether any subagent is waiting for a slot, working, waiting for an approval or stopping: not a time to restart. */
+	busy(): boolean {
+		for (const rt of this.runtimes.values()) {
+			const s = rt.record.status;
+			if (s === "queued" || s === "running" || s === "waiting_approval" || s === "stopping") return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Force-stops every subagent that has not finished (the host is shutting down) and resolves once they have all
+	 * finished, each with its partial report, or after [timeoutMs].
+	 */
+	async stopAll(timeoutMs = 5000): Promise<void> {
+		// Stopping a running one frees a slot; [closing] keeps a queued one from taking it.
+		this.closing = true;
+		const open: Promise<SubagentRecord>[] = [];
+		for (const [id, rt] of this.runtimes) {
+			const s = rt.record.status;
+			if (s === "done" || s === "failed" || s === "stopped") continue;
+			this.stop(id, true);
+			open.push(rt.completion);
+		}
+		if (!open.length) return;
+		let timer: NodeJS.Timeout | undefined;
+		await Promise.race([
+			Promise.allSettled(open),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, timeoutMs);
+			}),
+		]);
+		clearTimeout(timer);
+	}
+
 	private activeCount(): number {
 		let n = 0;
 		for (const rt of this.runtimes.values()) {
@@ -353,6 +401,7 @@ export class SubagentManager {
 	 * The parent is responsible for the brief; this only validates it.
 	 */
 	start(parent: SubagentParent, brief: string, profile: SubagentProfile, toolCallId?: string): SubagentRecord {
+		if (this.closing) throw new Error("The agent is shutting down; the subagent was not started");
 		const clean = brief.trim();
 		if (!clean) throw new Error("The subagent task is empty");
 		if (clean.length > MAX_TASK_CHARS) throw new Error(`The subagent task is longer than ${MAX_TASK_CHARS} characters`);
@@ -541,6 +590,11 @@ export class SubagentManager {
 				parent: rt.parent,
 			});
 			rt.session = session;
+			// Stopped while the session was being made: it never gets the brief.
+			if (rt.forceStop || rt.stopRequested) {
+				this.finish(rt, "stopped", rt.forceStop ? "Force-stopped by the user." : "Stopped by the user.", rt.forceStop ? "force" : "user");
+				return;
+			}
 			// The model and thinking level actually in use (the parent's, unless unavailable).
 			const m = (session as any).model;
 			if (m?.id) {
@@ -741,6 +795,7 @@ export class SubagentManager {
 	}
 
 	private promoteNext() {
+		if (this.closing) return;
 		while (this.activeCount() < MAX_RUNNING && this.waiting.length > 0) {
 			const id = this.waiting.shift()!;
 			const rt = this.runtimes.get(id);

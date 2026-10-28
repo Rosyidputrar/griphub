@@ -10,6 +10,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export type ApprovalMode = "ask_all" | "ask_risky" | "auto";
 
+/** An approval card as the host sends it. */
+export interface ApprovalRecord {
+	type: "approval";
+	approvalId: string;
+	toolName: string;
+	summary: string;
+	reason: string;
+	key: string;
+}
+
 export interface GuardHooks {
 	send(record: object): void;
 	/** Snapshot the working tree before the agent's first file change in a run. */
@@ -72,7 +82,8 @@ export class Guard {
 	planMode = false;
 	/** "Always allow" choices for this app run, keyed by the full command/pattern. */
 	private allowed = new Set<string>();
-	private pending = new Map<string, (allow: boolean) => void>();
+	/** Waiting approvals with the record that asked, so an app that reconnects can show them again. */
+	private pending = new Map<string, { resolve: (allow: boolean) => void; record: ApprovalRecord }>();
 	/** Random per-process token: approval ids must never repeat across host restarts. */
 	private readonly epoch = Math.random().toString(36).slice(2, 8);
 	private next = 1;
@@ -81,32 +92,42 @@ export class Guard {
 	constructor(private readonly hooks: GuardHooks) {}
 
 	reply(id: string, allow: boolean, always = false, key?: string) {
-		const resolve = this.pending.get(id);
+		const waiting = this.pending.get(id);
 		this.pending.delete(id);
 		if (allow && always && key) this.allowed.add(key);
-		resolve?.(allow);
+		waiting?.resolve(allow);
 	}
 
 	/** Approval for something outside a tool call (e.g. an issue-triggered run). Reuses the same card and reply path; the empty key can never be "always"-allowed. */
 	askApproval(toolName: string, summary: string, reason: string): Promise<boolean> {
-		const id = `a${this.epoch}-${this.next++}`;
-		this.hooks.send({ type: "approval", approvalId: id, toolName, summary, reason, key: "" });
-		return new Promise<boolean>((resolve) => this.pending.set(id, resolve));
+		return this.request({ toolName, summary, reason, key: "" });
+	}
+
+	/**
+	 * The approvals still waiting for an answer, as the records that asked for them. A server agent's app may have been
+	 * away when they were sent (and the replay buffer may no longer hold them); it asks for these after reconnecting.
+	 */
+	pendingApprovals(): ApprovalRecord[] {
+		return [...this.pending.values()].map((w) => w.record);
 	}
 
 	/** Deny everything still waiting (e.g. when the run is aborted). */
 	cancelAll() {
-		for (const [id, resolve] of this.pending) {
+		for (const [id, waiting] of this.pending) {
 			this.hooks.send({ type: "approval_dismiss", approvalId: id });
-			resolve(false);
+			waiting.resolve(false);
 		}
 		this.pending.clear();
 	}
 
 	private ask(toolName: string, input: Record<string, unknown>, reason: string, key: string) {
-		const id = `a${this.epoch}-${this.next++}`;
-		this.hooks.send({ type: "approval", approvalId: id, toolName, summary: describe(toolName, input), reason, key });
-		return new Promise<boolean>((resolve) => this.pending.set(id, resolve));
+		return this.request({ toolName, summary: describe(toolName, input), reason, key });
+	}
+
+	private request(fields: Omit<ApprovalRecord, "type" | "approvalId">): Promise<boolean> {
+		const record: ApprovalRecord = { type: "approval", approvalId: `a${this.epoch}-${this.next++}`, ...fields };
+		this.hooks.send(record);
+		return new Promise<boolean>((resolve) => this.pending.set(record.approvalId, { resolve, record }));
 	}
 
 	/** The pi extension factory. */

@@ -64,6 +64,7 @@ import {
 } from "./workbench.js";
 import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { Router } from "./router.js";
+import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
 
@@ -102,8 +103,45 @@ const guard = new Guard({
 // ---------------------------------------------------------------------------
 // Output
 
+function argValue(name: string): string | undefined {
+	const i = process.argv.indexOf(name);
+	return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+/**
+ * Set when the host runs as a daemon on a server (server mode, see server_agent.md): it listens on this unix socket
+ * and outlives its clients, which reach it over ssh. Unset on the phone, where the app spawned this process and talks
+ * to it over stdin/stdout exactly as before.
+ */
+const listenPath = argValue("--listen") ?? process.env.GRIPHUB_LISTEN;
+
+/** "server" on a VPS, "phone" in the app's own process. A daemon is a server unless told otherwise. */
+const mode = process.env.GRIPHUB_MODE ?? (listenPath ? "server" : "phone");
+
+/** Where the host keeps its own small files on a server (`running` marker; later the box and ntfy settings). */
+const griphubDir = process.env.GRIPHUB_DIR ?? join(process.env.HOME ?? agentDir, ".griphub");
+/** Exists while the daemon runs and is removed by a clean shutdown; finding it at start means the last one crashed. */
+const runningMarker = join(griphubDir, "running");
+
+/**
+ * Sends the host's records to the app. On the phone that is stdout, as always (no numbering, no buffer). As a daemon
+ * the hub numbers what is worth replaying and keeps it, so an app that lost its connection gets exactly what it
+ * missed (transport.ts).
+ */
+const hub = new Hub({
+	replay: !!listenPath,
+	mode,
+	hostVersion: VERSION,
+	handle: (cmd) => handle(cmd as Command),
+	// Only tests shorten these.
+	pingIntervalMs: Number(process.env.GRIPHUB_PING_MS) || undefined,
+	idleTimeoutMs: Number(process.env.GRIPHUB_IDLE_MS) || undefined,
+});
+// The app that spawned us is connected from the first byte, so early records reach it.
+const stdio = listenPath ? undefined : hub.attach(stdioConn());
+
 function send(record: object) {
-	process.stdout.write(`${JSON.stringify(record)}\n`);
+	hub.emit(record);
 }
 
 function log(...args: unknown[]) {
@@ -816,7 +854,17 @@ async function handle(cmd: Command): Promise<unknown> {
 	if (GITHUB_GIT_COMMANDS.has(cmd.type)) await integrations.githubFresh();
 	switch (cmd.type) {
 		case "hello":
-			return { version: VERSION, node: process.version, agentDir, workspace, tools: s.getActiveToolNames(), ...state() };
+			return {
+				version: VERSION,
+				node: process.version,
+				agentDir,
+				workspace,
+				tools: s.getActiveToolNames(),
+				mode,
+				transport: listenPath ? "daemon" : "stdio",
+				protocol: PROTOCOL,
+				...state(),
+			};
 		case "state":
 			return state();
 
@@ -874,6 +922,12 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "approval_reply":
 			guard.reply(cmd.approvalId, !!cmd.allow, !!cmd.always, cmd.key);
 			return null;
+		// What is still waiting for an answer, chat and subagents alike: an app that reconnects shows these again.
+		case "approvals_pending":
+			return [...guard.pendingApprovals(), ...subagents.pendingApprovals()];
+		case "host_restart":
+			if (!listenPath) throw new Error("Restarting is only available when the host runs as a daemon on a server");
+			return restartGate.request(cmd.whenIdle !== false);
 
 		// Subagents (subagent.ts). Creation is the parent model's job via the
 		// `subagent` tool; these commands are the app's controls for a live
@@ -1359,21 +1413,43 @@ function taskLog(cmd: Command): Log {
 	return log;
 }
 
-async function dispatch(line: string) {
-	let cmd: Command;
-	try {
-		cmd = JSON.parse(line);
-	} catch (e) {
-		send({ type: "response", ok: false, error: `Bad JSON: ${(e as Error).message}` });
-		return;
-	}
-	try {
-		const data = await handle(cmd);
-		send({ type: "response", id: cmd.id, ok: true, data });
-	} catch (e) {
-		send({ type: "response", id: cmd.id, ok: false, error: String((e as Error)?.message ?? e) });
-	}
+/**
+ * Nothing is in flight: no reply being written, no background run queued or running, no subagent waiting, working or
+ * stopping, and no approval waiting (chat or subagent). GripHub's subagents outlive the turn that started them, so the
+ * chat alone is not enough: restarting then would kill them (server_agent.md 4.9).
+ */
+function isIdle(): boolean {
+	const runs = runner?.summary();
+	return (
+		!session?.isStreaming &&
+		guard.pendingApprovals().length === 0 &&
+		!subagents?.busy() &&
+		!runs?.running &&
+		!runs?.runs.some((r) => r.status === "queued")
+	);
 }
+
+let shuttingDown = false;
+/** Ends the host. Subagents are stopped first, so each keeps a partial report instead of vanishing. */
+async function shutdown(code = 0) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	tunnels.stopAll();
+	// The phone's app force-kills the host 1.5 s after closing stdin (AgentRuntime.stop), so it only waits long enough for
+	// the subagents' "stopped" records to leave; a daemon has time for their partial reports.
+	await subagents?.stopAll(listenPath ? 5000 : 500).catch(() => {});
+	runner?.dispose();
+	void mcp?.dispose();
+	session?.dispose();
+	hub.close();
+	if (listenPath) {
+		rmSync(listenPath, { force: true });
+		rmSync(runningMarker, { force: true });
+	}
+	process.exit(code);
+}
+
+const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0) });
 
 // ---------------------------------------------------------------------------
 // Startup
@@ -1387,14 +1463,7 @@ async function main() {
 	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
 	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
 	// reaped by the app — the OS or user must kill that ssh.)
-	process.on("SIGTERM", () => {
-		tunnels.stopAll();
-		process.exit(0);
-	});
-	process.on("SIGINT", () => {
-		tunnels.stopAll();
-		process.exit(0);
-	});
+	for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown(0));
 	process.on("exit", () => tunnels.stopAll());
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(workspace, { recursive: true });
@@ -1506,27 +1575,30 @@ async function main() {
 		if (session && !session.isStreaming) return reopenSession().catch(() => {});
 	});
 
-	// Split on LF only; readline would also split on U+2028/U+2029.
-	let buffer = "";
-	process.stdin.setEncoding("utf8");
-	process.stdin.on("data", (chunk: string) => {
-		buffer += chunk;
-		let nl: number;
-		while ((nl = buffer.indexOf("\n")) >= 0) {
-			const line = buffer.slice(0, nl).replace(/\r$/, "");
-			buffer = buffer.slice(nl + 1);
-			if (line.trim()) void dispatch(line);
+	const readyRecord = { type: "ready", version: VERSION };
+	if (listenPath) {
+		// A daemon that was killed leaves its marker behind; finding it means the last run did not end cleanly.
+		mkdirSync(griphubDir, { recursive: true, mode: 0o700 });
+		if (existsSync(runningMarker)) {
+			send({ type: "notice", message: "The host was restarted unexpectedly (it was stopped without shutting down)." });
 		}
-	});
-	process.stdin.on("end", () => {
-		tunnels.stopAll();
-		runner.dispose();
-		void mcp.dispose();
-		session?.dispose();
-		process.exit(0);
-	});
-
-	send({ type: "ready", version: VERSION });
+		writeFileSync(runningMarker, `${process.pid} ${new Date().toISOString()}\n`, { mode: 0o600 });
+		// Listen last: a client that connects now finds everything above in place. stdin is not read at all (systemd
+		// gives the daemon /dev/null, whose end must not stop it).
+		hub.setReady(readyRecord);
+		await listenOnSocket(hub, listenPath);
+		log(`listening on ${listenPath}`);
+	} else {
+		// Split on LF only; readline would also split on U+2028/U+2029.
+		const lines = new LineBuffer();
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk: string) => {
+			for (const line of lines.push(chunk)) stdio?.receive(line);
+		});
+		// The app closed our stdin: it is done with us.
+		process.stdin.on("end", () => void shutdown(0));
+		hub.setReady(readyRecord);
+	}
 }
 
 main().catch((e) => {
