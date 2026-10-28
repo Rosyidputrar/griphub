@@ -3,7 +3,8 @@
 // host are in host-process.test.mjs.
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import net from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -17,10 +18,18 @@ const { defaultExec, PodmanBox } = await bundle("podmanbox");
 // with the answers it is given.
 
 const ORIGINAL_ENV = Object.fromEntries(
-	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL"].map((k) => [k, process.env[k]]),
+	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
 );
 
 const BOX = fileURLToPath(new URL("../../server/box/box", import.meta.url));
+
+// systemd-run stand-in: records the call and runs the command after "--", as a scope would.
+const SYSTEMD_RUN = `#!/bin/bash
+echo "$*" >> "$STUB_DIR/systemd-run.log"
+while [ "$1" != "--" ]; do shift; done
+shift
+exec "$@"
+`;
 
 const PODMAN = `#!/bin/bash
 dir="$STUB_DIR"
@@ -42,8 +51,10 @@ case "$cmd" in
   stop)
     if [ -f "$dir/state" ]; then echo exited > "$dir/state"; else echo "Error: no container with name or ID \\"griphub-box\\" found: no such container" >&2; exit 125; fi ;;
   rm) rm -f "$dir/state" ;;
-  run) echo running > "$dir/state"; echo id ;;
-  start) echo running > "$dir/state" ;;
+  run) echo running > "$dir/state"; echo id
+    if [ -n "\${STUB_HOLD:-}" ]; then sleep 60 >/dev/null 2>&1 & echo $! >> "$dir/holders"; fi ;;
+  start) echo running > "$dir/state"
+    if [ -n "\${STUB_HOLD:-}" ]; then sleep 60 >/dev/null 2>&1 & echo $! >> "$dir/holders"; fi ;;
   build)
     echo "STEP 1/3: FROM ubuntu"; echo "STEP 2/3: RUN apt-get install"; sleep "\${STUB_BUILD_DELAY:-0}"
     [ "\${STUB_BUILD_EXIT:-0}" = 0 ] || { echo "Error: building at STEP 2/3" >&2; exit "$STUB_BUILD_EXIT"; }
@@ -67,7 +78,9 @@ function rig(t, o = {}) {
 	mkdirSync(join(griphubDir, "box"), { recursive: true });
 	if (o.containerfile !== false) writeFileSync(join(griphubDir, "box", "Containerfile"), "FROM ubuntu\n");
 	mkdirSync(join(home, "workspace"), { recursive: true });
-	const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, GRIPHUB_WORKSPACE: join(home, "workspace"), STUB_DIR: stub, GRIPHUB_DIR: griphubDir };
+	// No user session bus here, so the launcher runs podman directly; a test that wants the bus makes one (see "scope").
+	mkdirSync(join(home, "run"));
+	const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, GRIPHUB_WORKSPACE: join(home, "workspace"), STUB_DIR: stub, GRIPHUB_DIR: griphubDir, XDG_RUNTIME_DIR: join(home, "run") };
 	for (const k of Object.keys(env)) process.env[k] = (env)[k];
 	delete process.env.GRIPHUB_BOX_HOME;
 	delete process.env.GRIPHUB_BOX_CONF;
@@ -78,6 +91,10 @@ function rig(t, o = {}) {
 			if (v === undefined) delete process.env[k];
 			else process.env[k] = v;
 		}
+	});
+	t.after(() => {
+		const holders = join(stub, "holders");
+		if (existsSync(holders)) for (const pid of readFileSync(holders, "utf8").split("\n").filter(Boolean)) spawnSync("kill", [pid]);
 	});
 	const script = o.script === false ? join(home, "no-such-box") : BOX;
 	const box = new PodmanBox({ script, griphubDir, exec: (f, a, x) => defaultExec(f, a, { timeoutMs: Math.min(x?.timeoutMs ?? 5000, 5000) }), checkTimeoutMs: 5000 });
@@ -184,6 +201,66 @@ test("check runs a command through the launcher: yes, with the reason when not",
 	const r = await bad.box.check();
 	assert.equal(r.ok, false);
 	assert.match(r.message, /crun: cannot start/);
+});
+
+test("what podman leaves running does not keep the launcher's lock, so the next call is not stuck behind it", (t) => {
+	const r = rig(t);
+	process.env.STUB_HOLD = "1"; // podman run starts a process that lives on, as conmon does, and it inherits what is open
+	const first = spawnSync(BOX, ["-c", "echo first"], { cwd: r.home, encoding: "utf8", env: process.env, timeout: 15_000 });
+	assert.equal(first.status, 0, first.stderr);
+	assert.ok(existsSync(join(r.stub, "holders")), "the stand-in for conmon is running");
+	const lock = spawnSync("flock", ["-n", join(r.griphubDir, "box.lock"), "-c", "true"], { encoding: "utf8", timeout: 5000 });
+	assert.equal(lock.status, 0, "the lock is free while the container lives on");
+	// A stopped container is started again by podman start, which leaves a process behind in the same way.
+	writeFileSync(join(r.stub, "state"), "exited\n");
+	const second = spawnSync(BOX, ["-c", "echo second"], { cwd: r.home, encoding: "utf8", env: process.env, timeout: 15_000 });
+	assert.equal(second.status, 0, second.stderr);
+	const third = spawnSync(BOX, ["-c", "echo third"], { cwd: r.home, encoding: "utf8", env: process.env, timeout: 15_000 });
+	assert.equal(third.status, 0, third.stderr);
+});
+
+test("a call that cannot get the lock in time says so and fails, instead of waiting for ever", (t) => {
+	const r = rig(t, { state: "running" });
+	const held = spawn("flock", [join(r.griphubDir, "box.lock"), "sleep", "30"], { stdio: "ignore" });
+	t.after(() => held.kill());
+	// flock needs a moment to take the lock before the launcher asks for it
+	spawnSync("sleep", ["0.5"]);
+	const fast = spawnSync("bash", ["-c", `sed 's/flock -w 60 9/flock -w 1 9/' "${BOX}" > "${r.home}/box-short" && chmod +x "${r.home}/box-short" && "${r.home}/box-short" -c true`], {
+		cwd: r.home,
+		encoding: "utf8",
+		env: process.env,
+		timeout: 20_000,
+	});
+	assert.equal(fast.status, 75, fast.stderr);
+	assert.match(fast.stderr, /another box operation is still running/);
+	assert.match(readFileSync(BOX, "utf8"), /flock -w 60 9/, "the real wait is 60 seconds (the test shortens a copy)");
+});
+
+test("the container is started in a scope of its own when there is a user session, so restarting the host does not stop it", async (t) => {
+	const r = rig(t);
+	writeFileSync(join(r.home, "bin", "systemd-run"), SYSTEMD_RUN);
+	chmodSync(join(r.home, "bin", "systemd-run"), 0o755);
+	const bus = net.createServer().listen(join(r.home, "run", "bus"));
+	t.after(() => bus.close());
+	await new Promise((resolve) => bus.once("listening", resolve));
+	const run = (cmd) => spawnSync(BOX, ["-c", cmd], { cwd: r.home, encoding: "utf8", env: process.env, timeout: 15_000 });
+	assert.equal(run("echo made").status, 0);
+	writeFileSync(join(r.stub, "state"), "exited\n");
+	assert.equal(run("echo started").status, 0);
+	const scoped = readFileSync(join(r.stub, "systemd-run.log"), "utf8").trim().split("\n");
+	assert.equal(scoped.length, 2, "podman run and podman start, and nothing else, go through a scope");
+	for (const line of scoped) assert.match(line, /--user --scope .* -- podman (run|start) /);
+	assert.deepEqual(r.calls().filter((c) => c[0] === "run" || c[0] === "start").map((c) => c[0]), ["run", "start"]);
+});
+
+test("without a user session bus podman runs as before, and the commands still work", (t) => {
+	const r = rig(t);
+	writeFileSync(join(r.home, "bin", "systemd-run"), SYSTEMD_RUN); // there, but with no bus to talk to it is not used
+	chmodSync(join(r.home, "bin", "systemd-run"), 0o755);
+	const ran = spawnSync(BOX, ["-c", "echo ok"], { cwd: r.home, encoding: "utf8", env: process.env, timeout: 15_000 });
+	assert.equal(ran.status, 0, ran.stderr);
+	assert.ok(!existsSync(join(r.stub, "systemd-run.log")), "systemd-run was not called");
+	assert.ok(r.calls().some((c) => c[0] === "run"));
 });
 
 test("without an image every command is refused, saying what to do, and nothing runs on the server", async (t) => {

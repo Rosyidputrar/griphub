@@ -42,6 +42,18 @@ state() {
 	podman container inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || true
 }
 
+# Starts podman for a container that outlives this call. conmon, the process podman leaves behind to watch the container,
+# stays in the cgroup of whoever started it. When that is griphub-hostd.service, restarting the host (every app update
+# does) stops conmon, and conmon takes the container and everything running in it down. A scope of its own keeps the
+# box apart from the host. Without a user session bus there is no scope to make, and podman runs as it always did.
+detached() {
+	if command -v systemd-run >/dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ]; then
+		systemd-run --user --scope --quiet --collect --description="GripHub box" -- "$@"
+	else
+		"$@"
+	fi
+}
+
 create() {
 	if ! podman image exists "$IMAGE"; then
 		# The agent reads this (it is the output of its command) and passes it on, so it says what the user can do.
@@ -50,7 +62,7 @@ create() {
 		echo "     podman build -t $IMAGE -f ~/.griphub/box/Containerfile ~/.griphub/box" >&2
 		exit 127
 	fi
-	podman run -d --name "$NAME" --hostname "$NAME" --init --network=host \
+	detached podman run -d --name "$NAME" --hostname "$NAME" --init --network=host \
 		--memory "$MEMORY" --memory-swap "$SWAP" --cpus "$CPUS" \
 		-v "$BOXHOME:$HOME_DIR" -v "$WS:$WS" -e "HOME=$HOME_DIR" -w "$WS" \
 		"$IMAGE" sleep infinity >/dev/null 9>&-
@@ -65,7 +77,7 @@ ensure_running() {
 	case "$(state)" in
 		running) ;;
 		"") create ;;
-		*) podman start "$NAME" >/dev/null 9>&- ;;
+		*) detached podman start "$NAME" >/dev/null 9>&- ;;
 	esac
 	exec 9>&-
 }
