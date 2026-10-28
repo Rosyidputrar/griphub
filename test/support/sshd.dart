@@ -90,8 +90,31 @@ class TestSshd {
 
   void revokeAll() => File('${dir.path}/authorized_keys').writeAsStringSync('');
 
-  /// Cuts every open connection, as a network that goes away does; the server keeps taking new ones.
-  void dropConnections() => Process.runSync('pkill', ['-KILL', '-P', '${_process.pid}']);
+  /// Cuts every open connection, as a network that goes away does; the server keeps taking new ones. Everything under
+  /// this sshd goes (its session processes and what runs in them), so no process is left holding a connection open
+  /// whatever the OpenSSH build and user; a daemon that detached itself, like a tmux server, is no longer under it.
+  void dropConnections() {
+    final ps = Process.runSync('ps', ['-e', '-o', 'pid=,ppid=']).stdout as String;
+    final children = <int, List<int>>{};
+    for (final line in ps.split('\n')) {
+      final f = line.trim().split(RegExp(r'\s+'));
+      if (f.length != 2) continue;
+      final pid = int.tryParse(f[0]), ppid = int.tryParse(f[1]);
+      if (pid != null && ppid != null) (children[ppid] ??= []).add(pid);
+    }
+    final under = <int>[];
+    void walk(int pid) {
+      for (final c in children[pid] ?? const <int>[]) {
+        under.add(c);
+        walk(c);
+      }
+    }
+
+    walk(_process.pid);
+    for (final pid in under) {
+      Process.killPid(pid, ProcessSignal.sigkill);
+    }
+  }
 
   Future<void> dispose() async {
     // The connections first: each is a child of this sshd, and once it is gone they would be left behind, waiting on

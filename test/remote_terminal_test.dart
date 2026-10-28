@@ -127,7 +127,8 @@ void main() {
       await t.until('set-8');
       sshd.dropConnections();
       // ShellSession.connectionLost: what tells a lost connection from a shell that was exited (that ends with 0).
-      expect(await t.exitCode.timeout(const Duration(seconds: 20)), 255);
+      // At once when the connection closes; at worst ssh's own keepalive (15 s × 3) notices.
+      expect(await t.exitCode.timeout(const Duration(seconds: 60)), 255);
       expect(exists(name), isTrue);
       final again = await open(setup.terminalArgv(cwd: remote.path, session: name));
       again.send('echo "\$KEPT"\n');
