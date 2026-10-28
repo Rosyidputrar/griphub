@@ -101,6 +101,21 @@ class MainActivity : FlutterFragmentActivity() {
                             }
                         }.start()
                     }
+                    // A server agent: the app runs ssh to the server's attach program instead of its own host.
+                    "startRemote" -> {
+                        Thread {
+                            try {
+                                @Suppress("UNCHECKED_CAST")
+                                val argv = (call.argument<List<String>>("argv") ?: emptyList())
+                                @Suppress("UNCHECKED_CAST")
+                                val env = (call.argument<Map<String, String>>("env") ?: emptyMap())
+                                AgentRuntime.startRemote(applicationContext, argv, env)
+                                runOnUiThread { result.success(AgentRuntime.paths(applicationContext)) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("start_failed", e.message, null) }
+                            }
+                        }.start()
+                    }
                     "send" -> {
                         AgentRuntime.send(call.arguments as String)
                         result.success(null)
@@ -111,7 +126,15 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     "isRunning" -> result.success(AgentRuntime.isRunning)
                     // The toolchain environment, for terminals the app opens.
-                    "environment" -> result.success(AgentRuntime.prepareEnvironment(applicationContext))
+                    // Unpacking the agent bundle after an update takes a moment: off the UI thread.
+                    "environment" -> Thread {
+                        try {
+                            val env = AgentRuntime.prepareEnvironment(applicationContext)
+                            runOnUiThread { result.success(env) }
+                        } catch (e: Exception) {
+                            runOnUiThread { result.error("environment_failed", e.message, null) }
+                        }
+                    }.start()
                     "setBusy" -> {
                         AgentService.setBusy(this, call.arguments as Boolean)
                         result.success(null)

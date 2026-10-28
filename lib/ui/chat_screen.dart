@@ -23,10 +23,12 @@ import 'mesh.dart';
 import 'model_sheet.dart';
 import 'tasks_screen.dart';
 import 'terminal_screen.dart';
+import 'server_screen.dart';
 import 'settings_screen.dart';
 import 'folder_picker.dart';
 import 'subagent_card.dart';
 import 'theme.dart';
+import 'transfer_dialog.dart';
 import 'todo_views.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -203,7 +205,23 @@ class _ChatScreenState extends State<ChatScreen> {
     if (files.isEmpty) {
       ok = await agent.send(text);
     } else {
-      final prompt = await preparePrompt(text, files, agent.cwd);
+      // Files go to the server first when the agent is there; that can take a while, and it can fail (the message
+      // and its files then stay where they are, to try again).
+      final prompt = await runTransfer(
+        context,
+        title: tr('Sending files'),
+        show: !agent.fs.isLocal,
+        task: (h) => preparePrompt(
+          text,
+          files,
+          agent.cwd,
+          agent.fs,
+          onProgress: h.onProgress,
+          cancel: h.cancel,
+          onFile: (l) => h.label = l,
+        ),
+      );
+      if (prompt == null) return;
       // Queue before the call: the host may echo the message before the
       // call returns, and the queue drains in transcript order.
       agent.queueSentAttachments(prompt.files);
@@ -371,6 +389,8 @@ class _ChatScreenState extends State<ChatScreen> {
               : null,
           title: _Title(agent: agent),
           actions: [
+            // Phone or server, and whether the server can be reached; only once a server is set up.
+            ConnectionChip(agent: agent),
             IconButton(
               tooltip: tr('Terminal'),
               icon: const Icon(LucideIcons.squareTerminal, size: 20),
@@ -392,6 +412,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         body: Column(
           children: [
+            ConnectionBanner(agent: agent),
             Expanded(
               child: Stack(
                 children: [
@@ -527,11 +548,13 @@ class _ChatScreenState extends State<ChatScreen> {
             UserEntry() => UserMessageView(
               e,
               onLongPress: (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
+              fs: agent.fs,
             ),
             AssistantEntry() => AssistantMessageView(
               e,
               tools: agent.tools,
               cwd: agent.cwd,
+              agent: agent,
               live: agent,
               modelLabel: agent.modelLabel,
               subagentCard: placed.cardFor,

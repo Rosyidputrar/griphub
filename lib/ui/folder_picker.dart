@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -66,6 +65,14 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
   }
 
   Future<void> _checkAccess() async {
+    // A server agent has only its workspace: the phone's storage is not where it works.
+    if (!widget.agent.fs.isLocal) {
+      setState(() {
+        phoneAvailable = false;
+        root = _Root.workspace;
+      });
+      return;
+    }
     final a = await widget.agent.client.storageAccess();
     if (!mounted) return;
     setState(() {
@@ -91,23 +98,19 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
   /// Folder listing, loaded off the UI thread: listing a large phone
   /// directory synchronously inside build() froze the UI. Stale results
   /// (path changed mid-load) are discarded.
-  List<Directory> _dirs = [];
+  List<FsEntry> _dirs = [];
   Map<String, bool> _git = {};
 
   Future<void> _loadChildren() async {
     final dir = path;
     final show = showHidden;
     try {
-      final entries = await Directory(dir).list(followLinks: false).toList();
-      final dirs = entries.whereType<Directory>().where((d) {
-        final name = folderName(d.path);
-        return show || !name.startsWith('.');
-      }).toList()
-        ..sort((a, b) => folderName(a.path).toLowerCase().compareTo(folderName(b.path).toLowerCase()));
-      final flags = <String, bool>{};
-      await Future.wait(dirs.map((d) async {
-        flags[d.path] = await Directory('${d.path}/.git').exists().catchError((_) => false);
-      }));
+      // This phone's folders, or the server's (server_agent.md, phase 5).
+      final entries = await widget.agent.fs.list(dir, detectGit: true);
+      // Links are left out: a link to a folder elsewhere is not a project of its own.
+      final dirs = entries.where((d) => d.isDir && !d.isLink && (show || !d.name.startsWith('.'))).toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      final flags = {for (final d in dirs) d.path: d.isGit};
       if (!mounted || path != dir || showHidden != show) return;
       setState(() {
         _dirs = dirs;
@@ -145,12 +148,13 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
         ],
       ),
     );
-    controller.dispose();
+    // Not disposed here: the dialog is still animating out with it (the files screen's dialogs do the same).
     final clean = name?.trim().replaceAll(RegExp(r'[/\\:*?"<>|]+'), '-');
     if (clean == null || clean.isEmpty) return;
     try {
-      final dir = Directory('$path/$clean')..createSync(recursive: true);
-      _go(dir.path);
+      final dir = joinPath(path, clean);
+      await widget.agent.fs.mkdir(dir);
+      _go(dir);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: $e')));
@@ -164,7 +168,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
     final text = Theme.of(context).textTheme;
     final locked = root == _Root.phone && !phoneGranted;
     final crumbs = path.substring(base.length).split('/').where((s) => s.isNotEmpty).toList();
-    final children = locked ? const <Directory>[] : _dirs;
+    final children = locked ? const <FsEntry>[] : _dirs;
 
     return Scaffold(
       appBar: AppBar(
@@ -173,7 +177,10 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
           IconButton(
             tooltip: tr(showHidden ? 'Hide hidden folders' : 'Show hidden folders'),
             icon: Icon(showHidden ? LucideIcons.eye : LucideIcons.eyeOff, size: 18),
-            onPressed: () => setState(() => showHidden = !showHidden),
+            onPressed: () {
+              setState(() => showHidden = !showHidden);
+              _loadChildren();
+            },
           ),
           if (!locked)
             IconButton(
@@ -190,10 +197,15 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
-                tr(
-                  'Projects live in the GripHub AI Agent workspace. To bring in files from your phone, open a project and use '
-                  'Files → Import from phone.',
-                ),
+                widget.agent.fs.isLocal
+                    ? tr(
+                        'Projects live in the GripHub AI Agent workspace. To bring in files from your phone, open a project and use '
+                        'Files → Import from phone.',
+                      )
+                    : tr(
+                        'Projects live in the workspace on your server. To bring in files from your phone, open a project and '
+                        'use Files → Import from phone.',
+                      ),
                 style: text.bodySmall,
               ),
             )
@@ -215,8 +227,16 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
                 _Crumb(
-                  label: root == _Root.workspace ? 'workspace' : 'phone',
-                  icon: root == _Root.workspace ? LucideIcons.boxes : LucideIcons.smartphone,
+                  label: !widget.agent.fs.isLocal
+                      ? 'server'
+                      : root == _Root.workspace
+                      ? 'workspace'
+                      : 'phone',
+                  icon: !widget.agent.fs.isLocal
+                      ? LucideIcons.server
+                      : root == _Root.workspace
+                      ? LucideIcons.boxes
+                      : LucideIcons.smartphone,
                   active: crumbs.isEmpty,
                   onTap: () => _go(base),
                 ),
@@ -282,7 +302,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                         title: Text(folderName(d.path), style: text.bodyMedium),
                         subtitle: git ? Text(tr('git repository'), style: text.bodySmall) : null,
                         trailing: Icon(LucideIcons.chevronRight, size: 16, color: p.faint),
-                        onTap: () => setState(() => path = d.path),
+                        onTap: () => _go(d.path),
                       );
                     },
                   ),

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/agent/agent_fs.dart';
 import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/sent_attachments.dart';
 import 'package:griphub_agent/ui/chat_extras.dart';
@@ -75,12 +76,17 @@ void main() {
     final dup = File('${root.path}/sub_notes.txt')..writeAsStringSync('other');
     final missing = '${root.path}/gone.png';
 
-    final prompt = await preparePrompt('look', [
-      Attachment(photo.path, 'photo.jpg', mime: 'image/jpeg'),
-      Attachment(doc.path, 'notes.txt'),
-      Attachment(dup.path, 'notes.txt'),
-      Attachment(missing, 'gone.png', mime: 'image/png'),
-    ], cwd.path);
+    final prompt = await preparePrompt(
+      'look',
+      [
+        Attachment(photo.path, 'photo.jpg', mime: 'image/jpeg'),
+        Attachment(doc.path, 'notes.txt'),
+        Attachment(dup.path, 'notes.txt'),
+        Attachment(missing, 'gone.png', mime: 'image/png'),
+      ],
+      cwd.path,
+      const LocalFs(),
+    );
 
     // The picture still reaches the model as an image.
     expect(prompt.images, hasLength(1));
@@ -105,7 +111,12 @@ void main() {
   test('preparePrompt sends big pictures down the file route', () async {
     final cwd = Directory('${root.path}/proj2')..createSync();
     final big = File('${root.path}/big.jpg')..writeAsBytesSync(List.filled(8 * 1024 * 1024 + 1, 3));
-    final prompt = await preparePrompt('', [Attachment(big.path, 'big.jpg', mime: 'image/jpeg')], cwd.path);
+    final prompt = await preparePrompt(
+      '',
+      [Attachment(big.path, 'big.jpg', mime: 'image/jpeg')],
+      cwd.path,
+      const LocalFs(),
+    );
     expect(prompt.images, isEmpty);
     expect(prompt.files, hasLength(1));
     expect(prompt.text, contains('Attached files:'));

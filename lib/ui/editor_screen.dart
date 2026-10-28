@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:re_editor/re_editor.dart';
@@ -37,9 +38,11 @@ import 'package:re_highlight/languages/xml.dart';
 import 'package:re_highlight/languages/yaml.dart';
 import 'package:re_highlight/re_highlight.dart' show Mode;
 
+import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import 'illustration.dart';
-import 'preview_screen.dart';
+import 'preview_open.dart';
 import 'i18n.dart';
 import 'theme.dart';
 
@@ -105,11 +108,14 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     if (state == AppLifecycleState.resumed && !_dirty && !_loading && !_binary) _reloadIfChanged();
   }
 
+  /// This phone's files, or the server's (server_agent.md, phase 5).
+  AgentFs get _fs => widget.agent.fs;
+
   Future<bool> _changedOnDisk() async {
     final known = _diskBytes;
     if (known == null) return false;
     try {
-      final now = await File(widget.path).readAsBytes();
+      final now = await _fs.read(widget.path);
       if (now.length != known.length) return true;
       for (var i = 0; i < now.length; i++) {
         if (now[i] != known[i]) return true;
@@ -118,6 +124,10 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     } on FileSystemException {
       // Deleted or moved away: saving recreates it, which is what the user asked for.
       return false;
+    } on AgentError catch (e) {
+      // The same on a server.
+      if (e.code == 'ENOENT') return false;
+      rethrow;
     }
   }
 
@@ -146,8 +156,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
 
   Future<void> _load() async {
     try {
-      final file = File(widget.path);
-      final bytes = await file.readAsBytes();
+      final bytes = await _fs.read(widget.path);
       _size = bytes.length;
       _diskBytes = bytes;
       final head = bytes.length > 8192 ? bytes.sublist(0, 8192) : bytes;
@@ -189,6 +198,14 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
   }
 
   void _onChanged() {
+    // The editor also notifies while it is being built (CodeEditor.initState, e.g. when it comes back after a
+    // reload); the state is updated after that frame then.
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _onChanged();
+      });
+      return;
+    }
     final dirty = _controller.text != _saved;
     final canUndo = _controller.canUndo;
     final canRedo = _controller.canRedo;
@@ -203,7 +220,15 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
 
   Future<bool> _save() async {
     if (_readOnly || _saving) return false;
-    if (await _changedOnDisk()) {
+    final bool changed;
+    try {
+      changed = await _changedOnDisk();
+    } catch (e) {
+      // The server cannot be reached: nothing is written, the edits stay.
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return false;
+    }
+    if (changed) {
       if (!mounted) return false;
       final choice = await _confirmOverwrite();
       if (choice == 'reload') {
@@ -217,7 +242,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     try {
       final text = _controller.text;
       final bytes = utf8.encode(_crlf ? text.replaceAll('\n', '\r\n') : text);
-      await File(widget.path).writeAsBytes(bytes, flush: true);
+      await _fs.write(widget.path, Uint8List.fromList(bytes));
       _diskBytes = bytes;
       _saved = text;
       if (!mounted) return true;
@@ -292,10 +317,10 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     }
   }
 
-  void _preview() {
-    final dir = widget.path.substring(0, widget.path.lastIndexOf('/').clamp(0, widget.path.length));
-    HtmlPreviewScreen.open(context, title: _name, source: () => _controller.text, baseDir: dir);
-  }
+  /// The text as it stands in the editor (saved or not), with its pictures and styles from next to the file: on this
+  /// phone by path, on a server through the server.
+  void _preview() =>
+      openTextPreview(context, widget.agent, title: _name, path: widget.path, source: () => _controller.text);
 
   Future<void> _copyAll() async {
     await Clipboard.setData(ClipboardData(text: _controller.text));

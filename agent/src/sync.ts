@@ -50,10 +50,17 @@ export interface SyncDeps {
 	/** Called after custom providers were added, so the model list can reload. */
 	providersChanged(): Promise<void>;
 	notify(status: SyncStatus): void;
+	/**
+	 * Why sync cannot run here, or unset when it can. A server agent sets it: the server is the one copy of the chats
+	 * and projects, so mirroring them through a repository would only fight it (server_agent.md 4.4).
+	 */
+	unavailable?: string;
 }
 
 export interface SyncStatus {
 	enabled: boolean;
+	/** Why sync is not offered here (a server agent), or null. */
+	unavailable: string | null;
 	running: boolean;
 	repo: string | null;
 	lastSync: number | null;
@@ -187,7 +194,8 @@ export class GitHubSync {
 
 	status(): SyncStatus {
 		const { enabled, lastSync, lastError, failures, skipped, imported, localOnly, pendingDelete } = this.state;
-		return { enabled, running: this.running, repo: this.repo, lastSync, lastError, failures, skipped, localOnly, imported, pendingDelete };
+		const unavailable = this.deps.unavailable ?? null;
+		return { enabled: enabled && !unavailable, unavailable, running: this.running, repo: this.repo, lastSync, lastError, failures, skipped, localOnly, imported, pendingDelete };
 	}
 
 	private save() {
@@ -196,6 +204,7 @@ export class GitHubSync {
 	}
 
 	async setEnabled(on: boolean) {
+		if (on && this.deps.unavailable) throw new Error(this.deps.unavailable);
 		if (on && !this.deps.integrations.summary().github) throw new Error("Sign in to GitHub first");
 		this.state.enabled = on;
 		this.state.lastError = null;
@@ -209,7 +218,7 @@ export class GitHubSync {
 
 	/** Runs a sync after [delayMs]; a sooner request replaces a later one, a later one leaves a sooner one alone. */
 	schedule(delayMs: number) {
-		if (!this.state.enabled) return;
+		if (!this.state.enabled || this.deps.unavailable) return;
 		const at = Date.now() + delayMs;
 		if (this.timer && this.due <= at) return;
 		clearTimeout(this.timer);
@@ -221,6 +230,7 @@ export class GitHubSync {
 	}
 
 	async syncNow(opts: { confirmDelete?: boolean } = {}): Promise<SyncStatus> {
+		if (this.deps.unavailable) throw new Error(this.deps.unavailable);
 		if (!this.state.enabled) throw new Error("GitHub sync is off");
 		if (this.running) {
 			this.again = true;

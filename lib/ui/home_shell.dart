@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import '../agent/integrations.dart';
 import '../agent/models.dart';
 import '../agent/updater.dart';
@@ -744,16 +744,21 @@ class _HomeTabState extends State<_HomeTab> {
     final ws = agent.info['workspace'] as String? ?? '';
     final slug = q.title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '');
     final n = DateTime.now();
-    final dir = Directory('$ws/$slug-${n.month}${n.day}-${n.hour}${n.minute.toString().padLeft(2, '0')}')
-      ..createSync(recursive: true);
-    if (!await agent.newSession(dir: dir.path)) {
-      dir.deleteSync();
+    // This phone's workspace, or the server's (server_agent.md, phase 5).
+    final fs = agent.fs;
+    final dir = joinPath(ws, '$slug-${n.month}${n.day}-${n.hour}${n.minute.toString().padLeft(2, '0')}');
+    await fs.mkdir(dir);
+    if (!await agent.newSession(dir: dir)) {
+      await fs.delete(dir).catchError((_) {});
       return;
     }
     if (mounted) await openChat(context, agent, prompt: tr(q.prompt!));
     // Backed out without sending anything: don't leave an empty project behind.
-    if (agent.cwd == dir.path && agent.entries.isEmpty && dir.existsSync() && dir.listSync().isEmpty) {
-      dir.deleteSync();
+    if (agent.cwd == dir &&
+        agent.entries.isEmpty &&
+        await fs.exists(dir).catchError((_) => false) &&
+        (await fs.list(dir).catchError((_) => <FsEntry>[])).isEmpty) {
+      await fs.delete(dir).catchError((_) {});
       try {
         await agent.newSession();
       } catch (_) {}

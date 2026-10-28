@@ -2,7 +2,8 @@
  * GripHub AI Agent agent host.
  *
  * Runs inside the bundled Node runtime on the device and exposes the pi SDK to
- * the Flutter app over JSONL on stdin/stdout:
+ * the Flutter app over JSONL on stdin/stdout. On a server (--listen, see
+ * server_agent.md) the same records go over a unix socket instead (transport.ts):
  *
  *   app  -> host   {"id": 1, "type": "prompt", "text": "..."}
  *   host -> app    {"type": "response", "id": 1, "ok": true, "data": ...}
@@ -26,15 +27,21 @@ import {
 	SettingsManager,
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
+import { agentsFileText, isManaged } from "./agents-file.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
 import { installDohLookup } from "./dns.js";
 import * as gitops from "./gitops.js";
+import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
+import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
 import { Integrations, type Log, run } from "./integrations.js";
 import { installLenientTools } from "./lenient.js";
-import { BASH_TIMEOUT_SECONDS, limitsExtension } from "./limits.js";
+import { limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
+import { Notifier } from "./notify.js";
+import { PodmanBox } from "./podmanbox.js";
+import { Preview } from "./preview.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { Skills } from "./skills.js";
@@ -64,6 +71,7 @@ import {
 } from "./workbench.js";
 import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { Router } from "./router.js";
+import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
 
@@ -88,6 +96,8 @@ let customProviders: CustomProviders;
 let sync: GitHubSync;
 let subagents: SubagentManager;
 let router: Router;
+let fsService: Fs;
+let preview: Preview;
 const tunnels = new Tunnels();
 let unsubscribe: (() => void) | undefined;
 
@@ -102,8 +112,138 @@ const guard = new Guard({
 // ---------------------------------------------------------------------------
 // Output
 
+function argValue(name: string): string | undefined {
+	const i = process.argv.indexOf(name);
+	return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+/**
+ * Set when the host runs as a daemon on a server (server mode, see server_agent.md): it listens on this unix socket
+ * and outlives its clients, which reach it over ssh. Unset on the phone, where the app spawned this process and talks
+ * to it over stdin/stdout exactly as before.
+ */
+const listenPath = argValue("--listen") ?? process.env.GRIPHUB_LISTEN;
+
+/** "server" on a VPS, "phone" in the app's own process. A daemon is a server unless told otherwise. */
+const mode = process.env.GRIPHUB_MODE ?? (listenPath ? "server" : "phone");
+
+/** A server agent: the daemon on a VPS. Everything that differs from the phone hangs off this. */
+const server = mode === "server";
+
+/** Where the host keeps its own small files on a server (`running` marker, the box). */
+const griphubDir = process.env.GRIPHUB_DIR ?? join(process.env.HOME ?? agentDir, ".griphub");
+/** Exists while the daemon runs and is removed by a clean shutdown; finding it at start means the last one crashed. */
+const runningMarker = join(griphubDir, "running");
+
+/**
+ * Sends the host's records to the app. On the phone that is stdout, as always (no numbering, no buffer). As a daemon
+ * the hub numbers what is worth replaying and keeps it, so an app that lost its connection gets exactly what it
+ * missed (transport.ts).
+ */
+const hub = new Hub({
+	replay: !!listenPath,
+	mode,
+	hostVersion: VERSION,
+	handle: (cmd) => handle(cmd as Command),
+	// Only tests shorten these.
+	pingIntervalMs: Number(process.env.GRIPHUB_PING_MS) || undefined,
+	idleTimeoutMs: Number(process.env.GRIPHUB_IDLE_MS) || undefined,
+});
+// The app that spawned us is connected from the first byte, so early records reach it.
+const stdio = listenPath ? undefined : hub.attach(stdioConn());
+
 function send(record: object) {
-	process.stdout.write(`${JSON.stringify(record)}\n`);
+	hub.emit(record);
+	if (server) notifyFor(record as Record<string, any>);
+}
+
+/** The launcher that runs bash inside the rootless container on a server (server/box/box). */
+const boxScript = process.env.GRIPHUB_BOX ?? join(griphubDir, "bin", "box");
+/** The rootless container the agent's shell runs in on a server. The phone's container is container.ts (proot). */
+const box = new PodmanBox({ script: boxScript, griphubDir });
+
+const envBytes = (name: string) => {
+	const n = Number(process.env[name]);
+	return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+
+/** Disk and memory. On a server a nearly full disk refuses new work; on a phone it is only reported. */
+const health = new Health({
+	path: workspace,
+	enforce: server,
+	limits: {
+		diskWarnBytes: envBytes("GRIPHUB_DISK_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskWarnBytes,
+		diskMinBytes: envBytes("GRIPHUB_DISK_MIN_BYTES") ?? DEFAULT_HEALTH_LIMITS.diskMinBytes,
+		memoryWarnBytes: envBytes("GRIPHUB_MEMORY_WARN_BYTES") ?? DEFAULT_HEALTH_LIMITS.memoryWarnBytes,
+	},
+	// Only a server tells anyone about it: on the phone `health` answers when asked, and nothing else changes.
+	onChange: server ? reportHealth : undefined,
+});
+
+/**
+ * Pushes to the phone through ntfy when nobody is looking at the app (notify.ts). Server only: on the phone the app
+ * makes its own notifications, and it is the app that is closed. Titles are generic, with nothing of the work in them.
+ */
+const notifier = new Notifier({
+	config: () => (server ? (integrations?.notifyConfig() ?? null) : null),
+	shouldSend: () => !hub.hasClient() || hub.clientInBackground(),
+	log: (m) => log(m),
+});
+
+function reportHealth(c: HealthChange) {
+	if (c.what === "disk") {
+		if (c.to === "ok") {
+			send({ type: "notice", message: `Disk space is back to normal (${humanBytes(c.freeBytes)} free).` });
+			return;
+		}
+		const critical = c.to === "critical";
+		send({
+			type: "notice",
+			message: critical
+				? `The disk is almost full (${humanBytes(c.freeBytes)} free). New prompts and tasks are refused until space is freed.`
+				: `Disk space is getting low (${humanBytes(c.freeBytes)} free).`,
+		});
+		void notifier.send("disk", critical ? "Disk is almost full" : "Disk space is low", { priority: critical ? 5 : 4, tags: ["warning"] });
+	} else if (c.to === "high") {
+		send({ type: "notice", message: `The host is using a lot of memory (${humanBytes(c.rssBytes)}).` });
+		void notifier.send("memory", "Host memory is high", { priority: 3, tags: ["warning"] });
+	}
+}
+
+/**
+ * Pushes for what the app would have shown as a notification itself (agent, approvals, background tasks, subagents).
+ * Every record passes through here on a server; the notifier drops what comes while someone is looking at the app.
+ */
+function notifyFor(record: Record<string, any>) {
+	switch (record.type) {
+		case "approval":
+			void notifier.send("approval", "Approval needed", { priority: 4, tags: ["raised_hand"] });
+			return;
+		case "agent_done":
+			if (!record.retrying) void notifier.send("agent_done", "Agent finished", { tags: ["white_check_mark"] });
+			return;
+		case "run_finished":
+			if (record.run?.status === "done") void notifier.send("run_done", "Task finished", { tags: ["white_check_mark"] });
+			else if (record.run?.status === "error") void notifier.send("run_error", "Task failed", { priority: 4, tags: ["x"] });
+			return;
+		case "subagent_finished": {
+			// The same switches as the app's own subagent notifications (Settings → Subagents).
+			const st = integrations?.settings ?? {};
+			const rec = record.subagent ?? {};
+			const limited = rec.status === "stopped" && ["time", "credit", "limit"].includes(rec.stopCode);
+			if (rec.status === "done" && st.subagentNotifyDone !== false) {
+				void notifier.send("subagent_done", "Subagent finished", { tags: ["white_check_mark"] });
+			} else if ((rec.status === "failed" || limited) && st.subagentNotifyFailed !== false) {
+				void notifier.send("subagent_failed", limited ? "Subagent hit its limit" : "Subagent failed", { priority: 4, tags: ["x"] });
+			}
+			return;
+		}
+		case "subagent_approval_request":
+			if (integrations?.settings.subagentNotifyApproval !== false) {
+				void notifier.send("subagent_approval", "Subagent needs approval", { priority: 4, tags: ["raised_hand"] });
+			}
+			return;
+	}
 }
 
 function log(...args: unknown[]) {
@@ -184,7 +324,10 @@ function state() {
 }
 
 /** Every session (chat or background run) is built the same way. */
-async function buildSession(sessionManager: SessionManager, opts: { interactive: boolean; onLimit: (reason: string) => void }) {
+async function buildSession(
+	sessionManager: SessionManager,
+	opts: { interactive: boolean; onLimit: (reason: string) => void; unattended?: Guard },
+) {
 	const cwd = sessionManager.getCwd();
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
@@ -195,6 +338,8 @@ async function buildSession(sessionManager: SessionManager, opts: { interactive:
 		extensionFactories: [
 			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+			// A server's background runs go on while nobody is there: what would need approval is refused instead.
+			...(opts.unattended ? [{ name: "griphub-unattended", factory: opts.unattended.extension, hidden: true }] : []),
 		],
 	});
 	await resourceLoader.reload();
@@ -255,6 +400,8 @@ function currentParent(title?: string): SubagentParent {
  */
 async function buildSubagentSession(opts: SubagentSessionFactoryOptions) {
 	const { cwd, profile, guard: subGuard, budgetExtension, onLimit, parent } = opts;
+	// Like a prompt: no new work on a server whose disk is nearly full. The subagent then fails with the reason.
+	await health.assertRoom();
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
@@ -490,12 +637,29 @@ async function reopenSession() {
 	await openSession(file ? SessionManager.open(file) : SessionManager.create(s.sessionManager.getCwd()));
 }
 
+/**
+ * The guard for a server's background runs, which nobody is watching: risky commands and writes outside the project
+ * are refused rather than asked about (guard.ts `deny_risky`). On the phone background runs have no guard, as before.
+ */
+function unattendedGuard(cwd: string): Guard {
+	const g = new Guard({
+		send: () => {},
+		checkpoint: async (dir, label) => {
+			await checkpoints.snapshot(dir, label);
+		},
+		cwd: () => cwd,
+	});
+	g.mode = "deny_risky";
+	return g;
+}
+
 /** A headless session for the background runner. */
 async function backgroundSession(cwd: string): Promise<RunSession> {
 	let error: string | undefined;
 	const { session: bg } = await buildSession(SessionManager.create(cwd || workspace), {
 		interactive: false,
 		onLimit: (reason) => (error = reason),
+		unattended: server ? unattendedGuard(cwd || workspace) : undefined,
 	});
 	bg.subscribe((e) => {
 		const m = (e as any).message;
@@ -505,6 +669,7 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 		sessionFile: bg.sessionFile,
 		prompt: async (text) => {
 			checkBudget();
+			await health.assertRoom();
 			await bg.prompt(text);
 		},
 		lastText: () => bg.getLastAssistantText(),
@@ -514,67 +679,16 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 	};
 }
 
-const AGENTS_MARKER = "<!-- griphub:managed (delete this line to keep your own edits) -->";
+/** The agent's shell is the server's box (server only). */
+function boxIsShell(): boolean {
+	return server && box.available && integrations?.settings.containerShell !== false;
+}
 
-/** Keeps the environment notes current, unless the user has taken the file over. */
+/** Keeps the environment notes current (agents-file.ts), unless the user has taken the file over. */
 function ensureAgentsFile() {
 	const path = join(agentDir, "AGENTS.md");
-	if (existsSync(path)) {
-		const current = readFileSync(path, "utf8");
-		const ours = current.includes(AGENTS_MARKER) || current.startsWith("# Environment\n\nYou are running inside GripHub AI Agent");
-		if (!ours) return;
-	}
-	writeFileSync(
-		path,
-		`${AGENTS_MARKER}
-# Environment
-
-You are running inside GripHub AI Agent, an Android app, on the user's phone.
-
-- The shell is Android's /system/bin/sh (mksh) with toybox utilities, not bash.
-  Prefer POSIX sh syntax. There is no sudo, apt or pkg.
-- On PATH: \`node\`, \`git\`, \`ssh\`, \`ssh-keygen\`, \`scp\`, \`rsync\`, \`curl\`, \`rg\`, \`fd\`.
-  With scp, pass \`-S ssh\`.
-- The workspace directory is ${workspace}. Projects live in subfolders of it.
-  Keep files inside it unless asked otherwise.
-- When the user has connected accounts in the app:
-  - GitHub: \`$GITHUB_TOKEN\` is set and git is already authenticated for
-    https://github.com (clone, pull, push work directly). Use the REST API
-    with curl for everything else (issues, PRs, repos).
-  - Vercel: \`$VERCEL_TOKEN\` is set for the Vercel REST API.
-  - Cloudflare: \`$CLOUDFLARE_API_TOKEN\` and \`$CLOUDFLARE_ACCOUNT_ID\` are set,
-    so wrangler in the Linux container works without logging in
-    (\`box -c 'npx wrangler deploy'\`, D1/KV/R2 commands), as does the REST API.
-  - SSH: saved servers are aliases in ~/.ssh/config, so \`ssh <name>\` works.
-    The device key is ~/.ssh/id_ed25519.
-- Linux container: when the user has installed one (Debian or Alpine, via
-  proot), \`box -c '<command>'\` runs a command inside it, and \`box\` alone opens
-  a shell. When it is enabled as your shell, every command already runs inside:
-  use \`apt-get install -y\` (Debian) or \`apk add\` (Alpine) to get Python,
-  Node.js, compilers and anything else. The home folder and workspace are the
-  same paths inside and out.
-- You have \`web_search\` and \`web_fetch\` tools. Use them before guessing how
-  to install or use something, and to look up unfamiliar errors. With a
-  Search1API key you also have \`web_screenshot\`, to see how a page looks
-  (e.g. to check a site you built after deploying it).
-- For tasks with three or more steps, call \`todo_write\` with your plan before
-  starting, and keep it current (one step in_progress, each marked completed
-  as soon as it is done). The user follows it in the app. In plan mode, write
-  the plan as text first; call \`todo_write\` once it is approved.
-- \`bash\` commands stop after ${BASH_TIMEOUT_SECONDS / 60} minutes unless you pass \`timeout\`
-  (in seconds); pass a longer one for slow installs or builds.
-- Dev servers: run them in the background (\`nohup npm run dev > dev.log 2>&1 &\`)
-  and print the URL (e.g. http://localhost:5173); the app offers a live
-  preview and a public link for any localhost port it sees.
-- Some actions need the user's approval in the app; if one is declined, ask
-  what they want instead rather than retrying.
-- There is no display server; do not try to open GUIs or browsers. The app can
-  preview HTML files you write.
-- Files listed after "Attached files:" in a message are part of it. A
-  \`pasted-text.txt\` there is text the user pasted into the message (the app
-  attaches long pastes as files): read it before you answer.
-`,
-	);
+	if (existsSync(path) && !isManaged(readFileSync(path, "utf8"))) return;
+	writeFileSync(path, agentsFileText({ mode, workspace, box: boxIsShell() }));
 }
 
 // ---------------------------------------------------------------------------
@@ -811,12 +925,26 @@ function restoreBackup(path: string) {
 const GITHUB_GIT_COMMANDS = new Set(["git_clone", "git_fetch", "git_pull", "git_push", "deploy", "sync_now", "ci_watch", "run_enqueue", "schedule_run"]);
 
 async function handle(cmd: Command): Promise<unknown> {
+	// Files and previews need no session, and the app may ask for them while one is being opened.
+	if (isFsCommand(cmd.type)) return runFsCommand(fsService, cmd);
+	if (cmd.type === "preview_serve") return preview.serve(cmd.dir);
+	if (cmd.type === "preview_stop") return { stopped: preview.stop(Number(cmd.port)) };
 	const s = session!;
 	const cwd = (cmd.dir as string | undefined) ?? s.sessionManager.getCwd();
 	if (GITHUB_GIT_COMMANDS.has(cmd.type)) await integrations.githubFresh();
 	switch (cmd.type) {
 		case "hello":
-			return { version: VERSION, node: process.version, agentDir, workspace, tools: s.getActiveToolNames(), ...state() };
+			return {
+				version: VERSION,
+				node: process.version,
+				agentDir,
+				workspace,
+				tools: s.getActiveToolNames(),
+				mode,
+				transport: listenPath ? "daemon" : "stdio",
+				protocol: PROTOCOL,
+				...state(),
+			};
 		case "state":
 			return state();
 
@@ -824,6 +952,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			// Remembered before anything can refuse it, so Try again knows what was asked.
 			lastPrompt = { text: cmd.text, images: cmd.images, sessionId: s.sessionId };
 			checkBudget();
+			// A server with a nearly full disk takes no new work (health.ts); on the phone this never refuses.
+			await health.assertRoom();
 			fallbackTried = false;
 			// Plan mode: ask for a plan first; tools that change things are blocked (guard.ts).
 			const text = guard.planMode
@@ -874,6 +1004,12 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "approval_reply":
 			guard.reply(cmd.approvalId, !!cmd.allow, !!cmd.always, cmd.key);
 			return null;
+		// What is still waiting for an answer, chat and subagents alike: an app that reconnects shows these again.
+		case "approvals_pending":
+			return [...guard.pendingApprovals(), ...subagents.pendingApprovals()];
+		case "host_restart":
+			if (!listenPath) throw new Error("Restarting is only available when the host runs as a daemon on a server");
+			return restartGate.request(cmd.whenIdle !== false);
 
 		// Subagents (subagent.ts). Creation is the parent model's job via the
 		// `subagent` tool; these commands are the app's controls for a live
@@ -1261,10 +1397,17 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "backup_restore":
 			return restoreBackup(cmd.path);
 
-		// Linux container (container.ts).
+		// Linux container. On the phone: container.ts (proot). On a server: the rootless Podman box (podmanbox.ts), which
+		// the setup script builds; the same commands serve both, so the screens do not need to know which one they talk to.
 		case "container_status":
-			return container.status(settingsManager.getShellPath());
+			return server ? box.status(settingsManager.getShellPath()) : container.status(settingsManager.getShellPath());
 		case "container_install": {
+			if (server) {
+				// "Install" on a server means building the image again.
+				guardBoxWork(cmd);
+				await box.rebuildImage(taskLog(cmd));
+				return box.status(settingsManager.getShellPath());
+			}
 			await container.install(cmd.distro as Distro, taskLog(cmd), integrations.settings.dns);
 			// On by default once installed, unless the user turned it off before.
 			if (integrations.settings.containerShell !== false) {
@@ -1275,17 +1418,61 @@ async function handle(cmd: Command): Promise<unknown> {
 			return container.status(settingsManager.getShellPath());
 		}
 		case "container_remove":
+			if (server) {
+				// "Remove" on a server throws the container away; the image and the box's home stay, and the next command
+				// makes a new one.
+				guardBoxWork(cmd);
+				await box.reset();
+				return box.status(settingsManager.getShellPath());
+			}
 			if (settingsManager.getShellPath() === container.shellPath) settingsManager.setShellPath(undefined);
 			container.remove();
 			await reopenSession();
 			return container.status(settingsManager.getShellPath());
 		case "container_enable":
+			if (server) {
+				if (cmd.on && !box.available) throw new Error("There is no box on this server");
+				settingsManager.setShellPath(cmd.on ? boxScript : undefined);
+				integrations.updateSettings({ containerShell: !!cmd.on });
+				ensureAgentsFile(); // the notes tell the agent where its commands run
+				await settingsManager.flush();
+				await reopenSession();
+				return box.status(settingsManager.getShellPath());
+			}
 			if (cmd.on && !container.status(undefined).installed) throw new Error("Install the container first");
 			settingsManager.setShellPath(cmd.on ? container.shellPath : undefined);
 			integrations.updateSettings({ containerShell: !!cmd.on });
 			await settingsManager.flush();
 			await reopenSession();
 			return container.status(settingsManager.getShellPath());
+		// Server only: the box.
+		case "box_check":
+			if (!server) throw new Error("Only a server has a box");
+			return box.check();
+		case "box_stop":
+			guardBoxWork(cmd);
+			await box.stop();
+			return box.status(settingsManager.getShellPath());
+		case "box_wipe_home":
+			guardBoxWork(cmd);
+			return { ...(await box.wipeHome()), status: await box.status(settingsManager.getShellPath()) };
+
+		// Disk, memory, and what is running: for the app's server screen.
+		case "health": {
+			const snap = await health.check();
+			const runs = runner.summary();
+			return {
+				...snap,
+				mode,
+				transport: listenPath ? "daemon" : "stdio",
+				epoch: hub.epoch,
+				uptimeSec: Math.round(process.uptime()),
+				node: process.version,
+				runs: { running: runs.running, queued: runs.runs.filter((r) => r.status === "queued").length },
+				subagents: subagents.busy(),
+				clientInBackground: hub.clientInBackground(),
+			};
+		}
 
 		// GripHub Router account data (router.ts), with the saved GripHub key.
 		case "router_account": {
@@ -1318,7 +1505,7 @@ async function handle(cmd: Command): Promise<unknown> {
 			return integrations.publicSettings();
 		case "settings_set": {
 			const out = integrations.updateSettings(cmd.settings ?? {});
-			container.setNameservers(integrations.settings.dns);
+			if (!server) container.setNameservers(integrations.settings.dns);
 			guard.mode = integrations.settings.approvalMode ?? "ask_risky";
 			return out;
 		}
@@ -1359,21 +1546,59 @@ function taskLog(cmd: Command): Log {
 	return log;
 }
 
-async function dispatch(line: string) {
-	let cmd: Command;
-	try {
-		cmd = JSON.parse(line);
-	} catch (e) {
-		send({ type: "response", ok: false, error: `Bad JSON: ${(e as Error).message}` });
-		return;
-	}
-	try {
-		const data = await handle(cmd);
-		send({ type: "response", id: cmd.id, ok: true, data });
-	} catch (e) {
-		send({ type: "response", id: cmd.id, ok: false, error: String((e as Error)?.message ?? e) });
-	}
+/**
+ * Nothing is in flight: no reply being written, no background run queued or running, no subagent waiting, working or
+ * stopping, and no approval waiting (chat or subagent). GripHub's subagents outlive the turn that started them, so the
+ * chat alone is not enough: restarting then would kill them (server_agent.md 4.9).
+ */
+function isIdle(): boolean {
+	const runs = runner?.summary();
+	return (
+		!session?.isStreaming &&
+		guard.pendingApprovals().length === 0 &&
+		!subagents?.busy() &&
+		!runs?.running &&
+		!runs?.runs.some((r) => r.status === "queued")
+	);
 }
+
+/** Changing the box kills whatever is running in it. Refuse while the agent is, unless the app says it is meant. */
+function guardBoxWork(cmd: Command) {
+	if (!server) throw new Error("Only a server has a box");
+	if (cmd.force === true) return;
+	const working = session?.isStreaming
+		? "The agent is working in the box right now."
+		: runner?.summary().running
+			? "A background task is running in the box."
+			: subagents?.busy()
+				? "A subagent is working in the box."
+				: null;
+	if (working) throw Object.assign(new Error(`${working} Stop it first, or do it anyway.`), { code: "busy" });
+}
+
+let shuttingDown = false;
+/** Ends the host. Subagents are stopped first, so each keeps a partial report instead of vanishing. */
+async function shutdown(code = 0) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	tunnels.stopAll();
+	health.stop();
+	preview?.stopAll();
+	// The phone's app force-kills the host 1.5 s after closing stdin (AgentRuntime.stop), so it only waits long enough for
+	// the subagents' "stopped" records to leave; a daemon has time for their partial reports.
+	await subagents?.stopAll(listenPath ? 5000 : 500).catch(() => {});
+	runner?.dispose();
+	void mcp?.dispose();
+	session?.dispose();
+	hub.close();
+	if (listenPath) {
+		rmSync(listenPath, { force: true });
+		rmSync(runningMarker, { force: true });
+	}
+	process.exit(code);
+}
+
+const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0) });
 
 // ---------------------------------------------------------------------------
 // Startup
@@ -1387,23 +1612,17 @@ async function main() {
 	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
 	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
 	// reaped by the app — the OS or user must kill that ssh.)
-	process.on("SIGTERM", () => {
-		tunnels.stopAll();
-		process.exit(0);
-	});
-	process.on("SIGINT", () => {
-		tunnels.stopAll();
-		process.exit(0);
-	});
+	for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown(0));
 	process.on("exit", () => tunnels.stopAll());
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(workspace, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
-	ensureAgentsFile();
 
-	// Route every lookup through DNS-over-HTTPS (configurable in settings).
+	// Route every lookup through DNS-over-HTTPS (configurable in settings; a server defaults to its own resolver).
 	installDohLookup();
-	integrations = new Integrations(agentDir, workspace);
+	integrations = new Integrations(agentDir, workspace, { server, boxScript: () => (box.available ? boxScript : null) });
+	// After the settings: on a server they say whether bash runs in the box, which the notes describe.
+	ensureAgentsFile();
 	integrations.onChange = () => send({ type: "integrations", summary: integrations.summary() });
 	// Keeps a GitHub App sign-in (8-hour tokens) fresh for git and the agent's shell, which read
 	// the token from git's config and $GITHUB_TOKEN rather than asking for it.
@@ -1416,7 +1635,15 @@ async function main() {
 	templates.seed(join(stateDir, "seeded-templates.json"));
 	checkpoints = new Checkpoints(join(stateDir, "checkpoints"));
 	container = new Container(process.env.GRIPHUB_FILES ?? join(agentDir, "..", "..", ".."));
-	mcp = new Mcp(join(stateDir, "mcp.json"), () => send({ type: "mcp", servers: mcp.summary() }));
+	mcp = new Mcp(
+		join(stateDir, "mcp.json"),
+		() => send({ type: "mcp", servers: mcp.summary() }),
+		server ? { shell: "/bin/sh", box: () => (box.available ? boxScript : "/bin/sh") } : undefined,
+	);
+	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
+	// read its disk any other way; on the phone the same commands work too, inside the same folders.
+	fsService = new Fs([{ path: workspace }, { path: join(agentDir, "skills"), readOnly: true }]);
+	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.GRIPHUB_PREVIEW_IDLE_MS) || undefined });
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
 	router = new Router({
@@ -1455,8 +1682,20 @@ async function main() {
 			};
 		},
 	});
+	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user
+	// turned that off. If the launcher went away, stop pointing at it.
+	if (server) {
+		const shell = settingsManager.getShellPath();
+		if (box.available && integrations.settings.containerShell !== false && shell !== boxScript) {
+			settingsManager.setShellPath(boxScript);
+			await settingsManager.flush();
+		} else if (shell === boxScript && !box.available) {
+			settingsManager.setShellPath(undefined);
+			await settingsManager.flush();
+		}
+	}
 	// Linux container is the agent's shell by default once installed.
-	if (
+	else if (
 		container.status(undefined).installed &&
 		integrations.settings.containerShell !== false &&
 		settingsManager.getShellPath() !== container.shellPath
@@ -1493,6 +1732,9 @@ async function main() {
 			await modelRuntime.refresh({ allowNetwork: false });
 		},
 		notify: (status) => send({ type: "sync", status }),
+		unavailable: server
+			? "GitHub sync is off on a server agent: the server keeps the one copy of the chats and projects. Move data between the phone and the server with a backup."
+			: undefined,
 	});
 	// Pick up what other phones synced while this one was off.
 	sync.schedule(20_000);
@@ -1506,27 +1748,34 @@ async function main() {
 		if (session && !session.isStreaming) return reopenSession().catch(() => {});
 	});
 
-	// Split on LF only; readline would also split on U+2028/U+2029.
-	let buffer = "";
-	process.stdin.setEncoding("utf8");
-	process.stdin.on("data", (chunk: string) => {
-		buffer += chunk;
-		let nl: number;
-		while ((nl = buffer.indexOf("\n")) >= 0) {
-			const line = buffer.slice(0, nl).replace(/\r$/, "");
-			buffer = buffer.slice(nl + 1);
-			if (line.trim()) void dispatch(line);
+	const readyRecord = { type: "ready", version: VERSION };
+	if (listenPath) {
+		// A daemon that was killed leaves its marker behind; finding it means the last run did not end cleanly.
+		mkdirSync(griphubDir, { recursive: true, mode: 0o700 });
+		if (existsSync(runningMarker)) {
+			send({ type: "notice", message: "The host was restarted unexpectedly (it was stopped without shutting down)." });
+			void notifier.send("restarted", "Host restarted unexpectedly", { priority: 4, tags: ["warning"] });
 		}
-	});
-	process.stdin.on("end", () => {
-		tunnels.stopAll();
-		runner.dispose();
-		void mcp.dispose();
-		session?.dispose();
-		process.exit(0);
-	});
-
-	send({ type: "ready", version: VERSION });
+		writeFileSync(runningMarker, `${process.pid} ${new Date().toISOString()}\n`, { mode: 0o600 });
+		// Listen last: a client that connects now finds everything above in place. stdin is not read at all (systemd
+		// gives the daemon /dev/null, whose end must not stop it).
+		hub.setReady(readyRecord);
+		await listenOnSocket(hub, listenPath);
+		log(`listening on ${listenPath}`);
+	} else {
+		// Split on LF only; readline would also split on U+2028/U+2029.
+		const lines = new LineBuffer();
+		process.stdin.setEncoding("utf8");
+		process.stdin.on("data", (chunk: string) => {
+			for (const line of lines.push(chunk)) stdio?.receive(line);
+		});
+		// The app closed our stdin: it is done with us.
+		process.stdin.on("end", () => void shutdown(0));
+		hub.setReady(readyRecord);
+	}
+	// A server is watched for a filling disk; a phone's storage is the user's business (the `health` command still
+	// answers there).
+	if (server) health.start();
 }
 
 main().catch((e) => {

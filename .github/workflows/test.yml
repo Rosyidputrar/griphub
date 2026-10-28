@@ -1,0 +1,111 @@
+# Runs the unit tests on every pull request and push to main:
+#   - agent/  : the Node host with node:test (cd agent && npm test), including the tests that start the real host
+#               process, phone mode on stdio and server mode on a unix socket, and the whole ssh chain through a
+#               private sshd on loopback (server_agent.md)
+#   - server/ : the setup scripts (shellcheck, and a real run of bootstrap.sh in a throwaway container)
+#   - app     : flutter analyze and flutter test (goldens included), with the server agent tests against the real Node
+#               host and a private sshd
+# The APK build lives in release.yml and is not a prerequisite for these.
+
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent:
+    name: Agent host (node:test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install
+        working-directory: agent
+        run: npm ci
+
+      # The ssh chain tests start a private sshd (loopback, throwaway keys) and must not be skipped here.
+      - name: Install sshd
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server openssh-client
+
+      # Some tests drive real git and rsync (the runner has both).
+      - name: Test
+        working-directory: agent
+        env:
+          GRIPHUB_REQUIRE_SSHD: "1"
+        run: npm test
+
+  server:
+    name: Server scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: shellcheck
+        run: shellcheck server/bootstrap.sh server/field-report.sh server/box/box server/test/*.sh
+
+      # Runs bootstrap.sh for real (apt, useradd, authorized_keys, the Node download) in a throwaway container.
+      - name: bootstrap.sh in a container (Ubuntu 24.04)
+        run: server/test/bootstrap-in-container.sh ubuntu:24.04
+
+  app:
+    name: Flutter app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # The server agent tests talk to the real Node host (built for the tests) through the real attach program, and
+      # run the whole ssh chain through a private sshd on loopback with rsync (throwaway keys): port forwards for
+      # previews and dev servers, terminal tabs on tmux, and backups brought over.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Test host for the app's server agent tests
+        working-directory: agent
+        run: |
+          npm ci
+          node test/build-harness.mjs
+
+      # tmux for the terminal tabs on a server, unzip to check a backup brought to the phone.
+      - name: Install sshd, rsync, tmux and unzip
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          openssh-server openssh-client rsync tmux unzip
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      # Those tests must run here, not skip: a missing Node side or sshd fails them.
+      - name: Test
+        env:
+          GRIPHUB_REQUIRE_NODE_SIDE: "1"
+        run: flutter test

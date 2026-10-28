@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -198,25 +198,33 @@ class _DeploySheetState extends State<_DeploySheet> {
   @override
   void initState() {
     super.initState();
-    if (target == DeployTarget.cloudflare) _suggestCloudflareFolder();
+    if (target == DeployTarget.cloudflare) unawaited(_suggestCloudflareFolder());
   }
 
   /// Cloudflare uploads files as they are, so point at the build output: an existing dist/build/out, or, for a
   /// project with a package.json and no wrangler config, dist after building it first.
-  void _suggestCloudflareFolder() {
+  Future<void> _suggestCloudflareFolder() async {
     if (folder.text.trim().isNotEmpty || !it.cloudflareConnected) return;
     final cwd = widget.agent.cwd;
+    final fs = widget.agent.fs;
+    Future<bool> has(String name) => fs.exists('$cwd/$name').catchError((Object _) => false);
     for (final d in ['dist', 'build', 'out']) {
-      if (Directory('$cwd/$d').existsSync()) {
-        folder.text = _suggested = d;
+      if (await has(d)) {
+        if (mounted && target == DeployTarget.cloudflare && folder.text.trim().isEmpty) folder.text = _suggested = d;
         return;
       }
     }
     // A folder that doesn't exist yet only makes sense when a build will create it.
-    final wrangler = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'].any((f) => File('$cwd/$f').existsSync());
-    if (!wrangler && hasContainer && File('$cwd/package.json').existsSync()) {
-      folder.text = _suggested = 'dist';
-      buildFirst = true;
+    var wrangler = false;
+    for (final f in ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml']) {
+      if (await has(f)) wrangler = true;
+    }
+    if (!wrangler && hasContainer && await has('package.json')) {
+      if (!mounted || target != DeployTarget.cloudflare || folder.text.trim().isNotEmpty) return;
+      setState(() {
+        folder.text = _suggested = 'dist';
+        buildFirst = true;
+      });
     }
   }
 
@@ -226,7 +234,7 @@ class _DeploySheetState extends State<_DeploySheet> {
   void _selectTarget(DeployTarget t) {
     target = t;
     if (t == DeployTarget.cloudflare) {
-      _suggestCloudflareFolder();
+      unawaited(_suggestCloudflareFolder());
     } else if (_suggested != null && folder.text.trim() == _suggested) {
       folder.clear();
       _suggested = null;
@@ -353,9 +361,9 @@ class _DeploySheetState extends State<_DeploySheet> {
                       setState(() {
                         hostId ??= it.hosts.firstOrNull?.id;
                         if (remotePath.text.isEmpty) remotePath.text = it.hosts.firstOrNull?.path ?? '';
-                        // Just connected Cloudflare: suggest its folder as on open.
-                        if (target == DeployTarget.cloudflare) _suggestCloudflareFolder();
                       });
+                      // Just connected Cloudflare: suggest its folder as on open.
+                      if (target == DeployTarget.cloudflare) unawaited(_suggestCloudflareFolder());
                     }
                   },
                   child: Text(tr('Open accounts & servers')),

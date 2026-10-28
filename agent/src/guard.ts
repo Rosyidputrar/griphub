@@ -5,16 +5,36 @@
  */
 
 import { homedir } from "node:os";
-import { resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export type ApprovalMode = "ask_all" | "ask_risky" | "auto";
+/**
+ * When the agent must ask before acting. `deny_risky` is for runs nobody is watching (a server's background tasks):
+ * what `ask_risky` would ask about is refused outright instead, since there is nobody to answer.
+ */
+export type ApprovalMode = "ask_all" | "ask_risky" | "auto" | "deny_risky";
+
+/** An approval card as the host sends it. */
+export interface ApprovalRecord {
+	type: "approval";
+	approvalId: string;
+	toolName: string;
+	summary: string;
+	reason: string;
+	key: string;
+}
 
 export interface GuardHooks {
 	send(record: object): void;
 	/** Snapshot the working tree before the agent's first file change in a run. */
 	checkpoint(cwd: string, label: string): Promise<void>;
 	cwd(): string;
+}
+
+/** Whether [path] is [dir] or somewhere inside it (lexically; resolve links first where they matter). */
+export function isInside(path: string, dir: string): boolean {
+	const rel = relative(resolve(dir), resolve(dir, path));
+	return rel === "" || (rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel));
 }
 
 /** Tools that change nothing; never need approval and stay on in plan mode. */
@@ -39,7 +59,11 @@ const RISKY_BASH = [
 	/\bDROP\s+(TABLE|DATABASE)\b|\bTRUNCATE\b/i,
 ];
 
-function riskOf(toolName: string, input: Record<string, unknown>, cwd: string): string | null {
+/**
+ * Why a call deserves a second look, or null. `mcp` says whether tools from MCP servers count: a person is asked about
+ * them, but an unattended run may use the servers the user set up (as background runs always could).
+ */
+function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
 	if (READ_ONLY.has(toolName)) return null;
 	if (toolName === "bash") {
 		const cmd = String(input.command ?? "");
@@ -56,7 +80,7 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string): 
 		return null;
 	}
 	// Unknown/custom tools (MCP and friends) are treated as risky.
-	return toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
+	return mcp && toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
 }
 
 /** Summary line for the approval card. */
@@ -72,7 +96,8 @@ export class Guard {
 	planMode = false;
 	/** "Always allow" choices for this app run, keyed by the full command/pattern. */
 	private allowed = new Set<string>();
-	private pending = new Map<string, (allow: boolean) => void>();
+	/** Waiting approvals with the record that asked, so an app that reconnects can show them again. */
+	private pending = new Map<string, { resolve: (allow: boolean) => void; record: ApprovalRecord }>();
 	/** Random per-process token: approval ids must never repeat across host restarts. */
 	private readonly epoch = Math.random().toString(36).slice(2, 8);
 	private next = 1;
@@ -81,32 +106,42 @@ export class Guard {
 	constructor(private readonly hooks: GuardHooks) {}
 
 	reply(id: string, allow: boolean, always = false, key?: string) {
-		const resolve = this.pending.get(id);
+		const waiting = this.pending.get(id);
 		this.pending.delete(id);
 		if (allow && always && key) this.allowed.add(key);
-		resolve?.(allow);
+		waiting?.resolve(allow);
 	}
 
 	/** Approval for something outside a tool call (e.g. an issue-triggered run). Reuses the same card and reply path; the empty key can never be "always"-allowed. */
 	askApproval(toolName: string, summary: string, reason: string): Promise<boolean> {
-		const id = `a${this.epoch}-${this.next++}`;
-		this.hooks.send({ type: "approval", approvalId: id, toolName, summary, reason, key: "" });
-		return new Promise<boolean>((resolve) => this.pending.set(id, resolve));
+		return this.request({ toolName, summary, reason, key: "" });
+	}
+
+	/**
+	 * The approvals still waiting for an answer, as the records that asked for them. A server agent's app may have been
+	 * away when they were sent (and the replay buffer may no longer hold them); it asks for these after reconnecting.
+	 */
+	pendingApprovals(): ApprovalRecord[] {
+		return [...this.pending.values()].map((w) => w.record);
 	}
 
 	/** Deny everything still waiting (e.g. when the run is aborted). */
 	cancelAll() {
-		for (const [id, resolve] of this.pending) {
+		for (const [id, waiting] of this.pending) {
 			this.hooks.send({ type: "approval_dismiss", approvalId: id });
-			resolve(false);
+			waiting.resolve(false);
 		}
 		this.pending.clear();
 	}
 
 	private ask(toolName: string, input: Record<string, unknown>, reason: string, key: string) {
-		const id = `a${this.epoch}-${this.next++}`;
-		this.hooks.send({ type: "approval", approvalId: id, toolName, summary: describe(toolName, input), reason, key });
-		return new Promise<boolean>((resolve) => this.pending.set(id, resolve));
+		return this.request({ toolName, summary: describe(toolName, input), reason, key });
+	}
+
+	private request(fields: Omit<ApprovalRecord, "type" | "approvalId">): Promise<boolean> {
+		const record: ApprovalRecord = { type: "approval", approvalId: `a${this.epoch}-${this.next++}`, ...fields };
+		this.hooks.send(record);
+		return new Promise<boolean>((resolve) => this.pending.set(record.approvalId, { resolve, record }));
 	}
 
 	/** The pi extension factory. */
@@ -136,7 +171,13 @@ export class Guard {
 				};
 			}
 
-			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : null;
+			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : this.mode === "deny_risky" ? riskOf(event.toolName, input, cwd, false) : null;
+			if (risk && this.mode === "deny_risky") {
+				return {
+					block: true,
+					reason: `Refused: nobody is watching this run, so actions that need approval are not allowed (${risk}). Do not look for a way around this; finish what you safely can and say what is left for the user.`,
+				};
+			}
 			if (risk) {
 				// "Always allow" stores the FULL pattern. Storing only the
 				// first two words let `cd app && git push` also allow

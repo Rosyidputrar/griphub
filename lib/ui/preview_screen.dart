@@ -11,7 +11,15 @@ import 'theme.dart';
 /// Renders HTML in a WebView. With [live], it re-renders as the source grows,
 /// so a page the agent is still writing builds up in front of the user.
 class HtmlPreviewScreen extends StatefulWidget {
-  const HtmlPreviewScreen({super.key, required this.title, required this.source, this.baseDir, this.live, this.url});
+  const HtmlPreviewScreen({
+    super.key,
+    required this.title,
+    required this.source,
+    this.baseDir,
+    this.baseUrl,
+    this.live,
+    this.url,
+  });
 
   /// A running server to show instead of HTML source (dev servers on localhost).
   final String? url;
@@ -29,6 +37,9 @@ class HtmlPreviewScreen extends StatefulWidget {
 
   /// Directory relative links (css, js, images) resolve against.
   final String? baseDir;
+
+  /// Or a web address they resolve against: the page as a server agent serves it (server_agent.md, phase 6).
+  final String? baseUrl;
   final Listenable? live;
 
   static Future<void> open(
@@ -36,11 +47,12 @@ class HtmlPreviewScreen extends StatefulWidget {
     required String title,
     required String Function() source,
     String? baseDir,
+    String? baseUrl,
     Listenable? live,
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => HtmlPreviewScreen(title: title, source: source, baseDir: baseDir, live: live),
+        builder: (_) => HtmlPreviewScreen(title: title, source: source, baseDir: baseDir, baseUrl: baseUrl, live: live),
       ),
     );
   }
@@ -101,7 +113,7 @@ class _HtmlPreviewScreenState extends State<HtmlPreviewScreen> {
     final html = widget.source();
     if (!force && html == loaded) return;
     loaded = html;
-    final base = widget.baseDir == null ? null : Uri.directory(widget.baseDir!).toString();
+    final base = widget.baseUrl ?? (widget.baseDir == null ? null : Uri.directory(widget.baseDir!).toString());
     controller.loadHtmlString(html, baseUrl: base);
   }
 

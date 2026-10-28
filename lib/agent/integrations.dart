@@ -178,6 +178,12 @@ class AppSettings {
   List<Map<String, dynamic>> get fallbackModels =>
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;
+
+  /// ntfy pushes from a server agent while the app is closed (agent/src/notify.ts). Off until turned on.
+  Map<String, dynamic> get _notify => (json['notify'] as Map?)?.cast<String, dynamic>() ?? const {};
+  bool get notifyEnabled => _notify['enabled'] == true;
+  String get notifyUrl => _notify['url'] as String? ?? 'https://ntfy.sh';
+  String? get notifyTopic => _notify['topic'] as String?;
 }
 
 /// Accounts, repositories, SSH and deploys, backed by the host's

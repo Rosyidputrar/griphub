@@ -124,7 +124,31 @@ object AgentRuntime {
             putAll(env)
             putAll(extraEnv)
         }
+        launch(pb)
+    }
 
+    /**
+     * Runs [argv] in place of the host: for a server agent, `ssh ... griphub-attach`, whose stdin and stdout carry the
+     * same JSONL as the phone's own host (server_agent.md). The store key stays on the phone: the server has its own.
+     */
+    @Synchronized
+    fun startRemote(context: Context, argv: List<String>, extraEnv: Map<String, String> = emptyMap()) {
+        if (isRunning) return
+        require(argv.isNotEmpty()) { "no command to run" }
+        // Preparing the environment is also what links ssh and rsync into bin/, so it comes before looking for them.
+        val env = prepareEnvironment(context)
+        require(File(argv[0]).canExecute()) { "${argv[0]} cannot be run" }
+        val pb = ProcessBuilder(argv).directory(File(paths(context).getValue("home")))
+        pb.environment().apply {
+            putAll(env)
+            putAll(extraEnv)
+            remove("GRIPHUB_STORE_KEY")
+        }
+        launch(pb)
+    }
+
+    /** Starts the process and wires its output, errors and exit to the listener. */
+    private fun launch(pb: ProcessBuilder) {
         val proc = pb.start()
         process = proc
         stdin = proc.outputStream
