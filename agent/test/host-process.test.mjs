@@ -239,8 +239,8 @@ test("server mode: a daemon that was killed says so after it comes back", async 
 	await c.until((r) => r.type === "ready");
 	// From the start of this daemon's buffer: the notice was sent before anyone connected.
 	await c.call("resume", { since: 0 });
-	const notice = await c.until((r) => r.type === "notice");
-	assert.match(notice.message, /restarted unexpectedly/);
+	// Other notices may come first (e.g. "No models available" on a fresh home); look for this one.
+	const notice = await c.until((r) => r.type === "notice" && /restarted unexpectedly/.test(r.message), 10_000, "for the restart notice");
 	assert.equal(typeof notice.seq, "number");
 });
 
