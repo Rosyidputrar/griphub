@@ -324,6 +324,19 @@ Uji di VPS hanya bisa dijalankan pemilik (sesi pengembangan tidak punya akses ke
 - Coexistence dengan CoderRa dicek dari skrip: akun, folder, soket, unit, image box, alias ssh, dan rentang subuid
   terpisah; Node yang sudah cukup baru dipakai bersama, tidak ditimpa.
 
+### 4.17 File setup server ikut di APK (setelah PR #9)
+
+Repo GripHub privat, jadi pengguna lain tidak bisa mengambil `server/` dari GitHub. Sekarang app membawanya sendiri:
+`agent/server-installer.mjs` membuat `griphub-setup.sh` (file-file `server/` di-gzip + base64 dalam satu skrip sh,
+masing-masing dengan SHA-256) dan `build.mjs` menaruhnya di bundle agent (`server/griphub-setup.sh`, tidak ikut disalin
+ke server saat Pasang / perbarui). Layar Agent server: **Salin perintah setup** menyalin satu tempelan
+(`cat > griphub-setup.sh <<'GRIPHUB_SETUP' … GRIPHUB_SETUP` lalu `sh griphub-setup.sh --pubkey … --address …`), dan
+**Atau bagikan file setup** mengirim file-nya ke app lain (SFTP). Skrip meminta sudo sendiri bila tidak dijalankan
+sebagai root, membongkar ke `~/griphub-server` (`field-report.sh` ikut), menolak file yang rusak sebelum apa pun
+berjalan, lalu menjalankan `bootstrap.sh`. Test: isi identik byte per byte dengan modenya, tempelan dijalankan seperti
+di terminal, tempelan yang kehilangan satu karakter berhenti, shellcheck pada skrip yang dibuat; layar: isi clipboard
+dan berkas yang dibagikan.
+
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 
 | Layar | Pemakaian `dart:io` | Perubahan |

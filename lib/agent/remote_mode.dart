@@ -104,9 +104,26 @@ class RemoteMode extends ChangeNotifier {
   /// The app's public key for the server, made on first use.
   Future<String> publicKey() => setup!.ensureKey(env: _env);
 
-  /// The command the user runs on their server.
+  /// The command the user runs on their server, next to the setup script.
   Future<String> bootstrapCommand({String? address}) async =>
       setup!.bootstrapCommand(await publicKey(), address: address);
+
+  /// The setup script this app carries (the server/ folder in one file, built into the agent bundle), or null when
+  /// the bundle has none.
+  File? get setupScript {
+    final dir = hostDir;
+    if (dir == null) return null;
+    final f = File('$dir/server/${RemoteSetup.setupFileName}');
+    return f.existsSync() ? f : null;
+  }
+
+  /// Everything the server needs, as one paste for its terminal: the setup script and the command that runs it. Null
+  /// when this app carries no setup script.
+  Future<String?> setupPaste({String? address}) async {
+    final script = setupScript;
+    if (script == null) return null;
+    return RemoteSetup.setupPaste(await script.readAsString(), await bootstrapCommand(address: address));
+  }
 
   /// Reads a pasted setup code and keeps the server (not yet in use). Throws [FormatException] with the reason.
   RemoteProfile saveCode(String text) {

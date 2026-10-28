@@ -354,6 +354,26 @@ class _ServerScreenState extends State<ServerScreen> {
     return 'griphub-${List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
   }
 
+  /// Sends the setup script to another app (an SFTP client, say), to put it on the server that way.
+  Future<void> _shareSetup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await agent.client.shareFile(agent.remote.setupScript!.path);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  /// Copies the setup script and the command that runs it as one paste for the server's terminal.
+  Future<void> _copySetup() async {
+    try {
+      final paste = await agent.remote.setupPaste(address: address.text.trim());
+      if (paste != null) await _copy(paste, tr('setup command'));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   Future<void> _copy(String text, String what) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Copied')}: $what')));
@@ -479,7 +499,9 @@ class _ServerScreenState extends State<ServerScreen> {
       SectionLabel(tr('1 · Set up the server')),
       Text(
         tr(
-          'On the server (Ubuntu or Debian) run bootstrap.sh from the server/ folder of the GripHub repository, as root, with this app\'s key:',
+          agent.remote.setupScript != null
+              ? 'On the server (Ubuntu or Debian), as root or an account with sudo: paste the setup command into its terminal. It carries the setup files and this app\'s key; nothing has to be downloaded.'
+              : 'On the server (Ubuntu or Debian) run bootstrap.sh from the server/ folder of the GripHub repository, as root, with this app\'s key:',
         ),
         style: text.bodySmall,
       ),
@@ -521,6 +543,25 @@ class _ServerScreenState extends State<ServerScreen> {
             ],
           ),
         ),
+      if (command != null && agent.remote.setupScript != null) ...[
+        const SizedBox(height: 10),
+        PrimaryButton(label: tr('Copy setup command'), icon: LucideIcons.clipboardCopy, onPressed: _copySetup),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _shareSetup,
+            icon: const Icon(LucideIcons.share2, size: 16),
+            label: Text(tr('Share the setup file instead')),
+          ),
+        ),
+        Text(
+          tr(
+            'The setup command is the file and the line above in one paste. Or send the file to the server (for example with an SFTP app) and run the line above next to it.',
+          ),
+          style: text.bodySmall,
+        ),
+      ],
       SectionLabel(tr('2 · Paste the setup code')),
       Text(
         tr('The script prints it at the end. The app trusts exactly that server and nothing that only looks like it.'),

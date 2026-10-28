@@ -177,13 +177,26 @@ void main() {
     test('the command shown for the server is safe to paste', () {
       expect(
         setup.bootstrapCommand('ssh-ed25519 AAAA griphub-app', address: 'agent.example.com'),
-        "sudo ./bootstrap.sh --pubkey 'ssh-ed25519 AAAA griphub-app' --address 'agent.example.com'",
+        "sh griphub-setup.sh --pubkey 'ssh-ed25519 AAAA griphub-app' --address 'agent.example.com'",
       );
       expect(
         setup.bootstrapCommand("ssh-ed25519 AAAA it's"),
-        "sudo ./bootstrap.sh --pubkey 'ssh-ed25519 AAAA it'\\''s'",
+        "sh griphub-setup.sh --pubkey 'ssh-ed25519 AAAA it'\\''s'",
       );
     });
+
+    test(
+      'the setup paste writes the script the app carries, then runs it; a script that could end it early is refused',
+      () {
+        final paste = RemoteSetup.setupPaste('#!/bin/sh\necho hi\n', "sh griphub-setup.sh --pubkey 'k'");
+        expect(
+          paste,
+          "cat > griphub-setup.sh <<'GRIPHUB_SETUP'\n#!/bin/sh\necho hi\nGRIPHUB_SETUP\nsh griphub-setup.sh --pubkey 'k'\n",
+        );
+        expect(RemoteSetup.setupPaste('no newline', 'x'), contains('no newline\nGRIPHUB_SETUP\n'));
+        expect(() => RemoteSetup.setupPaste('a\nGRIPHUB_SETUP\nrm -rf /\n', 'x'), throwsArgumentError);
+      },
+    );
 
     test('the profile survives a restart, and a damaged file is ignored', () {
       final store = RemoteProfileStore(File('${home.path}/.griphub/remote.json'));

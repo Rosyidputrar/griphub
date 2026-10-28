@@ -54,6 +54,10 @@ void main() {
   void configure({bool saved = false, bool active = false}) {
     final store = RemoteProfileStore(File('${tmp.path}/home/.griphub/remote.json'));
     if (saved) store.save(RemoteProfile.fromSetupCode(SetupCode.parse(_code())).copyWith(active: active));
+    // The setup script the agent bundle carries.
+    File('${tmp.path}/host/server/griphub-setup.sh')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('#!/bin/sh\n');
     agent.remote.configure(setup: _StubSetup('${tmp.path}/home'), store: store, hostDir: '${tmp.path}/host');
   }
 

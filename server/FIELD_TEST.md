@@ -8,23 +8,17 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 
 ## 0. Persiapan
 
-- [ ] **APK dari PR #9**: GitHub → Actions → run "Release APK" terbaru untuk PR #9 → bagian *Artifacts* →
-      `griphub-pr-9` (zip berisi APK per ABI). Pasang `griphub-…-arm64-v8a.apk` (HP modern). Ditandatangani dengan kunci
-      rilis yang sama, jadi terpasang di atas versi yang ada tanpa menghapus data.
-- [ ] **Folder `server/` ke VPS**: repo ini privat, jadi salin dari komputer Anda (atau unduh ZIP branch
-      `ccr-691d6b80-o39hpy` dari GitHub lalu ekstrak):
-      ```
-      scp -r server/ root@agentai:~/griphub-server
-      ```
+- [ ] **APK** versi terbaru (pembaruan di app, atau rilis terbaru). File setup server sudah ada di dalamnya.
 - [ ] Catat kondisi awal di VPS: `free -m`, `df -h /`, dan apakah CoderRa sedang berjalan.
 
 ## 1. Pasang
 
-- [ ] App: Pengaturan (Settings) → Data & keamanan → **Agent server** (Server agent) → isi alamat VPS → salin perintah yang ditampilkan.
-- [ ] VPS: `cd ~/griphub-server && bash bootstrap.sh --dry-run --pubkey '…' --address '…'`. Tidak ada peringatan
-      "written for Ubuntu and Debian"; ada baris `host key:`.
-- [ ] VPS: `sudo bash bootstrap.sh --pubkey '…' --address '…'`. Selesai tanpa error; mencetak `griphub1:…`.
-      Catat berapa lama (paket, Node, image box).
+- [ ] App: Pengaturan (Settings) → Data & keamanan → **Agent server** (Server agent) → isi alamat VPS →
+      **Salin perintah setup**.
+- [ ] VPS (aplikasi SSH, sebagai root atau akun dengan sudo): tempel. File terbongkar di `~/griphub-server` tanpa pesan
+      "arrived damaged"; tidak ada peringatan "written for Ubuntu and Debian"; ada baris `host key:`. Selesai tanpa
+      error dan mencetak `griphub1:…`. Catat berapa lama (paket, Node, image box).
+- [ ] Coba juga **Atau bagikan file setup**: file `griphub-setup.sh` bisa dikirim ke aplikasi lain.
 - [ ] App: tempel setup code → **Tes koneksi** (Test connection) → "Tersambung. Agent belum dipasang di server…".
 - [ ] App: **Pasang / perbarui agent** (Install / update agent) → selesai; **Pakai agent server** (Use the server agent) → chip di chat berubah menjadi **Server**.
 - [ ] Bila CoderRa terpasang: CoderRa tetap tersambung dan bekerja seperti biasa setelah langkah ini.
@@ -54,7 +48,7 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 
 ## 5. Subagent paralel dan memori
 
-- [ ] Jalankan `sudo bash field-report.sh --since "10 minutes ago"` di VPS: catat `MemoryCurrent` sebagai awal.
+- [ ] Jalankan `sudo bash ~/griphub-server/field-report.sh --since "10 minutes ago"` di VPS: catat `MemoryCurrent` sebagai awal.
 - [ ] Minta 3 subagent paralel (mis. tiga analisis repo berbeda). Kartu subagent bergerak; catat `MemoryPeak` dari
       `field-report.sh` setelahnya (batas 2 GB).
 - [ ] Saat subagent bekerja, putuskan HP (mode pesawat 2 menit): setelah tersambung, status subagent benar,
