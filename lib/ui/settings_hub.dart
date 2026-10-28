@@ -12,6 +12,7 @@ import 'accounts_screen.dart';
 import 'backup_screen.dart';
 import 'chat_extras.dart';
 import 'container_screen.dart';
+import 'server_screen.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'illustration.dart';
@@ -345,6 +346,17 @@ class _SettingsHubState extends State<SettingsHub> {
               SectionLabel(tr('Data & security')),
               SettingsGroup(
                 children: [
+                  SettingsRow(
+                    icon: LucideIcons.server,
+                    color: const Color(0xFF0F766E),
+                    title: tr('Server agent'),
+                    subtitle: agent.remote.active
+                        ? tr('The agent runs on your server')
+                        : agent.remote.configured
+                        ? tr('Set up; this phone runs the agent')
+                        : tr('Run the agent on your own VPS, around the clock'),
+                    onTap: () => _open(ServerScreen(agent: agent)),
+                  ),
                   SettingsRow(
                     icon: LucideIcons.refreshCw,
                     color: const Color(0xFF16A34A),

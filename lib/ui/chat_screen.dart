@@ -23,6 +23,7 @@ import 'mesh.dart';
 import 'model_sheet.dart';
 import 'tasks_screen.dart';
 import 'terminal_screen.dart';
+import 'server_screen.dart';
 import 'settings_screen.dart';
 import 'folder_picker.dart';
 import 'subagent_card.dart';
@@ -371,6 +372,8 @@ class _ChatScreenState extends State<ChatScreen> {
               : null,
           title: _Title(agent: agent),
           actions: [
+            // Phone or server, and whether the server can be reached; only once a server is set up.
+            ConnectionChip(agent: agent),
             IconButton(
               tooltip: tr('Terminal'),
               icon: const Icon(LucideIcons.squareTerminal, size: 20),
@@ -392,6 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         body: Column(
           children: [
+            ConnectionBanner(agent: agent),
             Expanded(
               child: Stack(
                 children: [

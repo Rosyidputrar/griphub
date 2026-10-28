@@ -1,6 +1,6 @@
 # server_agent.md — GripHub: agent berjalan di VPS (porting dari CoderRa)
 
-Status: fase 1–3 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 4–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
+Status: fase 1–4 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 5–7 belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
 (`seseegy/coderra` 5071362, dokumen `update_agent.md` plus kodenya). Mode server CoderRa sudah dipakai pemilik di
 VPS sungguhan dan berjalan baik. Yang diambil hanya **cara kerja server**; fitur agent tetap milik GripHub karena lebih
 maju (subagent asinkron, billing GripHub Router, approval, todo, GitHub sync, Cloudflare).
@@ -224,6 +224,28 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
   (`server-scripts.test.mjs`); shellcheck bersih. Job CI `server` menjalankan shellcheck dan bootstrap di container.
 - Belum: box dengan Podman sungguhan (di sandbox, Podman rootless bertingkat ditolak `/dev/net/tun`), `--harden-ssh`,
   AppArmor. Diuji di fase 7 di `agentai`.
+
+### 4.13 Dikerjakan di fase 4
+
+- Dart: `agent_backend.dart` (`PlatformBackend`/`ProcessBackend`), `AgentClient` dengan sambung ulang (backoff 1/2/4/8/16/30 s),
+  `resume`, dedup `seq`, `kicked`, jawaban `ping` + flag latar belakang, `AgentError.code` (`offline`, `connection_lost`).
+  `remote_profile.dart` (setup code `griphub1:`, kunci `~/.ssh/griphub_vps`, config `griphub_config` dengan host key dipin,
+  cek server, instal lewat rsync), `remote_mode.dart` (simpan/pakai/lupakan server, cek versi `.stamp`).
+- Instal/perbarui saat app tersambung ke server memakai `host_restart {whenIdle:true}`, jadi chat, subagent, dan run yang
+  sedang jalan tidak terpotong; tanpa koneksi, layanan di-restart lewat ssh.
+- Controller: di mode server `exit` = koneksi putus (bukan host mati), tidak ada layar gagal; `resync` saat gap memuat ulang
+  state, chat, subagent, approval (`approvals_pending`, chat dan subagent), dan run. Saat app baru dibuka dan tersambung,
+  approval yang menunggu juga dimuat. `setBusy`/`keepAlive` tidak dipanggil di mode server.
+- Ditemukan dan diperbaiki: `Features` dibuat saat pertama dipakai, sehingga record approval yang datang lebih dulu hilang;
+  sekarang dibuat bersama controller.
+- Kotlin: `startRemote` (tanpa `GRIPHUB_STORE_KEY`), `environment` pindah dari UI thread (ekstrak bundle bisa lama).
+- UI: layar **Agent server** (Settings → Data & keamanan), chip HP/Server dan banner koneksi di chat, layar gagal-boot mode
+  server dengan "Pakai agent di HP ini", teks EN/ID. Golden: terang/gelap, EN/ID, 320 dp × 1,3.
+- Test Dart: link dengan server tiruan (15), daemon Node asli lewat attach asli (10), controller termasuk subagent yang
+  selesai/minta approval saat HP terputus (5), resync gap (5), profil (16), rantai ssh asli dengan sshd + rsync (7),
+  `RemoteMode` (4), layar (18), golden (9). Model tiruan lewat preload `fetch` (`agent/test/fixtures/router-redirect.mjs`),
+  kunci provider tidak dilonggarkan. Di CI wajib jalan (`GRIPHUB_REQUIRE_NODE_SIDE=1`).
+- Belum: Kotlin dan ssh/rsync bawaan app di HP sungguhan (diuji di fase 7).
 
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 

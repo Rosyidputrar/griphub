@@ -269,6 +269,9 @@ class Features extends ChangeNotifier {
         notifyListeners();
       case 'exit':
       case 'fatal':
+        // A server agent's link dropped: the host is still there and its approvals still wait. Reconnecting replays
+        // what changed, or, when it cannot, the controller reloads them (replaceApprovals).
+        if (r['type'] == 'exit' && client.isRemote) return;
         // The host process is gone: any card left on screen belongs to a
         // dead process, and its id must never answer a new process's approval.
         approvals.clear();
@@ -308,7 +311,8 @@ class Features extends ChangeNotifier {
   }
 
   void _updateKeepAlive() {
-    final next = _runsKeepAlive || chatBusy;
+    // A server agent works on the server; the phone has nothing to keep alive for it.
+    final next = !client.isRemote && (_runsKeepAlive || chatBusy);
     if (keepAlive == next) return;
     keepAlive = next;
     unawaited(client.keepAlive(keepAlive, text: _keepAliveText()));
@@ -346,6 +350,15 @@ class Features extends ChangeNotifier {
   // Approvals & plan mode -----------------------------------------------------
   /// Ids already answered: a double-tap on a card must never answer twice.
   final _answered = <String>{};
+
+  /// Puts the chat's waiting approvals back as the host lists them (`approvals_pending`), after a server link could
+  /// not replay what it missed.
+  void replaceApprovals(Iterable<Map<String, dynamic>> records) {
+    approvals
+      ..clear()
+      ..addAll(records.where((r) => r['type'] == 'approval' && !_answered.contains(r['approvalId'])).map(Approval.new));
+    notifyListeners();
+  }
 
   Future<void> answer(Approval a, {required bool allow, bool always = false}) async {
     if (!_answered.add(a.id)) return;

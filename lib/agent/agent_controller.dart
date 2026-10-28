@@ -6,6 +6,7 @@ import 'agent_client.dart';
 import 'features.dart';
 import 'integrations.dart';
 import 'models.dart';
+import 'remote_mode.dart';
 import 'sent_attachments.dart';
 import 'subagent_notifications.dart';
 import 'subagents.dart';
@@ -16,13 +17,19 @@ enum BootStatus { starting, ready, failed }
 /// App-wide agent state: boot, the active session's transcript rebuilt from
 /// pi's event stream, and model/provider selection.
 class AgentController extends ChangeNotifier {
-  AgentController(this.client) {
+  AgentController(this.client) : features = Features(client) {
     client.records.listen(_onRecord);
   }
 
   final AgentClient client;
   late final integrations = Integrations(client);
-  late final features = Features(client);
+
+  /// Made with the controller, not on first use: it keeps approvals and runs from the host's records, and one that
+  /// arrived before anything looked at it would be lost.
+  final Features features;
+
+  /// The server agent, when the user set one up (server_agent.md). The phone's own agent otherwise.
+  late final remote = RemoteMode(this);
 
   BootStatus status = BootStatus.starting;
   String? bootError;
@@ -69,6 +76,8 @@ class AgentController extends ChangeNotifier {
   set inBackground(bool v) {
     if (v == _inBackground) return;
     _inBackground = v;
+    // A server agent hears it in its next ping and pushes instead of staying quiet (notify.ts).
+    client.inBackground = v;
     unawaited(_syncRunningNotification());
   }
 
@@ -133,6 +142,50 @@ class AgentController extends ChangeNotifier {
       subagentStore.applyRecord({'type': 'subagent_started', 'subagent': rec});
       if (rec['status'] != 'queued' && rec['status'] != 'running' && rec['status'] != 'waiting_approval' && rec['status'] != 'stopping') {
         subagentStore.applyRecord({'type': 'subagent_finished', 'subagent': rec});
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Reloads everything after a server link came back without being able to replay what it missed (the buffer had
+  /// moved on, or the server's host was restarted): the chat, subagents, approvals still waiting, and background runs.
+  /// On the phone this never happens.
+  Future<void> resync() async {
+    try {
+      _applyState(await client.call<Map<String, dynamic>>('state'));
+      _streaming = null;
+      await loadHistory();
+      await refreshSubagents();
+      await restoreApprovals();
+      await features.refreshRuns().catchError((_) {});
+      unawaited(integrations.refresh().catchError((_) {}));
+      notifyListeners();
+    } catch (_) {
+      // Dropped again before it finished: the next reconnect asks again.
+    }
+  }
+
+  /// Shows again what still waits for an answer, chat and subagents alike (`approvals_pending`), and forgets cards the
+  /// host no longer waits on.
+  Future<void> restoreApprovals() async {
+    final pending = (await client.call<List>('approvals_pending'))
+        .whereType<Map>()
+        .map((m) => m.cast<String, dynamic>())
+        .toList();
+    features.replaceApprovals(pending);
+    final waiting = {
+      for (final r in pending.where((r) => r['type'] == 'subagent_approval_request')) r['subagentId'] as String?: r,
+    };
+    for (final s in subagentStore.all) {
+      final r = waiting[s.id];
+      if (r != null) {
+        subagentStore.applyRecord(r);
+      } else if (s.approval != null) {
+        subagentStore.applyRecord({
+          'type': 'subagent_approval_dismiss',
+          'subagentId': s.id,
+          'approvalId': s.approval!.approvalId,
+        });
       }
     }
     notifyListeners();
@@ -239,7 +292,8 @@ class AgentController extends ChangeNotifier {
       unawaited(integrations.refresh().then((_) => integrations.refreshProjects()).catchError((_) {}));
       // Notification toggles and limits must be known before the first subagent record.
       unawaited(integrations.refreshSettings().then((_) {}).catchError((_) {}));
-      unawaited(refreshSubagents().catchError((_) {}));
+      // A server agent may have been waiting for answers while the app was closed: show them again.
+      unawaited(refreshSubagents().then((_) => client.isRemote ? restoreApprovals() : null).catchError((_) {}));
       status = BootStatus.ready;
     } catch (e) {
       status = BootStatus.failed;
@@ -566,6 +620,12 @@ class AgentController extends ChangeNotifier {
         notifyListeners();
       case 'error':
         _addNotice(readableError(record['message'] as String? ?? 'Error'), error: true);
+      // A server link that could not replay what it missed: reload instead.
+      case 'resync':
+        unawaited(resync());
+      // On a server agent an exit is the link dropping, not the host: the client reconnects by itself.
+      case 'exit' when client.isRemote:
+        break;
       case 'exit':
         if (status == BootStatus.ready) {
           status = BootStatus.failed;
@@ -736,7 +796,8 @@ class AgentController extends ChangeNotifier {
   void _setBusy(bool value) {
     if (busy == value) return;
     busy = value;
-    client.setBusy(value);
+    // The foreground service keeps this phone's agent alive; a server agent needs nothing from the phone.
+    if (!client.isRemote) client.setBusy(value);
     features.setChatBusy(value);
   }
 
