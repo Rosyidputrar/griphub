@@ -1,6 +1,6 @@
 # server_agent.md — GripHub: agent berjalan di VPS (porting dari CoderRa)
 
-Status: fase 1–6 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 7 (uji di VPS) belum. Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
+Status: fase 1–6 selesai di branch `ccr-691d6b80-o39hpy` (draft PR #9); fase 7 disiapkan dan menunggu uji pemilik di VPS (`server/FIELD_TEST.md`). Disusun dari pembacaan kode GripHub (`main` 4d0333e) dan mode server CoderRa
 (`seseegy/coderra` 5071362, dokumen `update_agent.md` plus kodenya). Mode server CoderRa sudah dipakai pemilik di
 VPS sungguhan dan berjalan baik. Yang diambil hanya **cara kerja server**; fitur agent tetap milik GripHub karena lebih
 maju (subagent asinkron, billing GripHub Router, approval, todo, GitHub sync, Cloudflare).
@@ -303,6 +303,26 @@ Pemilik menyatakan subagent CoderRa rusak dan penuh bug. Pemeriksaan kode CoderR
   (4). Mutasi: 6/6 tertangkap. CI app memasang `tmux` dan `unzip`.
 - Belum diuji di sini: `Pty` (flutter_pty) dan WebView hanya ada di HP, jadi kode layar Terminal dan tampilan pratinjau
   diuji di fase 7; yang diuji di sini adalah perintah ssh/tmux, forward, dan alamat yang diberikan ke layar.
+
+### 4.16 Fase 7: yang disiapkan untuk uji lapangan
+
+Uji di VPS hanya bisa dijalankan pemilik (sesi pengembangan tidak punya akses ke `agentai`). Yang disiapkan:
+
+- `server/FIELD_TEST.md`: checklist langkah demi langkah dengan hasil yang diharapkan: pasang, chat, putus-sambung,
+  approval dan ntfy saat app tertutup, subagent paralel dan memori, file/editor/lampiran, pratinjau dan dev server,
+  terminal tmux, backup, deploy, update saat sibuk, kembali ke mode HP, soak 24 jam, berdampingan dengan CoderRa.
+- `server/field-report.sh` (root, hanya membaca): status layanan dan `NRestarts`, `MemoryCurrent`/`MemoryPeak`,
+  linger, versi host, socket, proses terbesar, ukuran data, sesi tmux, image dan container box, OOM kill, peringatan
+  dan kejadian penting di log sejak `--since`; sama untuk CoderRa bila terpasang. Tidak mencetak kunci, token, atau
+  isi file. Dicoba utuh terhadap layanan user systemd sungguhan di container (status, linger, versi, log peringatan
+  tersaring); penolakan input dan non-root diuji di `server-scripts.test.mjs`; shellcheck di CI.
+- `docs/privacy.html` (EN/ID) dan README: bagian mode server (apa yang ada di server, apa yang di HP, SSH dengan host
+  key dipin dan forward hanya ke loopback, cara berhenti) dan baris ntfy (opsional, hanya judul umum, dari server).
+  Tanggal berlaku 28 Oktober 2026; sesuaikan bila penggabungan ke `main` jauh setelahnya.
+- Ditemukan saat menyiapkan: `TestSshd` meninggalkan proses sesi sshd setelah test (anak sshd tidak ikut dimatikan);
+  sekarang dimatikan lebih dulu.
+- Coexistence dengan CoderRa dicek dari skrip: akun, folder, soket, unit, image box, alias ssh, dan rentang subuid
+  terpisah; Node yang sudah cukup baru dipakai bersama, tidak ditimpa.
 
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 

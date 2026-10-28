@@ -22,7 +22,7 @@
 
 <main class="narrow doc">
   <h1>Privacy Policy</h1>
-  <p class="updated">Effective 29 September 2026 · App: GripHub (id.griphub.agent)</p>
+  <p class="updated">Effective 28 October 2026 · App: GripHub (id.griphub.agent)</p>
   <nav class="lang" aria-label="Language">
     <a href="#english" aria-current="true">English</a>
     <a href="#indonesia">Bahasa Indonesia</a>
@@ -31,7 +31,7 @@
   <!-- ============================== ENGLISH ============================== -->
   <section id="english" lang="en">
     <div class="summary">
-      <p><strong>In short:</strong> GripHub runs on your phone. The app developer does not collect, receive, sell or share any of your data, runs no server of his own, and includes no ads, analytics, trackers or crash reporters. Data leaves your phone when you chat — every chat goes to the built-in AI provider, GripHub Router (griphubrouter.web.id) — or when you connect another service (GitHub, Vercel, your own servers) or ask the agent to use the internet, and it goes directly to that service.</p>
+      <p><strong>In short:</strong> GripHub runs on your phone. The app developer does not collect, receive, sell or share any of your data, runs no server of his own, and includes no ads, analytics, trackers or crash reporters. Data leaves your phone when you chat — every chat goes to the built-in AI provider, GripHub Router (griphubrouter.web.id) — or when you connect another service (GitHub, Vercel, your own servers) or ask the agent to use the internet, and it goes directly to that service. If you choose server mode, the agent runs on a server of your own instead of your phone; the developer still runs no server and receives nothing.</p>
     </div>
 
     <h2>Who we are</h2>
@@ -50,6 +50,15 @@
     </ul>
     <p>A backup file is created only when you ask for one, and it is saved where you choose. It can contain your chats, settings and credentials, so keep it somewhere safe.</p>
 
+    <h2>Server mode (optional)</h2>
+    <p>You can run the agent on a server you control (for example a VPS you rent) instead of on your phone. Nothing changes unless you set this up yourself, with a script you run on your server.</p>
+    <ul>
+      <li><strong>On your server:</strong> the agent, your chats and agent sessions, settings, skills, schedules, project files, the Linux container, and the credentials you add while using server mode. Credentials are encrypted with AES-256-GCM using a key file that only the agent's account on your server can read. Backups you make in server mode are saved on your server until you download them.</li>
+      <li><strong>On your phone:</strong> the server's address and host key, an SSH key the app creates for reaching it (it never leaves the phone; you copy only its public half to the server), and copies of files you open, share or download from the server.</li>
+      <li><strong>Between them:</strong> everything goes over SSH, encrypted end to end between your phone and your server. The app checks the server's host key on every connection. The key you add for the app is restricted on the server: port forwarding with it can only reach the server's own loopback, never other machines.</li>
+      <li>In server mode, the services in the table below are contacted <em>from your server</em> instead of from your phone, with the same data.</li>
+      <li>To stop, choose "Forget this server" in the app (this deletes the app's key and server details from the phone), then remove the key or the agent's account on your server.</li>
+    </ul>
     <h2>Data sent to services you choose</h2>
     <p>GripHub connects to other services only to do what you ask. Data goes straight from your phone to that service and is handled under that service's own privacy policy.</p>
     <div class="table">
@@ -68,6 +77,8 @@
           <tr><td>Skill sources (GitHub, skills.md, agentskills.io)</td><td>When you search or install skills</td><td>Your search terms and download requests.</td></tr>
           <tr><td>MCP servers you add</td><td>When the agent uses their tools</td><td>The tool inputs the agent sends, plus any headers or keys you configured.</td></tr>
           <tr><td>localhost.run</td><td>Only when you share a running dev server with a public link</td><td>Traffic to and from that dev server.</td></tr>
+          <tr><td>Your own server (server mode)</td><td>Only if you set up server mode, whenever the app is connected to it</td><td>Everything the agent works with, over SSH, as described above.</td></tr>
+          <tr><td>ntfy (ntfy.sh by default, or an ntfy server you set)</td><td>Only in server mode, and only if you turn on notifications</td><td>From your server: a random topic name the app made, and a generic title such as "Agent finished" or "Approval needed". No message, file or project content is included.</td></tr>
           <tr><td>Your phone's speech recognizer (e.g. Google)</td><td>Only when you use voice input</td><td>Your voice, handled by the system speech service.</td></tr>
         </tbody>
       </table>
@@ -87,6 +98,7 @@
       <li>Delete chats, projects, keys and accounts inside the app at any time.</li>
       <li>Clearing the app's storage or uninstalling GripHub deletes everything it stored on your phone.</li>
       <li>Revoke GitHub access at <a href="https://github.com/settings/applications">github.com/settings/applications</a>, and revoke API keys in your AI provider's or Vercel's dashboard.</li>
+      <li>In server mode, your data is on your server: delete it there (for example by removing the agent's account).</li>
       <li>For data already sent to a service you connected, contact that service.</li>
     </ul>
 
@@ -103,10 +115,10 @@
   <!-- ============================== INDONESIA ============================== -->
   <section id="indonesia" lang="id">
     <h1 style="margin-top: 72px">Kebijakan Privasi</h1>
-    <p class="updated">Berlaku 29 September 2026 · Aplikasi: GripHub (id.griphub.agent)</p>
+    <p class="updated">Berlaku 28 Oktober 2026 · Aplikasi: GripHub (id.griphub.agent)</p>
 
     <div class="summary">
-      <p><strong>Singkatnya:</strong> GripHub berjalan di HP kamu. Developer aplikasi tidak mengumpulkan, menerima, menjual, atau membagikan data kamu, tidak menjalankan server sendiri, dan tidak menyertakan iklan, analitik, pelacak, atau pelaporan crash. Data keluar dari HP kamu saat kamu chat — setiap chat dikirim ke penyedia AI bawaan, GripHub Router (griphubrouter.web.id) — atau saat kamu menghubungkan layanan lain (GitHub, Vercel, server kamu sendiri) atau meminta agent memakai internet, dan data itu langsung dikirim ke layanan tersebut.</p>
+      <p><strong>Singkatnya:</strong> GripHub berjalan di HP kamu. Developer aplikasi tidak mengumpulkan, menerima, menjual, atau membagikan data kamu, tidak menjalankan server sendiri, dan tidak menyertakan iklan, analitik, pelacak, atau pelaporan crash. Data keluar dari HP kamu saat kamu chat — setiap chat dikirim ke penyedia AI bawaan, GripHub Router (griphubrouter.web.id) — atau saat kamu menghubungkan layanan lain (GitHub, Vercel, server kamu sendiri) atau meminta agent memakai internet, dan data itu langsung dikirim ke layanan tersebut. Jika kamu memilih mode server, agent berjalan di server milik kamu sendiri, bukan di HP; developer tetap tidak menjalankan server dan tidak menerima apa pun.</p>
     </div>
 
     <h2>Tentang kami</h2>
@@ -125,6 +137,15 @@
     </ul>
     <p>File backup hanya dibuat kalau kamu memintanya, dan disimpan di tempat yang kamu pilih. File ini bisa berisi chat, pengaturan, dan kredensial kamu, jadi simpan di tempat yang aman.</p>
 
+    <h2>Mode server (opsional)</h2>
+    <p>Kamu bisa menjalankan agent di server milik kamu (misalnya VPS yang kamu sewa) alih-alih di HP. Tidak ada yang berubah kecuali kamu sendiri yang menyiapkannya, dengan skrip yang kamu jalankan di server kamu.</p>
+    <ul>
+      <li><strong>Di server kamu:</strong> agent, chat dan sesi agent, pengaturan, skill, jadwal, file project, container Linux, dan kredensial yang kamu tambahkan saat memakai mode server. Kredensial dienkripsi dengan AES-256-GCM memakai file kunci yang hanya bisa dibaca akun agent di server kamu. Backup yang kamu buat di mode server disimpan di server sampai kamu mengunduhnya.</li>
+      <li><strong>Di HP kamu:</strong> alamat dan host key server, kunci SSH yang dibuat aplikasi untuk menjangkaunya (tidak pernah keluar dari HP; yang kamu salin ke server hanya bagian publiknya), dan salinan file yang kamu buka, bagikan, atau unduh dari server.</li>
+      <li><strong>Di antara keduanya:</strong> semuanya lewat SSH, terenkripsi dari HP sampai server kamu. Aplikasi memeriksa host key server di setiap koneksi. Kunci yang kamu tambahkan untuk aplikasi dibatasi di server: port forwarding dengannya hanya bisa menjangkau loopback server itu sendiri, tidak pernah mesin lain.</li>
+      <li>Di mode server, layanan di tabel bawah dihubungi <em>dari server kamu</em>, bukan dari HP, dengan data yang sama.</li>
+      <li>Untuk berhenti, pilih "Lupakan server ini" di aplikasi (ini menghapus kunci dan detail server dari HP), lalu hapus kunci atau akun agent di server kamu.</li>
+    </ul>
     <h2>Data yang dikirim ke layanan pilihan kamu</h2>
     <p>GripHub hanya terhubung ke layanan lain untuk menjalankan permintaan kamu. Data dikirim langsung dari HP kamu ke layanan tersebut dan diatur oleh kebijakan privasi layanan itu sendiri.</p>
     <div class="table">
@@ -143,6 +164,8 @@
           <tr><td>Sumber skill (GitHub, skills.md, agentskills.io)</td><td>Saat kamu mencari atau memasang skill</td><td>Kata kunci pencarian dan permintaan unduhan.</td></tr>
           <tr><td>Server MCP yang kamu tambahkan</td><td>Saat agent memakai tool-nya</td><td>Input tool yang dikirim agent, ditambah header atau key yang kamu atur.</td></tr>
           <tr><td>localhost.run</td><td>Hanya saat kamu membagikan dev server lewat link publik</td><td>Lalu lintas ke dan dari dev server tersebut.</td></tr>
+          <tr><td>Server kamu sendiri (mode server)</td><td>Hanya jika kamu menyiapkan mode server, selama aplikasi terhubung ke server itu</td><td>Semua yang dikerjakan agent, lewat SSH, seperti dijelaskan di atas.</td></tr>
+          <tr><td>ntfy (ntfy.sh secara default, atau server ntfy pilihan kamu)</td><td>Hanya di mode server, dan hanya jika kamu menyalakan notifikasi</td><td>Dari server kamu: nama topik acak yang dibuat aplikasi, dan judul umum seperti "Agent finished" atau "Approval needed". Tidak ada isi pesan, file, atau project yang ikut.</td></tr>
           <tr><td>Pengenal suara di HP kamu (mis. Google)</td><td>Hanya saat kamu memakai input suara</td><td>Suara kamu, diproses oleh layanan pengenal suara sistem.</td></tr>
         </tbody>
       </table>
@@ -162,6 +185,7 @@
       <li>Hapus chat, project, key, dan akun di dalam aplikasi kapan saja.</li>
       <li>Menghapus data aplikasi atau meng-uninstall GripHub akan menghapus semua yang disimpannya di HP kamu.</li>
       <li>Cabut akses GitHub di <a href="https://github.com/settings/applications">github.com/settings/applications</a>, dan cabut API key di dashboard penyedia AI atau Vercel kamu.</li>
+      <li>Di mode server, data kamu ada di server kamu: hapus di sana (misalnya dengan menghapus akun agent).</li>
       <li>Untuk data yang sudah terkirim ke layanan yang kamu hubungkan, hubungi layanan tersebut.</li>
     </ul>
 

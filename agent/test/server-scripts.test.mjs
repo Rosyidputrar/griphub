@@ -18,7 +18,7 @@ const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEKEYONEEXAMPLEKEYONEEXAM
 const bootstrap = (...args) => spawnSync("bash", [BOOTSTRAP, ...args], { encoding: "utf8" });
 
 test("the scripts are executable", () => {
-	for (const f of ["bootstrap.sh", "griphub-attach", "box/box", "test/bootstrap-in-container.sh", "test/bootstrap-inner.sh"]) {
+	for (const f of ["bootstrap.sh", "field-report.sh", "griphub-attach", "box/box", "test/bootstrap-in-container.sh", "test/bootstrap-inner.sh"]) {
 		assert.ok(statSync(server(f)).mode & 0o100, `${f} is executable`);
 	}
 });
@@ -88,4 +88,22 @@ test("bootstrap --dry-run shows the plan, the restricted key line and a setup co
 	const second = bootstrap("--dry-run", "--pubkey", KEY, "--user", "griphub2");
 	assert.equal(second.status, 0, second.stderr);
 	assert.match(second.stdout, /\/home\/griphub2\/\.griphub/);
+});
+
+// The field-test report (server_agent.md, phase 7) reads another account's service and log, so it wants root; its whole
+// run is tried against a real systemd user service by hand (see server_agent.md 4.16), here only what it refuses.
+test("field-report.sh explains itself, and refuses odd input, a missing account, and running without root", () => {
+	const report = (...args) => spawnSync("bash", [server("field-report.sh"), ...args], { encoding: "utf8" });
+	const help = report("--help");
+	assert.equal(help.status, 0);
+	assert.match(help.stdout, /sudo bash field-report\.sh/);
+	assert.doesNotMatch(help.stdout, /^set -euo/m);
+	for (const args of [["--user", "Root"], ["--lines", "many"], ["--bogus"]]) {
+		const r = report(...args);
+		assert.notEqual(r.status, 0, JSON.stringify(args));
+		assert.match(r.stderr, /^error: /m);
+	}
+	const r = report("--user", "no-such-agent-account");
+	assert.notEqual(r.status, 0);
+	assert.match(r.stderr, process.getuid() === 0 ? /no account named no-such-agent-account/ : /run this as root/);
 });

@@ -14,8 +14,9 @@ HP (app) ──ssh──> server: sshd ──> griphub-attach ──soket unix�
 - Server menyimpan semuanya: chat, subagent, berkas proyek, tugas latar belakang. GitHub sync mati di mode server;
   yang Anda lihat di app adalah yang ada di server.
 
-Status: skrip server dan host sudah siap (fase 1–3 di `server_agent.md`). Layar **Settings → Server agent** di app
-menyusul di fase 4; langkah di app di bawah berlaku setelah fase itu.
+Status: semua bagian sudah dibuat (fase 1–6 di `server_agent.md`): host, skrip server, layar **Agent server** di app,
+file, pratinjau, terminal dan backup lewat server. Sedang diuji di VPS sungguhan (fase 7): checklist di
+[`FIELD_TEST.md`](FIELD_TEST.md), laporan kondisi server dengan `sudo bash field-report.sh`.
 
 Diadaptasi dari mode server CoderRa (`seseegy/coderra`, folder `server/`).
 

@@ -91,6 +91,9 @@ class TestSshd {
   void revokeAll() => File('${dir.path}/authorized_keys').writeAsStringSync('');
 
   Future<void> dispose() async {
+    // The connections first: each is a child of this sshd, and once it is gone they would be left behind, waiting on
+    // clients that are already dead.
+    Process.runSync('pkill', ['-KILL', '-P', '${_process.pid}']);
     _process.kill(ProcessSignal.sigkill);
     await _process.exitCode;
     try {

@@ -30,7 +30,9 @@ the nearest credit expiry. Other OpenAI-compatible endpoints can be added as cus
 The app developer collects nothing and runs no server. Every chat you send goes to GripHub Router, which
 processes it as a service (see the [Privacy Policy](docs/privacy.html) for the full table of where data goes).
 Your GripHub API key, GitHub/Vercel tokens and SSH keys are encrypted on the device with a key held by the
-Android Keystore. Backups are created only when you ask for them.
+Android Keystore. Backups are created only when you ask for them. Server mode (optional) runs the agent on a server of
+your own over SSH instead of on the phone; your data then lives on that server, and push notifications, if you turn
+them on, go through ntfy with a generic title only.
 
 ## Features
 

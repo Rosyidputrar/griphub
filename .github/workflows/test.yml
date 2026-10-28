@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: shellcheck
-        run: shellcheck server/bootstrap.sh server/box/box server/test/*.sh
+        run: shellcheck server/bootstrap.sh server/field-report.sh server/box/box server/test/*.sh
 
       # Runs bootstrap.sh for real (apt, useradd, authorized_keys, the Node download) in a throwaway container.
       - name: bootstrap.sh in a container (Ubuntu 24.04)
