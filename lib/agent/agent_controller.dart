@@ -298,6 +298,15 @@ class AgentController extends ChangeNotifier {
       unawaited(integrations.refreshSettings().then((_) {}).catchError((_) {}));
       // A server agent may have been waiting for answers while the app was closed: show them again.
       unawaited(refreshSubagents().then((_) => client.isRemote ? restoreApprovals() : null).catchError((_) {}));
+      // A server keeps its own clock (UTC as a rule): schedules follow the phone's time zone instead.
+      if (client.isRemote) {
+        unawaited(
+          client
+              .call('timezone_set', {'offsetMinutes': DateTime.now().timeZoneOffset.inMinutes})
+              .then((_) {})
+              .catchError((_) {}),
+        );
+      }
       status = BootStatus.ready;
     } catch (e) {
       status = BootStatus.failed;

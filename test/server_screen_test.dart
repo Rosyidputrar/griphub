@@ -199,6 +199,56 @@ void main() {
     });
   });
 
+  group('ServerUpdateBanner', () {
+    Future<void> openChat(
+      WidgetTester tester, {
+      required String? serverStamp,
+      String localStamp = '1.4.0 1800000000000',
+    }) async {
+      Directory('${tmp.path}/host').createSync(recursive: true);
+      File('${tmp.path}/host/.stamp').writeAsStringSync('$localStamp\n');
+      configure(saved: true, active: true);
+      backend.hello = {...backend.hello, 'bundleStamp': ?serverStamp};
+      backend.onCommand = (c) => switch (c['type']) {
+        'host_restart' => {'restarting': false},
+        _ => null,
+      };
+      await tester.runAsync(() => agent.client.start());
+      await show(tester, ServerUpdateBanner(agent: agent));
+      await tester.pump();
+    }
+
+    testWidgets('a server agent from another bundle offers the update; it waits until the agent is done', (
+      tester,
+    ) async {
+      await openChat(tester, serverStamp: '1.3.0 1700000000000');
+      expect(find.text('The agent on the server is not the version this app carries.'), findsOneWidget);
+      await tester.tap(find.text('Update'));
+      for (var i = 0; i < 10 && setup.installs == 0; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      for (var i = 0; i < 5; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      expect(setup.installs, 1);
+      expect(backend.sent.map((c) => c['type']), contains('host_restart'), reason: 'restarts once idle, not at once');
+      expect(find.text('The server agent updates once it finishes its current work.'), findsOneWidget);
+      expect(find.text('Update'), findsNothing);
+    });
+
+    testWidgets('the same bundle on both sides: nothing to say', (tester) async {
+      await openChat(tester, serverStamp: '1.4.0 1800000000000');
+      expect(find.textContaining('not the version'), findsNothing);
+    });
+
+    testWidgets('an older host that does not name its bundle counts as another version', (tester) async {
+      await openChat(tester, serverStamp: null);
+      expect(find.text('The agent on the server is not the version this app carries.'), findsOneWidget);
+    });
+  });
+
   group('ServerScreen', () {
     Future<void> open(WidgetTester tester) async {
       tall(tester);
@@ -374,7 +424,7 @@ void main() {
   group('ServerScreen on a connected server', () {
     Map<String, Object?> notify = {'enabled': false, 'url': 'https://ntfy.sh', 'topic': null};
 
-    Future<void> openConnected(WidgetTester tester, {String diskLevel = 'ok'}) async {
+    Future<void> openConnected(WidgetTester tester, {String diskLevel = 'ok', Map<String, Object?>? box}) async {
       configure(saved: true, active: true);
       notify = {'enabled': false, 'url': 'https://ntfy.sh', 'topic': null};
       backend.onCommand = (c) => switch (c['type']) {
@@ -385,6 +435,7 @@ void main() {
           'uptimeSec': 7500,
           'subagents': true,
           'node': 'v24.22.0',
+          'box': ?box,
         },
         'settings_get' => {'notify': notify},
         'settings_set' => () {
@@ -417,6 +468,19 @@ void main() {
       expect(find.text('Up for  2 h 5 min'), findsOneWidget);
       expect(find.text('Subagents  working'), findsOneWidget);
       expect(find.textContaining('almost full'), findsNothing);
+    });
+
+    testWidgets('says where the agent\'s commands run', (tester) async {
+      await openConnected(tester, box: {'available': true, 'installed': true, 'enabled': true});
+      expect(find.text('Box  ready · commands run inside it'), findsOneWidget);
+      expect(find.text('Build the box'), findsNothing);
+    });
+
+    testWidgets('a box that is not built is a problem with a way out', (tester) async {
+      await openConnected(tester, box: {'available': true, 'installed': false, 'enabled': true});
+      expect(find.text('Box  not built · commands are refused'), findsOneWidget);
+      expect(find.text('The agent cannot run commands until the box is built.'), findsOneWidget);
+      expect(find.text('Build the box'), findsOneWidget);
     });
 
     testWidgets('warns when the disk is getting full', (tester) async {

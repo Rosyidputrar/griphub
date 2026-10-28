@@ -10,7 +10,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/remote_profile.dart';
+import 'package:griphub_agent/ui/box_screen.dart';
 import 'package:griphub_agent/ui/server_screen.dart';
+import 'package:griphub_agent/ui/terminal_screen.dart';
 
 import '../support/fake_backend.dart';
 import 'harness.dart';
@@ -82,6 +84,8 @@ void main() {
           'subagents': true,
           'uptimeSec': 93780,
           'node': 'v24.22.0',
+          // The box image never got built (the field test's VPS): the card says so and offers the way out.
+          'box': {'available': true, 'installed': false, 'enabled': true},
         },
         'settings_get' => {
           'notify': {'enabled': true, 'url': 'https://ntfy.sh', 'topic': 'griphub-3f9c2a7b1d4e8f60a5b2c7d9e1f3a4b6'},
@@ -128,6 +132,86 @@ void main() {
       await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_banner_${look.name}')));
       expect(layoutErrors.where((e) => e.contains('server_banner_${look.name}')), isEmpty);
       await tester.pumpWidget(const SizedBox()); // stops the countdown timer
+    });
+
+    testWidgets('update banner, server agent from another bundle (${look.name})', (tester) async {
+      Directory('${tmp.path}/host').createSync(recursive: true);
+      File('${tmp.path}/host/.stamp').writeAsStringSync('1.4.0 1800000000000\n');
+      configure(saved: true, active: true);
+      backend.hello = {...backend.hello, 'bundleStamp': '1.3.0 1700000000000'};
+      await tester.runAsync(() => agent.client.start());
+      await pumpLook(
+        tester,
+        look,
+        Scaffold(
+          appBar: AppBar(
+            title: const Text('Chat'),
+            actions: [ConnectionChip(agent: agent)],
+          ),
+          body: Column(
+            children: [
+              ConnectionBanner(agent: agent),
+              ServerUpdateBanner(agent: agent),
+              const Expanded(child: SizedBox()),
+            ],
+          ),
+        ),
+        height: 300,
+      );
+      await tester.pump();
+      collectLayoutErrors(tester, 'server_update_${look.name}');
+      await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_update_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_update_${look.name}')), isEmpty);
+    });
+
+    testWidgets('terminal tab, connection to the server lost (${look.name})', (tester) async {
+      var reconnects = 0;
+      await pumpLook(
+        tester,
+        look,
+        Scaffold(
+          appBar: AppBar(title: const Text('Terminal')),
+          body: Column(
+            children: [
+              ServerTabLostBar(onReconnect: () => reconnects++),
+              const Expanded(child: ColoredBox(color: Colors.black)),
+            ],
+          ),
+        ),
+        height: 260,
+      );
+      collectLayoutErrors(tester, 'server_tab_lost_${look.name}');
+      await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_tab_lost_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('server_tab_lost_${look.name}')), isEmpty);
+      await tester.tap(find.byType(TextButton));
+      expect(reconnects, 1);
+    });
+
+    testWidgets('box screen, box not built yet (${look.name})', (tester) async {
+      configure(saved: true, active: true);
+      backend.onCommand = (c) => switch (c['type']) {
+        'container_status' => {
+          'kind': 'podman',
+          'available': true,
+          'installed': false,
+          'state': 'none',
+          'enabled': true,
+          'image': 'localhost/griphub-box',
+          'startedAt': null,
+          'usage': null,
+          'limits': {'memory': '2g', 'swap': '3g', 'cpus': '1.5'},
+          'problem': 'The box image has not been built on this server.',
+        },
+        _ => null,
+      };
+      await tester.runAsync(() => agent.client.start());
+      await pumpLook(tester, look, BoxScreen(agent: agent), height: 1300);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+      await tester.pump();
+      collectLayoutErrors(tester, 'box_not_built_${look.name}');
+      await expectLater(find.byType(BoxScreen), matchesGoldenFile(golden('box_not_built_${look.name}')));
+      expect(layoutErrors.where((e) => e.contains('box_not_built_${look.name}')), isEmpty);
     });
   }
 }

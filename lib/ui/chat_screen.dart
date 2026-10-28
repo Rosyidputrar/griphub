@@ -413,6 +413,7 @@ class _ChatScreenState extends State<ChatScreen> {
         body: Column(
           children: [
             ConnectionBanner(agent: agent),
+            ServerUpdateBanner(agent: agent),
             Expanded(
               child: Stack(
                 children: [

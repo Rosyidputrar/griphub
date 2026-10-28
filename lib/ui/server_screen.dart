@@ -9,6 +9,7 @@ import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/remote_profile.dart';
 import 'i18n.dart';
+import 'box_screen.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -144,6 +145,81 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
                   ),
                 ),
                 TextButton(onPressed: agent.client.reconnectNow, child: Text(action)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Under the chat's connection banner: the agent on the server is not the version this app carries (the app was updated,
+/// the server was not), with the update one tap away. The update waits until the agent is done with its work.
+class ServerUpdateBanner extends StatefulWidget {
+  const ServerUpdateBanner({super.key, required this.agent});
+
+  final AgentController agent;
+
+  @override
+  State<ServerUpdateBanner> createState() => _ServerUpdateBannerState();
+}
+
+class _ServerUpdateBannerState extends State<ServerUpdateBanner> {
+  bool _updating = false;
+
+  /// After an update the host restarts once it is idle; until the new one says hello, the banner says so.
+  bool _waiting = false;
+
+  Future<void> _update() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _updating = true);
+    try {
+      final r = await widget.agent.remote.install();
+      if (!mounted) return;
+      setState(() => _waiting = r.ok);
+      messenger.showSnackBar(SnackBar(content: Text(tr(r.message))));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final agent = widget.agent;
+    return ListenableBuilder(
+      listenable: Listenable.merge([agent.client.connection, agent.remote]),
+      builder: (context, _) {
+        if (!agent.client.connection.value.connected || agent.remote.serverOutdated != true) {
+          _waiting = false;
+          return const SizedBox.shrink();
+        }
+        final p = context.palette;
+        return Material(
+          color: p.accent.withValues(alpha: 0.10),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+            child: Row(
+              children: [
+                Icon(LucideIcons.circleArrowUp, size: 16, color: p.accent),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _waiting
+                        ? tr('The server agent updates once it finishes its current work.')
+                        : tr('The agent on the server is not the version this app carries.'),
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                ),
+                if (_updating)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                else if (!_waiting)
+                  TextButton(onPressed: _update, child: Text(tr('Update'))),
               ],
             ),
           ),
@@ -449,6 +525,18 @@ class _ServerScreenState extends State<ServerScreen> {
     final runs = (h['runs'] as Map?)?.cast<String, dynamic>() ?? const {};
     final uptime = Duration(seconds: (h['uptimeSec'] as num?)?.toInt() ?? 0);
     final low = disk['level'] != null && disk['level'] != 'ok';
+    // Where the agent's commands run. A box without an image refuses them all, so that is said, with the way out.
+    final box = (h['box'] as Map?)?.cast<String, dynamic>();
+    final boxMissing = box != null && box['available'] == true && box['installed'] != true;
+    final boxText = box == null
+        ? null
+        : box['available'] != true
+        ? tr('none · commands run on the server')
+        : box['installed'] != true
+        ? tr('not built · commands are refused')
+        : box['enabled'] == true
+        ? tr('ready · commands run inside it')
+        : tr('off · commands run on the server');
     String line(String k, String v) => '$k  $v';
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -468,12 +556,34 @@ class _ServerScreenState extends State<ServerScreen> {
                 uptime.inHours >= 1 ? '${uptime.inHours} h ${uptime.inMinutes % 60} min' : '${uptime.inMinutes} min',
               ),
               line(tr('Node'), '${h['node'] ?? '?'}'),
+              if (boxText != null) line(tr('Box'), boxText),
             ])
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 1),
                 child: Text(
                   l,
                   style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
+                ),
+              ),
+            if (boxMissing)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tr('The agent cannot run commands until the box is built.'),
+                      style: TextStyle(color: p.warning, fontSize: 12.5),
+                    ),
+                    TextButton.icon(
+                      icon: const Icon(LucideIcons.hammer, size: 16),
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).push(MaterialPageRoute(builder: (_) => BoxScreen(agent: agent))).then((_) => _loadHealth()),
+                      label: Text(tr('Build the box')),
+                    ),
+                  ],
                 ),
               ),
             if (low)

@@ -133,8 +133,60 @@ void main() {
     };
     await open(tester);
     expect(find.text('Not built'), findsOneWidget);
-    expect(find.textContaining('image has not been built'), findsOneWidget);
+    expect(find.text('The box is not built yet'), findsOneWidget);
+    expect(find.textContaining('commands are refused'), findsOneWidget);
     expect(find.text('Using now'), findsNothing);
+    // Nothing to switch to, open or test until it is built.
+    expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
+    await tester.tap(find.text('Test the box'));
+    await tester.pump();
+    expect(sent(), isNot(contains('box_check')));
+  });
+
+  testWidgets('building a box that was never built: asks, shows the build, and the commands then have a box', (
+    tester,
+  ) async {
+    box = {...running(), 'installed': false, 'state': 'none', 'usage': null, 'problem': 'not built'};
+    await open(tester);
+    await tester.tap(find.text('Build the box'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(find.text('Build the box?'), findsOneWidget);
+    expect(find.textContaining('After that the agent\'s commands run inside the box'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Build'));
+    Future<void> until(bool Function() ok) async {
+      for (var i = 0; i < 50 && !ok(); i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    await until(() => find.textContaining('Successfully tagged').evaluate().isNotEmpty);
+    expect(find.text('Building the box'), findsOneWidget);
+    box = running();
+    buildDone.complete(box);
+    await until(() => find.text('Done').evaluate().isNotEmpty);
+    expect(last('container_install'), containsPair('distro', ''));
+  });
+
+  testWidgets('a build that fails says what most often causes it', (tester) async {
+    box = {...running(), 'installed': false, 'state': 'none', 'usage': null, 'problem': 'not built'};
+    overrides['container_install'] = (c) =>
+        throw const FakeFailure('Error: cannot set up namespace using "/usr/bin/newuidmap": exit status 1');
+    await open(tester);
+    await tester.tap(find.text('Build the box'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    await tester.tap(find.widgetWithText(FilledButton, 'Build'));
+    for (var i = 0; i < 50 && find.text('Close').evaluate().isEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    expect(find.textContaining('newuidmap'), findsWidgets, reason: 'the build log shows why');
+    // The log sheet is taller than the test screen; close it the way its Close button does.
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.textContaining('rootless Podman is not ready'), findsOneWidget);
   });
 
   testWidgets('no box at all: an explanation, and none of the controls', (tester) async {

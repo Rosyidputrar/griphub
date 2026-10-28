@@ -135,6 +135,15 @@ const griphubDir = process.env.GRIPHUB_DIR ?? join(process.env.HOME ?? agentDir,
 /** Exists while the daemon runs and is removed by a clean shutdown; finding it at start means the last one crashed. */
 const runningMarker = join(griphubDir, "running");
 
+/** The `.stamp` next to this host (written with the agent bundle), or undefined when there is none. */
+function bundleStamp(): string | undefined {
+	try {
+		return readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), ".stamp"), "utf8").trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Sends the host's records to the app. On the phone that is stdout, as always (no numbering, no buffer). As a daemon
  * the hub numbers what is worth replaying and keeps it, so an app that lost its connection gets exactly what it
@@ -144,6 +153,7 @@ const hub = new Hub({
 	replay: !!listenPath,
 	mode,
 	hostVersion: VERSION,
+	bundleStamp: bundleStamp(),
 	handle: (cmd) => handle(cmd as Command),
 	// Only tests shorten these.
 	pingIntervalMs: Number(process.env.GRIPHUB_PING_MS) || undefined,
@@ -680,33 +690,14 @@ async function backgroundSession(cwd: string): Promise<RunSession> {
 }
 
 /** The agent's shell is the server's box (server only). */
-/**
- * Whether the box can take commands: its launcher is installed and its image has been built. A launcher without an
- * image fails every command ("the container image is missing"), so until the image exists commands run on the server.
- */
-let boxImage = false;
-function boxUsable(): boolean {
-	return server && box.available && boxImage;
+/** The box, briefly, for the health card: is there one, is its image built, do the agent's commands go to it. */
+async function boxHealth(): Promise<{ available: boolean; installed: boolean; enabled: boolean }> {
+	const s = await box.status(settingsManager.getShellPath());
+	return { available: s.available, installed: s.installed, enabled: s.enabled };
 }
 
 function boxIsShell(): boolean {
-	return boxUsable() && integrations?.settings.containerShell !== false;
-}
-
-/**
- * Points the agent's shell at the box when it can take commands (and the user did not turn it off), and away from it
- * when it cannot. [status] is a fresh box status; returns whether the shell changed (the session then needs reopening).
- */
-async function followBox(status: { available: boolean; installed: boolean }): Promise<boolean> {
-	boxImage = status.available && status.installed;
-	const shell = settingsManager.getShellPath();
-	const want = boxIsShell() ? boxScript : undefined;
-	if (want === shell || (!want && shell !== boxScript)) return false;
-	if (!want) log("the box cannot take commands yet (no image); the agent's commands run directly on the server");
-	settingsManager.setShellPath(want);
-	ensureAgentsFile(); // the notes tell the agent where its commands run
-	await settingsManager.flush();
-	return true;
+	return server && box.available && integrations?.settings.containerShell !== false;
 }
 
 /** Keeps the environment notes current (agents-file.ts), unless the user has taken the file over. */
@@ -1424,18 +1415,13 @@ async function handle(cmd: Command): Promise<unknown> {
 
 		// Linux container. On the phone: container.ts (proot). On a server: the rootless Podman box (podmanbox.ts), which
 		// the setup script builds; the same commands serve both, so the screens do not need to know which one they talk to.
-		case "container_status": {
-			if (!server) return container.status(settingsManager.getShellPath());
-			// An image built since (from this screen, or by hand on the server) puts the agent's commands in the box.
-			if (await followBox(await box.status(settingsManager.getShellPath()))) await reopenSession().catch(() => {});
-			return box.status(settingsManager.getShellPath());
-		}
+		case "container_status":
+			return server ? box.status(settingsManager.getShellPath()) : container.status(settingsManager.getShellPath());
 		case "container_install": {
 			if (server) {
 				// "Install" on a server means building the image again.
 				guardBoxWork(cmd);
 				await box.rebuildImage(taskLog(cmd));
-				if (await followBox(await box.status(settingsManager.getShellPath()))) await reopenSession().catch(() => {});
 				return box.status(settingsManager.getShellPath());
 			}
 			await container.install(cmd.distro as Distro, taskLog(cmd), integrations.settings.dns);
@@ -1462,10 +1448,6 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "container_enable":
 			if (server) {
 				if (cmd.on && !box.available) throw new Error("There is no box on this server");
-				if (cmd.on && !boxUsable()) {
-					boxImage = (await box.status(undefined)).installed;
-					if (!boxImage) throw new Error("The box's image has not been built yet: rebuild it on this screen first");
-				}
 				settingsManager.setShellPath(cmd.on ? boxScript : undefined);
 				integrations.updateSettings({ containerShell: !!cmd.on });
 				ensureAgentsFile(); // the notes tell the agent where its commands run
@@ -1492,6 +1474,19 @@ async function handle(cmd: Command): Promise<unknown> {
 			return { ...(await box.wipeHome()), status: await box.status(settingsManager.getShellPath()) };
 
 		// Disk, memory, and what is running: for the app's server screen.
+		// Server only: the phone's UTC offset, for schedules. Whole hours map to Etc/GMT zones (Indonesia's are); other
+		// offsets leave the server's own zone.
+		case "timezone_set": {
+			if (!server) return { timeZone: null };
+			const minutes = Number(cmd.offsetMinutes);
+			if (!Number.isInteger(minutes) || Math.abs(minutes) > 14 * 60) throw new Error("offsetMinutes must be a whole number of minutes");
+			const zone = minutes === 0 ? "UTC" : minutes % 60 === 0 ? `Etc/GMT${minutes > 0 ? "-" : "+"}${Math.abs(minutes) / 60}` : null;
+			if (zone && zone !== integrations.settings.timeZone) {
+				integrations.updateSettings({ timeZone: zone });
+				process.env.TZ = zone;
+			}
+			return { timeZone: integrations.settings.timeZone ?? null };
+		}
 		case "health": {
 			const snap = await health.check();
 			const runs = runner.summary();
@@ -1505,6 +1500,10 @@ async function handle(cmd: Command): Promise<unknown> {
 				runs: { running: runs.running, queued: runs.runs.filter((r) => r.status === "queued").length },
 				subagents: subagents.busy(),
 				clientInBackground: hub.clientInBackground(),
+				// Where the agent's commands run: the app shows a box that is not built (commands then fail) as a problem.
+				...(server ? { box: await boxHealth() } : {}),
+				// The zone schedules run in (timezone_set), as an offset the app can compare with the phone's.
+				clock: { timeZone: process.env.TZ ?? null, offsetMinutes: -new Date().getTimezoneOffset() },
 			};
 		}
 
@@ -1654,7 +1653,7 @@ async function main() {
 
 	// Route every lookup through DNS-over-HTTPS (configurable in settings; a server defaults to its own resolver).
 	installDohLookup();
-	integrations = new Integrations(agentDir, workspace, { server, boxScript: () => (boxUsable() ? boxScript : null) });
+	integrations = new Integrations(agentDir, workspace, { server, boxScript: () => (box.available ? boxScript : null) });
 	// After the settings: on a server they say whether bash runs in the box, which the notes describe.
 	ensureAgentsFile();
 	integrations.onChange = () => send({ type: "integrations", summary: integrations.summary() });
@@ -1672,7 +1671,7 @@ async function main() {
 	mcp = new Mcp(
 		join(stateDir, "mcp.json"),
 		() => send({ type: "mcp", servers: mcp.summary() }),
-		server ? { shell: "/bin/sh", box: () => (boxUsable() ? boxScript : "/bin/sh") } : undefined,
+		server ? { shell: "/bin/sh", box: () => (box.available ? boxScript : "/bin/sh") } : undefined,
 	);
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
 	// read its disk any other way; on the phone the same commands work too, inside the same folders.
@@ -1716,9 +1715,21 @@ async function main() {
 			};
 		},
 	});
-	// On a server, bash runs inside the rootless container once it has been set up (server/box/box) and its image built,
-	// unless the user turned that off. Without the image (or the launcher), commands run directly on the server.
-	if (server) await followBox(await box.status(settingsManager.getShellPath()));
+	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user
+	// turned that off. If the launcher went away, stop pointing at it.
+	// A server runs on UTC as a rule; the app tells it the phone's time zone (timezone_set), so "every day at 09:00"
+	// means the user's 09:00.
+	if (server && integrations.settings.timeZone) process.env.TZ = integrations.settings.timeZone;
+	if (server) {
+		const shell = settingsManager.getShellPath();
+		if (box.available && integrations.settings.containerShell !== false && shell !== boxScript) {
+			settingsManager.setShellPath(boxScript);
+			await settingsManager.flush();
+		} else if (shell === boxScript && !box.available) {
+			settingsManager.setShellPath(undefined);
+			await settingsManager.flush();
+		}
+	}
 	// Linux container is the agent's shell by default once installed.
 	else if (
 		container.status(undefined).installed &&

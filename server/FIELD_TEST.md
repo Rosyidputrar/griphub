@@ -19,6 +19,8 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
       "arrived damaged"; tidak ada peringatan "written for Ubuntu and Debian"; ada baris `host key:`. Selesai tanpa
       error dan mencetak `griphub1:…`. Catat berapa lama (paket, Node, image box).
 - [ ] Coba juga **Atau bagikan file setup**: file `griphub-setup.sh` bisa dikirim ke aplikasi lain.
+- [ ] Akhir output setup: tidak ada peringatan "the agent's box was not built" atau "building the box failed". Bila
+      ada, catat pesan podman; setelah itu app: Pengaturan → **Box agent** → **Bangun box**.
 - [ ] App: tempel setup code → **Tes koneksi** (Test connection) → "Tersambung. Agent belum dipasang di server…".
 - [ ] App: **Pasang / perbarui agent** (Install / update agent) → selesai; **Pakai agent server** (Use the server agent) → chip di chat berubah menjadi **Server**.
 - [ ] Bila CoderRa terpasang: CoderRa tetap tersambung dan bekerja seperti biasa setelah langkah ini.
@@ -75,11 +77,13 @@ Latar belakang dan keputusan desain: `server_agent.md`. Cara pasang yang lengkap
 ## 8. Terminal
 
 - [ ] Buka Terminal: prompt berbentuk `<folder> $` di folder proyek; `git status`, `ll` bekerja.
-- [ ] Jalankan `top` (atau `sleep 600`), mode pesawat 1 menit, kembali: tab tersambung ke sesi yang sama
-      (`top` masih jalan).
+- [ ] Jalankan `top` (atau `sleep 600`), mode pesawat 1 menit, kembali: bar "Koneksi terputus" muncul →
+      **Sambungkan lagi** → tab tersambung ke sesi yang sama (`top` masih jalan).
 - [ ] Tutup app, buka lagi Terminal: tab bergabung ke sesi tmux yang sama.
-- [ ] Tab **Shell Linux (box)**: masuk ke container box; `node -v` dan `git` ada.
+- [ ] Tab **Shell box (box agent)**: masuk ke container box; `node -v` dan `git` ada.
 - [ ] Tutup tab: di VPS `sudo -u griphub tmux ls` tidak lagi menampilkan sesi itu.
+
+- [ ] Jadwalkan tugas jam tertentu (mis. 5 menit lagi, jam HP): berjalan pada jam HP, bukan jam UTC server.
 
 ## 9. Backup
 

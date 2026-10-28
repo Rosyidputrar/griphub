@@ -90,6 +90,9 @@ class TestSshd {
 
   void revokeAll() => File('${dir.path}/authorized_keys').writeAsStringSync('');
 
+  /// Cuts every open connection, as a network that goes away does; the server keeps taking new ones.
+  void dropConnections() => Process.runSync('pkill', ['-KILL', '-P', '${_process.pid}']);
+
   Future<void> dispose() async {
     // The connections first: each is a child of this sshd, and once it is gone they would be left behind, waiting on
     // clients that are already dead.

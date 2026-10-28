@@ -44,7 +44,9 @@ state() {
 
 create() {
 	if ! podman image exists "$IMAGE"; then
-		echo "box: the container image $IMAGE is missing. Run server/bootstrap.sh again, or build it with" >&2
+		# The agent reads this (it is the output of its command) and passes it on, so it says what the user can do.
+		echo "box: the agent's box (the container its commands run in) has not been built on this server yet, so no" >&2
+		echo "     command can run. Build it in the app: Settings > The agent's box > Build the box. Or on the server:" >&2
 		echo "     podman build -t $IMAGE -f ~/.griphub/box/Containerfile ~/.griphub/box" >&2
 		exit 127
 	fi

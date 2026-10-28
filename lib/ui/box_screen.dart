@@ -48,6 +48,9 @@ class _BoxScreenState extends State<BoxScreen> {
   bool _working = false;
   ({bool ok, String message})? _checked;
 
+  /// Building the image from this screen failed; the hint about rootless Podman shows.
+  bool _buildFailed = false;
+
   @override
   void initState() {
     super.initState();
@@ -105,7 +108,7 @@ class _BoxScreenState extends State<BoxScreen> {
     }
   }
 
-  Future<bool> _confirm(String title, String body, String action) async =>
+  Future<bool> _confirm(String title, String body, String action, {bool danger = true}) async =>
       await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -114,7 +117,9 @@ class _BoxScreenState extends State<BoxScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white),
+              style: danger
+                  ? FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white)
+                  : null,
               onPressed: () => Navigator.pop(context, true),
               child: Text(action),
             ),
@@ -159,6 +164,31 @@ class _BoxScreenState extends State<BoxScreen> {
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+
+  /// The box was never built (the setup script could not, or it was skipped): build its image for the first time.
+  Future<void> _build() async {
+    if (!await _confirm(
+      tr('Build the box?'),
+      tr(
+        'Builds the box\'s image on the server. It takes a few minutes and downloads Ubuntu with the usual tools. After that the agent\'s commands run inside the box.',
+      ),
+      tr('Build'),
+      danger: false,
+    )) {
+      return;
+    }
+    await _change((force) async {
+      final ok = await runWithLog<bool>(
+        context,
+        title: tr('Building the box'),
+        task: (log, _) async {
+          await it.installContainer('', onLine: log, force: force);
+          return true;
+        },
+      );
+      if (mounted) setState(() => _buildFailed = ok != true);
+    });
   }
 
   Future<void> _rebuild() async {
@@ -257,45 +287,54 @@ class _BoxScreenState extends State<BoxScreen> {
                         padding: const EdgeInsets.only(top: 10),
                         child: Text(_loadError!, style: TextStyle(color: p.warning, fontSize: 12.5)),
                       ),
-                    if (c.problem != null)
+                    if (!c.installed)
+                      _notBuilt(context)
+                    else if (c.problem != null)
                       Padding(padding: const EdgeInsets.only(top: 12), child: _Note(c.problem!, p.warning)),
                     if (c.usage != null) _usage(context, c),
                     SectionLabel(tr('Agent')),
-                    SettingsGroup(
-                      children: [
-                        SettingsRow(
-                          icon: LucideIcons.shield,
-                          color: p.accent,
-                          title: tr('Run the agent\'s commands in the box'),
-                          subtitle: c.enabled
-                              ? tr('Every command happens inside the box, not on the server')
-                              : tr('Off: commands run directly on the server'),
-                          trailing: Switch(value: c.enabled, onChanged: _working ? null : _setShell),
-                        ),
-                        SettingsRow(
-                          icon: LucideIcons.terminal,
-                          color: const Color(0xFF22C55E),
-                          title: tr('Open a shell in the box'),
-                          subtitle: tr('The same place the agent works in'),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => TerminalScreen(agent: widget.agent, command: 'box'),
-                            ),
+                    // Greyed out until the box is built: none of these can do anything before that.
+                    Opacity(
+                      opacity: c.installed ? 1 : 0.45,
+                      child: SettingsGroup(
+                        children: [
+                          SettingsRow(
+                            icon: LucideIcons.shield,
+                            color: p.accent,
+                            title: tr('Run the agent\'s commands in the box'),
+                            subtitle: c.enabled
+                                ? tr('Every command happens inside the box, not on the server')
+                                : tr('Off: commands run directly on the server'),
+                            // Nothing to switch to until the box is built.
+                            trailing: Switch(value: c.enabled, onChanged: _working || !c.installed ? null : _setShell),
                           ),
-                        ),
-                        SettingsRow(
-                          icon: LucideIcons.heartPulse,
-                          color: p.accent,
-                          title: tr('Test the box'),
-                          subtitle: _checking
-                              ? tr('Running a command in it…')
-                              : tr('Runs a command inside it, the way the agent does'),
-                          trailing: _checking
-                              ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                              : null,
-                          onTap: _checking ? null : _check,
-                        ),
-                      ],
+                          SettingsRow(
+                            icon: LucideIcons.terminal,
+                            color: const Color(0xFF22C55E),
+                            title: tr('Open a shell in the box'),
+                            subtitle: tr('The same place the agent works in'),
+                            onTap: !c.installed
+                                ? null
+                                : () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => TerminalScreen(agent: widget.agent, command: 'box'),
+                                    ),
+                                  ),
+                          ),
+                          SettingsRow(
+                            icon: LucideIcons.heartPulse,
+                            color: p.accent,
+                            title: tr('Test the box'),
+                            subtitle: _checking
+                                ? tr('Running a command in it…')
+                                : tr('Runs a command inside it, the way the agent does'),
+                            trailing: _checking
+                                ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                : null,
+                            onTap: _checking || !c.installed ? null : _check,
+                          ),
+                        ],
+                      ),
                     ),
                     if (_checked != null)
                       Padding(
@@ -305,27 +344,30 @@ class _BoxScreenState extends State<BoxScreen> {
                     SectionLabel(tr('Manage')),
                     SettingsGroup(
                       children: [
-                        SettingsRow(
-                          icon: LucideIcons.power,
-                          color: p.muted,
-                          title: tr('Stop the box'),
-                          subtitle: tr('Frees its memory; the next command starts it again'),
-                          onTap: _working || c.state != 'running' ? null : _stop,
-                        ),
-                        SettingsRow(
-                          icon: LucideIcons.rotateCcw,
-                          color: p.warning,
-                          title: tr('Reset the box'),
-                          subtitle: tr('Throws the container away; the next command makes a fresh one'),
-                          onTap: _working || c.state == 'none' ? null : _reset,
-                        ),
-                        SettingsRow(
-                          icon: LucideIcons.hammer,
-                          color: p.warning,
-                          title: tr('Rebuild the image'),
-                          subtitle: tr('Builds it again from the Containerfile on the server'),
-                          onTap: _working ? null : _rebuild,
-                        ),
+                        // Before the first build there is no container to stop or reset, and building is the card above.
+                        if (c.installed) ...[
+                          SettingsRow(
+                            icon: LucideIcons.power,
+                            color: p.muted,
+                            title: tr('Stop the box'),
+                            subtitle: tr('Frees its memory; the next command starts it again'),
+                            onTap: _working || c.state != 'running' ? null : _stop,
+                          ),
+                          SettingsRow(
+                            icon: LucideIcons.rotateCcw,
+                            color: p.warning,
+                            title: tr('Reset the box'),
+                            subtitle: tr('Throws the container away; the next command makes a fresh one'),
+                            onTap: _working || c.state == 'none' ? null : _reset,
+                          ),
+                          SettingsRow(
+                            icon: LucideIcons.hammer,
+                            color: p.warning,
+                            title: tr('Rebuild the image'),
+                            subtitle: tr('Builds it again from the Containerfile on the server'),
+                            onTap: _working ? null : _rebuild,
+                          ),
+                        ],
                         SettingsRow(
                           icon: LucideIcons.trash2,
                           color: p.danger,
@@ -348,6 +390,54 @@ class _BoxScreenState extends State<BoxScreen> {
                 ),
         );
       },
+    );
+  }
+
+  /// The box has no image yet: the agent's commands are refused until it is built, and this is the way to build it.
+  Widget _notBuilt(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: SurfaceCard(
+        highlight: true,
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                IconTile(icon: LucideIcons.hammer, color: p.warning, size: 40),
+                const SizedBox(width: 12),
+                Expanded(child: Text(tr('The box is not built yet'), style: text.titleMedium)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              tr(
+                'Until it is, the agent\'s commands are refused: the box is what keeps them away from the server itself. Building it takes a few minutes.',
+              ),
+              style: text.bodySmall,
+            ),
+            const SizedBox(height: 14),
+            PrimaryButton(
+              label: tr('Build the box'),
+              icon: LucideIcons.hammer,
+              busy: _working,
+              onPressed: _working ? null : _build,
+            ),
+            if (_buildFailed) ...[
+              const SizedBox(height: 12),
+              _Note(
+                tr(
+                  'Building failed; the log says why. Most often rootless Podman is not ready on the server yet. Run the setup command from the Server agent screen on the server again (it repairs that), then build again.',
+                ),
+                p.danger,
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -379,10 +469,12 @@ class _BoxScreenState extends State<BoxScreen> {
                       : c.image ?? '',
                   style: TextStyle(fontFamily: mono, fontSize: 12, color: p.muted),
                 ),
+                // Under the title rather than beside it, so a narrow phone keeps the title on one line.
+                const SizedBox(height: 8),
+                Pill(label, color: color, dot: true),
               ],
             ),
           ),
-          Pill(label, color: color, dot: true),
         ],
       ),
     );

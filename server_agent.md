@@ -337,6 +337,38 @@ berjalan, lalu menjalankan `bootstrap.sh`. Test: isi identik byte per byte denga
 di terminal, tempelan yang kehilangan satu karakter berhenti, shellcheck pada skrip yang dibuat; layar: isi clipboard
 dan berkas yang dibagikan.
 
+### 4.18 Setelah uji lapangan pertama: box gagal tertutup, tab server, zona waktu, versi agent
+
+Di VPS, image box tidak terbangun saat setup (podman rootless gagal, kemungkinan pembatasan user namespace AppArmor di
+Ubuntu 24.04), sehingga setiap perintah agent berakhir `exit 127`. Keputusan pemilik: **gagal tertutup**. Perintah
+agent tidak pernah dijalankan langsung di server; tanpa box, perintah ditolak dengan pesan yang menunjukkan jalan
+keluarnya.
+
+- `server/box/box`: tanpa image, mencetak bahwa box belum dibangun dan cara membangunnya (app: Pengaturan > Box agent >
+  Bangun box, atau `podman build` di server), keluar 127, dan tidak menjalankan apa pun.
+- `health` (server) memuat `box: {available, installed, enabled}`. Kartu Kesehatan server menampilkan baris Box, dan
+  bila belum dibangun: peringatan plus tombol **Bangun box** ke layar box. Layar box: kartu "Box belum dibangun" dengan
+  tombol bangun (konfirmasi biasa, bukan merah), petunjuk podman rootless bila gagal, baris Agent diredupkan, dan
+  Hentikan/Reset/Bangun ulang disembunyikan sampai ada image.
+- `bootstrap.sh` `repair_podman`: bila `kernel.apparmor_restrict_unprivileged_userns=1` dan profil `podman` belum
+  ada, menulis `/etc/apparmor.d/podman` (unconfined dengan `userns,`, sama dengan yang dibawa Ubuntu) dan memuatnya,
+  lalu `podman system migrate`. Bila podman tetap gagal, error-nya dicetak dan setup selesai tanpa box (dibangun nanti
+  dari app). Menempel ulang perintah setup memperbaiki server yang sudah terpasang.
+- Tab Terminal di server: koneksi putus (ssh keluar 255) menampilkan bar "Koneksi terputus. Shell tetap berjalan di
+  server." dengan **Sambungkan lagi**, yang bergabung ke sesi tmux yang sama (tidak lagi membunuhnya). `exit` di shell
+  (keluar 0) menutup sesi seperti biasa. Menutup tab server selalu bertanya karena sesinya ikut berakhir. Menu: **Shell
+  server** dan **Shell box (box agent)**.
+- Jadwal memakai jam HP: saat tersambung app mengirim `timezone_set {offsetMinutes}`; host menyimpannya
+  (`settings.timeZone`, mis. `Etc/GMT-7` untuk WIB) dan memasang `TZ`, juga setelah restart. Offset bukan jam bulat
+  (mis. +5:30) membiarkan zona yang ada. Mode HP tidak mengirimnya.
+- Versi agent di server: `hello_server.bundleStamp` (`.stamp` bundle) dibandingkan dengan bundle di APK. Bila beda
+  (atau host lama tidak menyebutnya), chat menampilkan banner "Agent di server bukan versi yang dibawa app ini" dengan
+  **Perbarui** (pasang lalu restart setelah agent selesai bekerja).
+- Test: launcher tanpa image (podmanbox), `health.box`, `timezone_set` termasuk setelah restart, `bundleStamp` di
+  hello; tmux dengan sshd asli: koneksi diputus (255, sesi tetap ada dan bisa disambung) dan `exit` (0, sesi hilang);
+  widget: layar box belum dibangun, membangun, gagal; kartu kesehatan; banner versi; golden: layar box belum dibangun,
+  kartu kesehatan dengan baris Box, banner versi, bar tab terputus (terang/gelap, EN/ID, 320dp dengan teks 1.3).
+
 ## 5. Layar yang membaca disk HP (diaudit dengan grep, diverifikasi saat dikerjakan)
 
 | Layar | Pemakaian `dart:io` | Perubahan |

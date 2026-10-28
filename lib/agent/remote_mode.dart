@@ -108,6 +108,34 @@ class RemoteMode extends ChangeNotifier {
   Future<String> bootstrapCommand({String? address}) async =>
       setup!.bootstrapCommand(await publicKey(), address: address);
 
+  String? _localStamp;
+  String? _stampDir;
+
+  /// The `.stamp` of the agent bundle this app carries (null without one). Read once per bundle folder.
+  String? get localStamp {
+    if (_stampDir != hostDir || _stampDir == null) {
+      _stampDir = hostDir;
+      final dir = hostDir;
+      try {
+        _localStamp = dir == null ? null : File('$dir/.stamp').readAsStringSync().trim();
+      } catch (_) {
+        _localStamp = null;
+      }
+    }
+    return _localStamp;
+  }
+
+  /// Whether the agent on the server is another version than the one this app carries: the server names the bundle it
+  /// came from when the link comes up (`hello_server.bundleStamp`; older hosts do not, and count as other). Null when it
+  /// cannot be told (not on a server, not connected yet, no bundle here).
+  bool? get serverOutdated {
+    if (!active) return null;
+    final hello = agent.client.serverHello;
+    final local = localStamp;
+    if (hello == null || local == null || local.isEmpty) return null;
+    return (hello['bundleStamp'] as String?)?.trim() != local;
+  }
+
   /// The setup script this app carries (the server/ folder in one file, built into the agent bundle), or null when
   /// the bundle has none.
   File? get setupScript {
