@@ -118,6 +118,40 @@ void main() {
     expect(same.message, contains('up to date'));
   }, skip: skip);
 
+  test('a copy that breaks off keeps the old stamp, so the app still says there is an update', () async {
+    installAttachWrapper('${remoteDir()}/host.sock');
+    final host = fakeHost({'host.mjs': '// v1', '.stamp': 'one', 'a.js': 'a'});
+    expect((await setup.install(host.path)).ok, isTrue);
+
+    File('${host.path}/host.mjs').writeAsStringSync('// version two, longer');
+    File('${host.path}/.stamp').writeAsStringSync('two-two');
+    final unreadable = File('${host.path}/zz.js')..writeAsStringSync('cannot be read');
+    Process.runSync('chmod', ['000', unreadable.path]); // rsync copies the rest and then reports it could not read this
+    if (unreadable.existsSync() && Process.runSync('sh', ['-c', 'cat "${unreadable.path}" >/dev/null 2>&1']).exitCode == 0) {
+      return; // running as root, which reads anything: the case cannot be made
+    }
+    File(restartMarker).deleteSync(); // the first install restarted the (not running) agent
+    final r = await setup.install(host.path);
+    expect(r.ok, isFalse, reason: r.message);
+    expect(await setup.remoteStamp(), 'one', reason: 'the stamp only moves once everything else is in place');
+    expect(File(restartMarker).existsSync(), isFalse, reason: 'a failed copy must not restart the agent');
+    Process.runSync('chmod', ['644', unreadable.path]);
+    final again = await setup.install(host.path);
+    expect(again.ok, isTrue, reason: again.message);
+    expect(await setup.remoteStamp(), 'two-two');
+  }, skip: skip);
+
+  test('a running agent is asked to restart when it is idle, and the service is not restarted over its head', () async {
+    final daemon = await TestDaemon.start(socket: '${remoteDir()}/host.sock');
+    cleanup.add(daemon.dispose);
+    installAttachWrapper('${remoteDir()}/host.sock');
+    final r = await setup.install(fakeHost({'host.mjs': 'x', '.stamp': '1'}).path);
+    expect(r.ok, isTrue, reason: r.message);
+    expect(r.message, contains('The agent was restarted'));
+    expect(File(restartMarker).existsSync(), isFalse, reason: 'systemctl restart is only for an agent that does not answer');
+    expect(await daemon.process!.exitCode.timeout(const Duration(seconds: 10)), 0, reason: 'host_restart ends the daemon cleanly');
+  }, skip: skip);
+
   test('an install that cannot start the agent says what was done and what failed', () async {
     installAttachWrapper('${remoteDir()}/host.sock');
     final failing = RemoteSetup(

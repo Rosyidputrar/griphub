@@ -107,6 +107,12 @@ cpSync(join(stage, "package.json"), join(out, "package.json"));
 // Skills GripHub AI Agent ships with; the host seeds them into <agentDir>/skills.
 cpSync(join(here, "skills"), join(out, "skills"), { recursive: true });
 cpSync(join(stage, "node_modules"), join(out, "node_modules"), { recursive: true });
+// The files bootstrap.sh installs outside the host's folder (box launcher, its Containerfile, the attach program). The
+// app's update copies only this folder, so they travel in it and the host puts them in place at start (launcher.ts).
+mkdirSync(join(out, "launcher"), { recursive: true });
+for (const [from, to] of [["box/box", "box"], ["box/Containerfile", "Containerfile"], ["griphub-attach", "griphub-attach"]]) {
+	cpSync(join(SERVER_DIR, from), join(out, "launcher", to));
+}
 
 // 4. Ship as one archive: copying thousands of small files through
 // AssetManager is slow, a single zip streams in one pass. The stamp lets the

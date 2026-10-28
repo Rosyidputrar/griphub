@@ -40,6 +40,7 @@ import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
 import { Notifier } from "./notify.js";
+import { syncLauncher } from "./launcher.js";
 import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
@@ -144,6 +145,12 @@ function bundleStamp(): string | undefined {
 	}
 }
 
+/** The folder this host runs from (its `.stamp`, `skills/` and, on a server, `launcher/` are next to it). */
+const hostDir = fileURLToPath(new URL(".", import.meta.url));
+
+/** The bundle this process started from. The `.stamp` on disk may already be a newer one that is waiting for a restart. */
+const runningStamp = bundleStamp();
+
 /**
  * Sends the host's records to the app. On the phone that is stdout, as always (no numbering, no buffer). As a daemon
  * the hub numbers what is worth replaying and keeps it, so an app that lost its connection gets exactly what it
@@ -153,7 +160,7 @@ const hub = new Hub({
 	replay: !!listenPath,
 	mode,
 	hostVersion: VERSION,
-	bundleStamp: bundleStamp(),
+	bundleStamp: runningStamp,
 	handle: (cmd) => handle(cmd as Command),
 	// Only tests shorten these.
 	pingIntervalMs: Number(process.env.GRIPHUB_PING_MS) || undefined,
@@ -1500,6 +1507,9 @@ async function handle(cmd: Command): Promise<unknown> {
 				runs: { running: runs.running, queued: runs.runs.filter((r) => r.status === "queued").length },
 				subagents: subagents.busy(),
 				clientInBackground: hub.clientInBackground(),
+				// An update is copied and the host is waiting for the work in flight to end before it restarts.
+				restartPending: restartGate.pending,
+				bundleStamp: runningStamp ?? null,
 				// Where the agent's commands run: the app shows a box that is not built (commands then fail) as a problem.
 				...(server ? { box: await boxHealth() } : {}),
 				// The zone schedules run in (timezone_set), as an offset the app can compare with the phone's.
@@ -1724,6 +1734,11 @@ async function main() {
 	// A server runs on UTC as a rule; the app tells it the phone's time zone (timezone_set), so "every day at 09:00"
 	// means the user's 09:00.
 	if (server && integrations.settings.timeZone) process.env.TZ = integrations.settings.timeZone;
+	// The app's update copies this host's folder only; the box launcher and its files come in it and are put in place here.
+	if (server) {
+		const replaced = syncLauncher({ hostDir, griphubDir, warn: (m) => log("launcher:", m) });
+		if (replaced.length) log("launcher updated:", replaced.join(", "));
+	}
 	if (server) {
 		const shell = settingsManager.getShellPath();
 		if (box.available && integrations.settings.containerShell !== false && shell !== boxScript) {

@@ -668,7 +668,12 @@ void main() {
   group('ServerScreen on a connected server', () {
     Map<String, Object?> notify = {'enabled': false, 'url': 'https://ntfy.sh', 'topic': null};
 
-    Future<void> openConnected(WidgetTester tester, {String diskLevel = 'ok', Map<String, Object?>? box}) async {
+    Future<void> openConnected(
+      WidgetTester tester, {
+      String diskLevel = 'ok',
+      Map<String, Object?>? box,
+      bool restartPending = false,
+    }) async {
       configure(saved: true, active: true);
       notify = {'enabled': false, 'url': 'https://ntfy.sh', 'topic': null};
       backend.onCommand = (c) => switch (c['type']) {
@@ -680,6 +685,7 @@ void main() {
           'subagents': true,
           'node': 'v24.22.0',
           'box': ?box,
+          'restartPending': restartPending,
         },
         'settings_get' => {'notify': notify},
         'settings_set' => () {
@@ -714,6 +720,16 @@ void main() {
       expect(find.text('2 h 5 min'), findsOneWidget);
       expect(find.text('working'), findsOneWidget);
       expect(find.textContaining('almost full'), findsNothing);
+    });
+
+    testWidgets('says when a copied update is waiting for the agent to be idle', (tester) async {
+      await openConnected(tester, restartPending: true);
+      expect(find.text('Update copied · restarts when the current work is done'), findsOneWidget);
+    });
+
+    testWidgets('says nothing about an update when none is waiting', (tester) async {
+      await openConnected(tester);
+      expect(find.textContaining('Update copied'), findsNothing);
     });
 
     testWidgets('says where the agent\'s commands run', (tester) async {
