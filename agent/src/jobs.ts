@@ -18,6 +18,12 @@ import { Type } from "typebox";
 /** The longest a job may run. */
 export const JOB_LIMIT_MINUTES = 60;
 
+/** How many jobs one chat may run at a time (like subagent's MAX_RUNNING): a runaway loop cannot fork endlessly. */
+export const MAX_RUNNING_PER_CHAT = 3;
+
+/** How many finished jobs are remembered per chat; older records go when a new job starts. */
+export const KEPT_PER_CHAT = 20;
+
 /** How much of a job's output is kept, from the end. */
 export const OUTPUT_CAP = 32 * 1024;
 
@@ -68,6 +74,8 @@ interface Running {
 	child: ChildProcess;
 	timer: NodeJS.Timeout;
 	stopReason?: "timeout" | "stopped";
+	/** Its chat was deleted: when it ends, nobody is called back and the record goes. */
+	forgotten?: boolean;
 }
 
 export class Jobs {
@@ -99,6 +107,11 @@ export class Jobs {
 	start(o: { sessionFile: string; command: string; cwd: string; label?: string; minutes?: number; toolCallId?: string }): JobRecord {
 		const command = o.command.trim();
 		if (!command) throw new Error("The job needs a command");
+		const mine = [...this.running.values()].filter((r) => r.job.sessionFile === o.sessionFile).length;
+		if (mine >= MAX_RUNNING_PER_CHAT) {
+			throw new Error(`This chat already runs ${mine} background jobs; wait for one to end or stop one first`);
+		}
+		this.prune(o.sessionFile);
 		const minutes = Math.min(JOB_LIMIT_MINUTES, Math.max(1, Math.round(o.minutes ?? JOB_LIMIT_MINUTES)));
 		const job: JobRecord = {
 			id: `j${this.epoch}-${this.next++}`,
@@ -153,6 +166,24 @@ export class Jobs {
 		return job;
 	}
 
+	/** Forgets the finished jobs of a chat (it was deleted); its running jobs are stopped and not called back. */
+	forgetSession(sessionFile: string) {
+		for (const run of [...this.running.values()]) {
+			if (run.job.sessionFile !== sessionFile) continue;
+			run.forgotten = true;
+			this.kill(run.job.id, "stopped");
+		}
+		for (const [id, job] of this.jobs) if (job.sessionFile === sessionFile && job.status !== "running") this.jobs.delete(id);
+	}
+
+	/** Drops a chat's oldest finished records past [KEPT_PER_CHAT], so the list never grows with the host's age. */
+	private prune(sessionFile: string) {
+		const ended = [...this.jobs.values()]
+			.filter((j) => j.sessionFile === sessionFile && j.status !== "running")
+			.sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0));
+		for (const old of ended.slice(0, Math.max(0, ended.length - (KEPT_PER_CHAT - 1)))) this.jobs.delete(old.id);
+	}
+
 	/** Stops every job without calling anyone back (the host is shutting down). */
 	stopAll() {
 		for (const run of [...this.running.values()]) {
@@ -180,6 +211,10 @@ export class Jobs {
 		job.exitCode = code;
 		job.finishedAt = this.now();
 		job.status = run.stopReason ?? (code === 0 ? "done" : "failed");
+		if (run.forgotten) {
+			this.jobs.delete(job.id);
+			return;
+		}
 		this.hooks.send({ type: "job", job: jobWire(job, this.now()) });
 		this.hooks.finished(job);
 	}

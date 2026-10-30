@@ -152,6 +152,8 @@ class AgentController extends ChangeNotifier {
   }
 
   /// Re-reads the host's background jobs (at boot, and after a reconnect that could not replay what it missed).
+  /// All chats' jobs on purpose: the store draws other chats' cards after a switch, and the keep-alive counts every
+  /// running job on the host. The host caps what it keeps per chat, so this list stays small.
   Future<void> refreshJobs() async {
     final list = await client.call<List>('job_list');
     jobStore.replaceAll(list.whereType<Map>().map((m) => m.cast<String, dynamic>()));

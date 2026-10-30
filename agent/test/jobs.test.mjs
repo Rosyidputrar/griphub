@@ -4,7 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bundle, tempDir, waitFor } from "./helpers.mjs";
 
-const { Jobs, jobReport, jobWire, OUTPUT_CAP, REPORT_CAP, JOB_LIMIT_MINUTES } = await bundle("jobs");
+const { Jobs, jobReport, jobWire, OUTPUT_CAP, REPORT_CAP, JOB_LIMIT_MINUTES, MAX_RUNNING_PER_CHAT, KEPT_PER_CHAT } =
+	await bundle("jobs");
 
 function jobsFor(t, extra = {}) {
 	const records = [];
@@ -75,4 +76,40 @@ test("an empty command is refused, and an unknown job cannot be stopped", async 
 	const { jobs } = jobsFor(t);
 	assert.throws(() => jobs.start({ sessionFile: "c", cwd: tempDir(t), command: "  " }), /needs a command/);
 	assert.throws(() => jobs.stop("nope"), /Unknown job/);
+});
+
+test("one chat runs a few jobs at most; another chat is not held back by them", async (t) => {
+	const { jobs } = jobsFor(t);
+	const cwd = tempDir(t);
+	for (let i = 0; i < MAX_RUNNING_PER_CHAT; i++) jobs.start({ sessionFile: "a", cwd, command: "sleep 30" });
+	assert.throws(() => jobs.start({ sessionFile: "a", cwd, command: "sleep 30" }), /already runs \d+ background jobs/);
+	const other = jobs.start({ sessionFile: "b", cwd, command: "true" });
+	assert.equal(other.status, "running");
+});
+
+test("old finished records are dropped per chat, so job_list never grows with the host's age", async (t) => {
+	const { jobs, finished } = jobsFor(t);
+	const cwd = tempDir(t);
+	const want = KEPT_PER_CHAT + 5;
+	for (let i = 0; i < want; i++) {
+		jobs.start({ sessionFile: "a", cwd, command: "true" });
+		await waitFor("the job to end", () => finished.length === i + 1, 10_000);
+	}
+	jobs.start({ sessionFile: "b", cwd, command: "sleep 30" });
+	assert.ok(jobs.list("a").length <= KEPT_PER_CHAT, `kept ${jobs.list("a").length} of chat a`);
+	assert.equal(jobs.list("b").length, 1, "another chat's records are its own");
+	assert.equal(jobs.list().length, jobs.list("a").length + 1);
+});
+
+test("a deleted chat's jobs are stopped and forgotten, with no callback", async (t) => {
+	const { jobs, finished } = jobsFor(t);
+	const cwd = tempDir(t);
+	jobs.start({ sessionFile: "a", cwd, command: "sleep 30" });
+	const ended = jobs.start({ sessionFile: "a", cwd, command: "true" });
+	await waitFor("the quick job to end", () => ended.status !== "running", 10_000);
+	const callbacks = finished.length;
+	jobs.forgetSession("a");
+	await waitFor("the running one to die", () => jobs.busy() === false, 10_000);
+	assert.equal(jobs.list("a").length, 0, "no record outlives its chat");
+	assert.equal(finished.length, callbacks, "nobody was called back for the forgotten chat");
 });

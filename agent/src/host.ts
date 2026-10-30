@@ -597,19 +597,23 @@ const JOB_MESSAGE = "griphub_job";
 /** Jobs that ended and have not called their chat back yet (it was busy, or another chat was open). */
 const finishedJobs: JobRecord[] = [];
 
+/** How many turns in a row job callbacks may start with no word from the user; then the results only land in the chat. */
+const JOB_CHAIN_LIMIT = 5;
+
+/** Job-callback turns since the user last said something (host.ts "prompt" resets it). */
+let jobChain = 0;
+
 /**
  * Calls the open chat back with the jobs of it that ended, once it is idle: one turn for all of them, with no message
  * from the user. Waits while it works (its turn ends first) and while another chat is open (it is called back when it
- * is opened again). Never past the daily budget or onto a full disk: the results are then added without a turn, and
- * the user is told why the agent did not go on.
+ * is opened again). Never past the daily budget, onto a full disk, or past JOB_CHAIN_LIMIT turns with no word from the
+ * user: the results are then added without a turn, and the user is told why the agent did not go on.
  */
 async function deliverJobs() {
 	const s = session;
 	if (!s || s.isStreaming || fallbackPending) return;
 	const key = s.sessionFile ?? s.sessionId;
-	const mine = finishedJobs.filter((j) => j.sessionFile === key);
-	if (!mine.length) return;
-	for (const j of mine) finishedJobs.splice(finishedJobs.indexOf(j), 1);
+	if (!finishedJobs.some((j) => j.sessionFile === key)) return;
 	let held = budgetError();
 	if (!held) {
 		try {
@@ -618,19 +622,29 @@ async function deliverJobs() {
 			held = (e as Error).message;
 		}
 	}
-	try {
-		for (const [i, job] of mine.entries()) {
-			const lastOne = i === mine.length - 1;
+	if (!held && jobChain >= JOB_CHAIN_LIMIT) held = `it already went on ${jobChain} times since your last message`;
+	// One at a time, each taken off the queue only once it was sent: when a send fails, the rest stay queued and are
+	// delivered on the next try (they used to be dropped with it).
+	let started = false;
+	for (;;) {
+		const at = finishedJobs.findIndex((j) => j.sessionFile === key);
+		if (at < 0) break;
+		const job = finishedJobs[at];
+		const lastOne = !finishedJobs.some((j, i) => i > at && j.sessionFile === key);
+		try {
 			await s.sendCustomMessage(
 				{ customType: JOB_MESSAGE, content: jobReport(job), display: true, details: { job: jobWire(job) } },
 				{ triggerTurn: lastOne && !held },
 			);
+		} catch (e) {
+			send({ type: "error", message: `Could not continue after the background job: ${(e as Error).message}` });
+			return;
 		}
-	} catch (e) {
-		send({ type: "error", message: `Could not continue after the background job: ${(e as Error).message}` });
-		return;
+		finishedJobs.splice(at, 1);
+		if (lastOne && !held) started = true;
 	}
-	if (held) send({ type: "notice", message: `The background job ended, but the agent did not continue: ${held}` });
+	if (started) jobChain++;
+	else if (held) send({ type: "notice", message: `The background job ended, but the agent did not continue: ${held}` });
 }
 
 function messageText(m: any): string {
@@ -897,6 +911,11 @@ async function deleteSessions(paths: string[], cwd?: string) {
 			// Already gone.
 		}
 	}
+	// A deleted chat's jobs die with it: nothing to call back, no records that outlive their chat. Job records carry
+	// the session file as the chat gave it, so both sides are resolved before they are compared.
+	const gone = new Set(files);
+	for (const job of jobs.list()) if (gone.has(resolve(job.sessionFile))) jobs.forgetSession(job.sessionFile);
+	for (let i = finishedJobs.length - 1; i >= 0; i--) if (gone.has(resolve(finishedJobs[i].sessionFile))) finishedJobs.splice(i, 1);
 	return { deleted, ...state() };
 }
 
@@ -1090,6 +1109,8 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "prompt": {
 			// Remembered before anything can refuse it, so Try again knows what was asked.
 			lastPrompt = { text: cmd.text, images: cmd.images, sessionId: s.sessionId };
+			// The user spoke: job callbacks may start turns again (deliverJobs).
+			jobChain = 0;
 			checkBudget();
 			// A server with a nearly full disk takes no new work (health.ts); on the phone this never refuses.
 			await health.assertRoom();
