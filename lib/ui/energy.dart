@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'i18n.dart';
 import 'theme.dart';
 
 /// How a wait ended, for an [EnergySpinner] that turns into a check or a cross.
@@ -33,11 +34,13 @@ class EnergyColors {
   final double tailFloor;
 
   static const dark = EnergyColors(
-    palette: [Color(0xFFDBEAFE), Color(0xFF1E3CFF), Color(0xFF4F46E5), Color(0xFF7C3AED), Color(0xFFC026D3)],
+    // Blue and indigo a step lighter than the deep ones they started as (3:1 on the page): at 44 px the tail's end
+    // sank into black.
+    palette: [Color(0xFFDBEAFE), Color(0xFF4A6BFF), Color(0xFF6366F1), Color(0xFF7C3AED), Color(0xFFC026D3)],
     halo: Color(0x297C3AED),
     success: Color(0xFF4ADE80),
     failure: Color(0xFFFF6369),
-    tailFloor: .12,
+    tailFloor: .2,
   );
 
   /// On white a light head disappears and a glow turns into haze: the same hues, deeper, and only a faint halo.
@@ -71,12 +74,18 @@ const energyHeroSize = 28.0;
 /// It stays cheap: each comet is one path built once per size and theme, and a frame only turns the canvas and draws
 /// it (no blur, no offscreen layers). It repaints on its own layer without rebuilding, stops when its route is hidden,
 /// and stands still when the system removes animations.
+///
+/// A screen reader hears "Loading…", then "Done" or "Failed" once an outcome is given.
 class EnergySpinner extends StatefulWidget {
-  const EnergySpinner({super.key, this.size = 16, this.color, this.outcome});
+  const EnergySpinner({super.key, this.size = 16, this.color, this.outcome, this.semanticsLabel});
 
   final double size;
   final Color? color;
   final EnergyOutcome? outcome;
+
+  /// What a screen reader says in place of "Loading…" (or "Done", "Failed"). Empty where text next to the spinner
+  /// already says it, so it is not read twice.
+  final String? semanticsLabel;
 
   /// How long the turn into a check or a cross takes until the symbol stands (its ripple fades a little after).
   static const outcomeDuration = Duration(milliseconds: 650);
@@ -149,7 +158,14 @@ class _EnergySpinnerState extends State<EnergySpinner> with SingleTickerProvider
   @override
   Widget build(BuildContext context) {
     final colors = EnergyColors.of(context);
-    return RepaintBoundary(
+    final label =
+        widget.semanticsLabel ??
+        switch (widget.outcome) {
+          null => tr('Loading…'),
+          EnergyOutcome.success => tr('Done'),
+          EnergyOutcome.failure => tr('Failed'),
+        };
+    final spinner = RepaintBoundary(
       child: SizedBox.square(
         dimension: widget.size,
         child: CustomPaint(
@@ -165,6 +181,9 @@ class _EnergySpinnerState extends State<EnergySpinner> with SingleTickerProvider
         ),
       ),
     );
+    if (label.isEmpty) return ExcludeSemantics(child: spinner);
+    // The outcome is announced when it comes, not only when the spinner is reached.
+    return Semantics(label: label, liveRegion: widget.outcome != null, child: spinner);
   }
 }
 

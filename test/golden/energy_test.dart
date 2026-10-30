@@ -227,4 +227,63 @@ void main() {
       expect(results, [null]);
     });
   });
+
+  group('screen readers', () {
+    testWidgets('hear "Loading…", in the app\'s language, then "Done" or "Failed"', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final outcome = ValueNotifier<EnergyOutcome?>(null);
+      await pumpLook(
+        tester,
+        const Look(language: 'id'),
+        Scaffold(
+          body: Center(
+            child: ValueListenableBuilder(
+              valueListenable: outcome,
+              builder: (_, o, _) => EnergySpinner(size: 44, outcome: o),
+            ),
+          ),
+        ),
+      );
+      expect(find.bySemanticsLabel('Memuat…'), findsOneWidget);
+      outcome.value = EnergyOutcome.failure;
+      await tester.pump();
+      expect(find.bySemanticsLabel('Gagal'), findsOneWidget);
+      expect(tester.getSemantics(find.bySemanticsLabel('Gagal')).flagsCollection.isLiveRegion, isTrue, reason: 'announced when it comes');
+      outcome.value = EnergyOutcome.success;
+      await tester.pump();
+      expect(find.bySemanticsLabel('Selesai'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('a spinner in place of a button\'s text gives the button a label', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpLook(tester, const Look(), Scaffold(body: Center(child: FilledButton(onPressed: () {}, child: const BusySpinner()))));
+      expect(find.bySemanticsLabel('Loading…'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('the dialog\'s spinner is not read on top of its own label', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final work = Completer<void>();
+      await pumpLook(
+        tester,
+        const Look(),
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => runWithProgress(context, 'Restoring…', () => work.future),
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('go'));
+      await frames(tester, const Duration(milliseconds: 300));
+      expect(find.bySemanticsLabel('Restoring…'), findsOneWidget);
+      expect(find.bySemanticsLabel('Loading…'), findsNothing);
+      work.complete();
+      await frames(tester, const Duration(milliseconds: 300));
+      semantics.dispose();
+    });
+  });
 }
