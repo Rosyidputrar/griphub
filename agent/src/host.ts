@@ -900,12 +900,18 @@ function billingNotice(): string | null {
 	return "Claude subscription sign-in bills third-party apps like this one per token from extra usage, not your plan limits. Manage it at claude.ai/settings/usage, or use an API key.";
 }
 
-/** Rebuilds the active session so tool settings (shell, MCP tools) take effect. */
+/**
+ * Rebuilds the active session so tool settings (shell, MCP tools) take effect, in the folder the chat is in. pi writes
+ * a chat's file only once it has a message, and opening a file that isn't there yet takes the process's own folder:
+ * a new chat reopened that way (MCP coming up after start, a shell change) moved to wherever the host was started, a
+ * server daemon's `/` or home, and the agent's files went there.
+ */
 async function reopenSession() {
 	const s = session!;
 	if (s.isStreaming) throw new Error("Wait for the agent to finish first");
 	const file = s.sessionFile;
-	await openSession(file ? SessionManager.open(file) : SessionManager.create(s.sessionManager.getCwd()));
+	const cwd = s.sessionManager.getCwd();
+	await openSession(file ? SessionManager.open(file, undefined, cwd) : SessionManager.create(cwd));
 }
 
 /**
