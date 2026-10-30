@@ -712,3 +712,66 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 	const leftovers = execFileSync("find", [dir, "-name", "restore-*.zip"]).toString().trim();
 	assert.equal(leftovers, "");
 });
+
+// ---------------------------------------------------------------------------
+// The context limit: past it the chat is summarized, long before a large model's own limit
+
+/** A phone host on the mock router with a model of [contextWindow] tokens and the context limit set to [compactAt]. */
+async function phoneWithModel(t, contextWindow, compactAt) {
+	const dir = home(t);
+	writeFileSync(join(dir, "release"), "");
+	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
+		cwd: join(dir, "workspace"),
+		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Oke." }),
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	t.after(() => child.kill("SIGKILL"));
+	const { records, until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	let id = 0;
+	const call = async (type, args = {}) => {
+		const n = ++id;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: "mock-model", name: "Mock", contextWindow }] } })).ok, true);
+	assert.equal((await call("set_model", { provider: "griphub", model: "mock-model" })).ok, true);
+	const before = (await call("settings_get")).data;
+	assert.equal(before.compactAt, 300_000, "the default the app shows");
+	const set = await call("settings_set", { settings: { compactAt } });
+	assert.equal(set.ok, true, set.error);
+	assert.equal(set.data.compactAt, compactAt, "the app sees what was saved, 0 included");
+	// Each prompt is about 10k tokens.
+	const say = async (i) => {
+		const from = records.length;
+		await call("prompt", { text: `Langkah ${i}: ${"kata ".repeat(8000)}` });
+		await until((r, j) => j >= from && r.type === "agent_done" && typeof r.turnMs === "number");
+	};
+	return { records, until, call, say };
+}
+
+const compactions = (records) => records.filter((r) => r.type === "event" && r.event.type.startsWith("compaction")).map((r) => r.event);
+
+test("past the context limit the chat is summarized, well before the model's own limit", async (t) => {
+	const h = await phoneWithModel(t, 200_000, 25_000);
+	for (let i = 0; i < 4; i++) await h.say(i);
+	const end = await h.until((r) => r.type === "event" && r.event.type === "compaction_end", 30_000, "for the summary");
+	const [start] = compactions(h.records);
+	assert.equal(start.type, "compaction_start");
+	assert.equal(start.reason, "limit", "the host's own, not pi's near the model's limit");
+	assert.equal(start.limit, 25_000);
+	assert.equal(end.event.reason, "limit");
+	assert.equal(end.event.errorMessage, undefined);
+	assert.ok(end.event.result.tokensBefore > 25_000);
+	const history = (await h.call("messages")).data;
+	assert.ok(history.some((m) => m.role === "compactionSummary"), "the older turns are a summary now");
+	// A prompt sent right after goes through (it waits for a summary rather than being refused).
+	await h.say(9);
+});
+
+test("a context limit of 0 leaves it to the model's own limit", async (t) => {
+	const h = await phoneWithModel(t, 200_000, 0);
+	for (let i = 0; i < 4; i++) await h.say(i);
+	await new Promise((r) => setTimeout(r, 300));
+	assert.deepEqual(compactions(h.records), []);
+});

@@ -13,6 +13,7 @@ import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/energy.dart';
 import 'package:griphub_agent/ui/files_screen.dart';
 import 'package:griphub_agent/ui/message_views.dart';
 import 'package:griphub_agent/ui/model_sheet.dart';
@@ -179,7 +180,7 @@ void main() {
       await tester.tap(find.text('slow'));
       await settle();
       expect(find.text('top.txt'), findsNothing, reason: 'the old folder is not shown under the new title');
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(EnergySpinner), findsOneWidget);
 
       // Back to the top before the slow folder answered; then it answers.
       await tester.binding.handlePopRoute();
@@ -210,7 +211,7 @@ void main() {
       await tester.tap(find.text('30 days'));
       await frames(tester);
       expect(find.text('seven-model'), findsNothing);
-      expect(find.byType(CircularProgressIndicator), findsWidgets);
+      expect(find.byType(EnergySpinner), findsWidgets);
 
       thirty.complete([
         {'day': day, 'provider': 'griphub', 'model': 'thirty-model', 'input': 5000, 'output': 50, 'requests': 4},
@@ -279,11 +280,11 @@ void main() {
       await frames(tester);
       await tester.tap(find.text('Run now'));
       await frames(tester, 2);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(EnergySpinner), findsOneWidget);
       late.complete(runsState());
       await frames(tester);
       expect(find.text('Queued: "Nightly check"'), findsOneWidget);
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byType(EnergySpinner), findsNothing);
     });
   });
 
@@ -319,7 +320,7 @@ void main() {
       await tester.tap(find.text('Model B'));
       await frames(tester, 3);
       expect(find.text('Model B'), findsOneWidget, reason: 'the sheet is still open');
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(EnergySpinner), findsOneWidget);
       // Another model can't be picked meanwhile.
       await tester.tap(find.text('Model A'));
       await frames(tester, 2);

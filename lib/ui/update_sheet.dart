@@ -215,7 +215,7 @@ class _UpdateSheet extends StatelessWidget {
     final release = updater.latest;
     switch (updater.phase) {
       case UpdatePhase.checking:
-        return [const Center(child: SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2)))];
+        return [const Center(child: BusySpinner(size: 22))];
       case UpdatePhase.available:
         return [
           PrimaryButton(label: tr('Update now'), icon: LucideIcons.download, onPressed: updater.startDownload),

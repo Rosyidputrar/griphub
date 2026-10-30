@@ -122,7 +122,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
         return Scaffold(
           appBar: AppBar(title: Text(tr('Linux container'))),
           body: c == null
-              ? const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+              ? const Center(child: BusySpinner(size: 20))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
                   children: [
@@ -208,7 +208,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                                 ? '${tr('Every command the agent runs happens inside')} ${d.name}'
                                 : tr('The agent uses the Android shell; `box` still reaches Linux'),
                             trailing: switching
-                                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                ? const BusySpinner(size: 18)
                                 : Switch(value: c.enabled, onChanged: widget.agent.busy ? null : _setShell),
                           ),
                           SettingsRow(

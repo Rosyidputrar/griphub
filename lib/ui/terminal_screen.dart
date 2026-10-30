@@ -686,7 +686,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           ? Center(child: Text('${tr('Could not start a shell')}: $error'))
           : s == null
           ? starting
-                ? const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+                ? const Center(child: BusySpinner(size: 18))
                 : Center(
                     child: SizedBox(
                       width: 220,
@@ -956,7 +956,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
                   decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
                   alignment: Alignment.center,
                   child: starting
-                      ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const BusySpinner(size: 14)
                       : Icon(LucideIcons.plus, size: 16, color: p.text),
                 ),
               ),

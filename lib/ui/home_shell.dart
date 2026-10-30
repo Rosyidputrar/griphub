@@ -1380,7 +1380,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                   if (!snap.hasData)
                     const Padding(
                       padding: EdgeInsets.all(40),
-                      child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                      child: Center(child: BusySpinner.page()),
                     )
                   else if (all.isEmpty)
                     Padding(

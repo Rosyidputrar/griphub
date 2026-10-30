@@ -272,7 +272,7 @@ class _GitScreenState extends State<GitScreen> {
         actions: [IconButton(tooltip: tr('Refresh'), icon: const Icon(LucideIcons.refreshCw), onPressed: _refresh)],
       ),
       body: s == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: BusySpinner.page())
           : !s.isRepo
           ? _notRepo(context)
           : Column(
@@ -567,12 +567,7 @@ class _GitScreenState extends State<GitScreen> {
               width: 44,
               height: 40,
               child: busy
-                  ? Center(
-                      child: SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: p.muted),
-                      ),
-                    )
+                  ? const Center(child: BusySpinner())
                   : IconButton(
                       tooltip: staged ? 'Unstage' : 'Stage',
                       icon: Icon(
@@ -628,7 +623,7 @@ class _GitScreenState extends State<GitScreen> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final log = _log;
-    if (log == null) return const Center(child: CircularProgressIndicator());
+    if (log == null) return const Center(child: BusySpinner.page());
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
@@ -711,7 +706,7 @@ class _GitScreenState extends State<GitScreen> {
     }
     if (_issuesError != null && _issues == null) return message(tr("Couldn't load issues"), '$_issuesError');
     final issues = _issues;
-    if (issues == null) return const Center(child: CircularProgressIndicator());
+    if (issues == null) return const Center(child: BusySpinner.page());
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
@@ -927,7 +922,7 @@ class _BranchSheetState extends State<BranchSheet> {
         title: b.name,
         subtitle: b.remote && localNames.contains(target) ? 'Local branch $target exists' : null,
         trailing: _busy == b.name || _busy == target
-            ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.muted))
+            ? BusySpinner()
             : b.current
             ? Icon(LucideIcons.check, size: 18, color: p.accent)
             : const SizedBox.shrink(),
@@ -970,7 +965,7 @@ class _BranchSheetState extends State<BranchSheet> {
               if (branches == null)
                 const Padding(
                   padding: EdgeInsets.all(32),
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(child: BusySpinner.page()),
                 )
               else ...[
                 if (local.isNotEmpty) ...[
@@ -1059,7 +1054,7 @@ class _DiffSheetState extends State<_DiffSheet> {
               if (!snap.hasData) {
                 return const Padding(
                   padding: EdgeInsets.all(32),
-                  child: Center(child: CircularProgressIndicator()),
+                  child: Center(child: BusySpinner.page()),
                 );
               }
               if (snap.data!.trim().isEmpty && widget.file.untracked) {
@@ -1125,7 +1120,7 @@ class _ChangedFileContentState extends State<_ChangedFileContent> {
         if (snap.hasError) return Text('${snap.error}', style: text.bodySmall?.copyWith(color: p.danger));
         final loaded = snap.data;
         if (loaded == null) {
-          return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
+          return const Padding(padding: EdgeInsets.all(32), child: Center(child: BusySpinner.page()));
         }
         if (loaded.message != null) return Text(loaded.message!, style: text.bodySmall);
         if (loaded.text == null) {

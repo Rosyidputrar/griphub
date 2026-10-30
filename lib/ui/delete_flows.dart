@@ -5,6 +5,7 @@ import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import '../agent/models.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// Asks before deleting chats; deleting can't be undone.
@@ -147,7 +148,7 @@ class _DeleteProjectDialogState extends State<_DeleteProjectDialog> {
                   const Padding(
                     padding: EdgeInsets.all(16),
                     child: Center(
-                      child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                      child: BusySpinner(size: 20),
                     ),
                   )
                 else ...[
@@ -192,7 +193,7 @@ class _DeleteProjectDialogState extends State<_DeleteProjectDialog> {
                 style: TextButton.styleFrom(foregroundColor: p.danger),
                 onPressed: canDelete ? _delete : null,
                 child: _deleting
-                    ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const BusySpinner()
                     : Text(tr('Delete project')),
               ),
           ],

@@ -12,6 +12,7 @@ import '../agent/sent_attachments.dart';
 import '../agent/updater.dart';
 import 'code_view.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// Opens [attachment] in a full-screen viewer: pictures full-screen with
@@ -138,7 +139,7 @@ class _ViewerBodyState extends State<_ViewerBody> {
       future: _loaded,
       builder: (context, snap) {
         final loaded = snap.data;
-        if (loaded == null) return const Center(child: CircularProgressIndicator());
+        if (loaded == null) return const Center(child: BusySpinner.page());
         return _content(context, loaded);
       },
     );
@@ -250,10 +251,7 @@ class _AgentImageState extends State<AgentImage> {
             width: widget.width,
             height: widget.height,
             child: Center(
-              child: SizedBox.square(
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 1.6, color: context.palette.muted),
-              ),
+              child: const BusySpinner(size: 18),
             ),
           );
         }

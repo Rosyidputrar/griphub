@@ -177,6 +177,12 @@ class AppSettings {
   final Map<String, dynamic> json;
 
   String get dns => json['dns'] as String? ?? 'cloudflare';
+
+  /// Tokens of context past which the chat is summarized (host.ts capContext); 0 leaves it to the model's own limit.
+  int get compactAt => (json['compactAt'] as num?)?.toInt() ?? compactAtDefault;
+
+  /// The host's default (integrations.ts COMPACT_AT_DEFAULT), for a host too old to send it.
+  static const compactAtDefault = 300000;
   String? get dnsUrl => json['dnsUrl'] as String?;
   bool get hasBraveKey => json['braveKey'] == true;
   bool get hasTavilyKey => json['tavilyKey'] == true;

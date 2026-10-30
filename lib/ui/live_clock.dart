@@ -21,6 +21,8 @@ class LiveClock extends StatefulWidget {
     this.took,
     this.state = ClockState.running,
     this.detail,
+    this.showTime = true,
+    this.wrap = false,
   });
 
   /// What is being timed ("Working", "Build"). Shown before the time.
@@ -35,6 +37,12 @@ class LiveClock extends StatefulWidget {
 
   /// Said after the time (tokens so far, an exit code).
   final String? detail;
+
+  /// False for something that ended long ago with no time kept (a summary read back from a chat): label and detail only.
+  final bool showTime;
+
+  /// The whole line wraps on a narrow screen instead of cutting the label short (where the label says what happened).
+  final bool wrap;
 
   @override
   State<LiveClock> createState() => _LiveClockState();
@@ -111,16 +119,20 @@ class _LiveClockState extends State<LiveClock> with SingleTickerProviderStateMix
       ClockState.failed => LucideIcons.circleX,
       ClockState.stopped => LucideIcons.circleStop,
     };
-    // Only the label gives way on a narrow line: the time (and what follows it) is what the clock is for.
-    final label = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Flexible(
-          child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
-        ),
-        Text(' · ${[formatDurationShort(_elapsed), ?widget.detail].join(' · ')}', maxLines: 1, style: style),
-      ],
-    );
+    final rest = [if (widget.showTime) formatDurationShort(_elapsed), ?widget.detail];
+    // Only the label gives way on a narrow line: the time (and what follows it) is what the clock is for. Or, with
+    // [wrap], nothing gives way and the line wraps.
+    final label = widget.wrap
+        ? Text([widget.label, ...rest].join(' · '), style: style)
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+              ),
+              if (rest.isNotEmpty) Text(' · ${rest.join(' · ')}', maxLines: 1, style: style),
+            ],
+          );
     return Semantics(
       liveRegion: !_running,
       label: _running ? '${widget.label}, ${tr('running')}' : null,

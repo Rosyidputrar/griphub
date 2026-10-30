@@ -194,7 +194,7 @@ class _SyncScreenState extends State<SyncScreen> {
                         ].join(' · '),
                         onTap: s.running ? null : _syncNow,
                         trailing: s.running
-                            ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const BusySpinner(size: 18)
                             : null,
                       ),
                       if (s.repo != null)

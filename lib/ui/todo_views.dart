@@ -5,6 +5,7 @@ import '../agent/agent_controller.dart';
 import '../agent/models.dart';
 import '../agent/todos.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// The steps of a plan, each with its state: ✓ done, ◐ in progress, ○ to do.
@@ -126,7 +127,7 @@ class TodoCard extends StatelessWidget {
           ? note(Icon(LucideIcons.circleAlert, size: 15, color: p.danger), tr("Couldn't read the plan"), p.muted)
           : block.args == null
           ? note(
-              SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: p.muted)),
+              BusySpinner(size: 14),
               tr('Planning…'),
               p.muted,
             )

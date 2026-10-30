@@ -859,8 +859,26 @@ class AgentController extends ChangeNotifier {
         run.images = contentImageData((e['result'] as Map?)?['content']);
         run.status = e['isError'] == true ? ToolStatus.failed : ToolStatus.done;
         runningTool = null;
+      // The older turns are being summarized; the line it adds runs a clock until compaction_end says how it went.
       case 'compaction_start':
-        _addNotice('Compacting context…');
+        entries.add(
+          CompactionEntry(
+            startedAt: clock(),
+            limit: e['reason'] == 'limit' ? (e['limit'] as num?)?.toInt() : null,
+          ),
+        );
+      case 'compaction_end':
+        final c = entries.whereType<CompactionEntry>().where((c) => c.running).lastOrNull;
+        if (c != null) {
+          final result = (e['result'] as Map?)?.cast<String, dynamic>();
+          c
+            ..running = false
+            ..took = c.startedAt == null ? null : clock().difference(c.startedAt!)
+            ..aborted = e['aborted'] == true
+            ..error = e['errorMessage'] as String?
+            ..tokensBefore = (result?['tokensBefore'] as num?)?.toInt()
+            ..tokensAfter = (result?['estimatedTokensAfter'] as num?)?.toInt();
+        }
       case 'session_info_changed':
         sessionName = e['name'] as String?;
       case 'thinking_level_changed':
@@ -927,7 +945,7 @@ class AgentController extends ChangeNotifier {
       case 'bashExecution':
         entries.add(NoticeEntry('\$ ${m['command']}\n${m['output']}'));
       case 'compactionSummary':
-        entries.add(NoticeEntry('Earlier messages were summarized to save context.'));
+        entries.add(CompactionEntry(running: false, tokensBefore: (m['tokensBefore'] as num?)?.toInt()));
       // A background job's result: the host's message to the agent, shown as a notice of the job's end.
       case 'custom' when m['customType'] == 'griphub_job':
         final job = (m['details'] as Map?)?['job'];

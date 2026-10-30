@@ -881,13 +881,13 @@ class _DevServerBannerState extends State<DevServerBanner> {
                       previewing.contains(e.key)
                           ? const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              child: BusySpinner(),
                             )
                           : TextButton(onPressed: () => _preview(e.key, e.value), child: Text(tr('Preview'))),
                       opening.contains(e.key)
                           ? const Padding(
                               padding: EdgeInsets.all(12),
-                              child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                              child: BusySpinner(),
                             )
                           : IconButton(
                               tooltip: tr('Share a public link'),

@@ -69,7 +69,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
           title: Text(tr('Accounts & servers')),
         ),
         body: !it.loaded
-            ? const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+            ? const Center(child: BusySpinner(size: 18))
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
@@ -370,7 +370,7 @@ class _GithubConnectState extends State<_GithubConnect> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 1.6, color: p.muted)),
+                    BusySpinner(size: 12),
                     const SizedBox(width: 8),
                     Text(tr('Waiting for you to approve on GitHub…'), style: text.bodySmall),
                   ],
@@ -468,7 +468,7 @@ class _TokenConnectState extends State<_TokenConnect> {
           FilledButton(
             onPressed: busy ? null : _connect,
             child: busy
-                ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const BusySpinner()
                 : Text(tr('Connect')),
           ),
         ],

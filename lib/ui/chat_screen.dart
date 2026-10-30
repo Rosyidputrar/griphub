@@ -667,6 +667,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             NoticeEntry() => NoticeView(e),
             JobEntry() => JobNoticeView(e),
+            CompactionEntry() => CompactionView(e),
           };
           final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
           return Padding(

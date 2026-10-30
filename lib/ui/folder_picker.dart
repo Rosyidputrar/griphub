@@ -302,7 +302,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
                     ],
                   )
                 : _loading && children.isEmpty
-                ? const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                ? const Center(child: BusySpinner(size: 20))
                 : _loadError != null
                 ? Center(
                     child: Padding(

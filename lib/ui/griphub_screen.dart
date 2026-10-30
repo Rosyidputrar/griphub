@@ -169,7 +169,7 @@ class _GripHubScreenState extends State<GripHubScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: BusySpinner.page())
           : ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               children: [
@@ -211,7 +211,7 @@ class _GripHubScreenState extends State<GripHubScreen> {
                       TextButton.icon(
                         onPressed: _busy || _refreshing ? null : _refreshModels,
                         icon: _refreshing
-                            ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const BusySpinner(size: 14)
                             : const Icon(LucideIcons.refreshCw, size: 16),
                         label: Text(tr('Update models')),
                       ),

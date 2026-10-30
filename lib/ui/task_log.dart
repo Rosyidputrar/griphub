@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'ci_panel.dart';
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// Runs [task] in a bottom sheet that streams its output, then shows either
@@ -130,7 +131,7 @@ class _TaskSheetState<T> extends State<_TaskSheet<T>> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final Widget status = running
-        ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.muted))
+        ? BusySpinner()
         : error != null
         ? Icon(LucideIcons.circleAlert, size: 20, color: p.danger)
         : Icon(LucideIcons.circleCheck, size: 20, color: p.success);

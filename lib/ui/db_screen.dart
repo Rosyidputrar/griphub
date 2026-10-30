@@ -511,5 +511,5 @@ class _Spinner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) =>
-      const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)));
+      const Center(child: BusySpinner(size: 18));
 }

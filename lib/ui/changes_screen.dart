@@ -188,7 +188,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
         ],
       ),
       body: list == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: BusySpinner.page())
           : RefreshIndicator(onRefresh: _refresh, child: list.isEmpty ? _empty(context) : _content(context, list)),
     );
   }
@@ -300,7 +300,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
         if (_loadingChanges && changes == null)
           const Padding(
             padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(child: BusySpinner.page()),
           )
         else if (changes == null || changes.files.isEmpty)
           SurfaceCard(
@@ -370,7 +370,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
               child: _loadingFile.contains(f.path)
                   ? const Padding(
                       padding: EdgeInsets.all(20),
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: BusySpinner.page()),
                     )
                   : f.binary
                   ? DiffView(patch: 'Binary files a/${f.path} and b/${f.path} differ', showHeaders: false)

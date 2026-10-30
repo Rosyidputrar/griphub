@@ -98,6 +98,7 @@ class FakeHost {
     'approvalMode': stored['approvalMode'] ?? 'ask_risky',
     'fallbackModels': const [],
     'dailyBudget': stored['dailyBudget'] ?? 0,
+    'compactAt': stored['compactAt'] ?? 300000,
     'subagentCreditLimit': stored['subagentCreditLimit'] ?? 50,
     'subagentMinutesLimit': stored['subagentMinutesLimit'] ?? 30,
     'subagentApprovalMode': stored['subagentApprovalMode'] ?? stored['approvalMode'] ?? 'ask_risky',

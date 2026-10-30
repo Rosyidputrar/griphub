@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'i18n.dart';
+import 'kit.dart';
 import 'theme.dart';
 
 /// Live CI state from the host: GitHub Actions runs → jobs → steps, or a
@@ -28,10 +29,7 @@ Widget ciStatusIcon(BuildContext context, String? status, String? conclusion, {d
   final p = context.palette;
   if (status != 'completed') {
     if (status == 'in_progress') {
-      return SizedBox.square(
-        dimension: size - 3,
-        child: CircularProgressIndicator(strokeWidth: 1.8, color: const Color(0xFFE3B341)),
-      );
+      return BusySpinner(size: size - 3, color: const Color(0xFFE3B341));
     }
     return Icon(LucideIcons.circle, size: size, color: p.faint);
   }

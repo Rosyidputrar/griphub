@@ -312,7 +312,7 @@ class _Loading extends StatelessWidget {
   @override
   Widget build(BuildContext context) => const Padding(
     padding: EdgeInsets.all(24),
-    child: Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+    child: Center(child: BusySpinner(size: 18)),
   );
 }
 
@@ -393,7 +393,7 @@ class _HitList extends StatelessWidget {
                     else if (installing.contains(h.spec))
                       const Padding(
                         padding: EdgeInsets.all(8),
-                        child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: BusySpinner(size: 18),
                       )
                     else
                       IconButton(
