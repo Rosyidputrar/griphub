@@ -131,6 +131,24 @@ Perlu Anda sadari:
   Batas memori/CPU box ada di `~/.griphub/box.conf` (`BOX_MEMORY=2g`, `BOX_SWAP=3g`, `BOX_CPUS=1.5`) dan berlaku saat
   container dibuat lagi (**Reset the box** di app).
 
+## Backup otomatis
+
+Dinyalakan dari app (Pengaturan → Backup & pulihkan → **Backup otomatis server**). App membuat kunci acak 32 byte,
+menyimpannya di HP bersama profil server, dan memberikannya ke server. Setiap jam, bila ada perubahan, daemon menulis
+`~/.griphub/backups/auto-<waktu>.ghb`, dan tiga yang terbaru disimpan.
+
+- **Isi:** data agent (chat, skill, prompt, jadwal), rahasia yang tersimpan (API key, token, server MCP) dalam bentuk
+  terdekripsi *di dalam* arsip terenkripsi, seluruh workspace beserta `.git` dan dotfile, serta kunci deploy
+  `~/.ssh/id_ed25519`. Yang tidak ikut: dependensi dan cache (`node_modules`, `.venv`, `__pycache__`, `.gradle`, …),
+  riwayat undo (`checkpoints`), `authorized_keys`, dan file di atas 512 MB (dicatat di `manifest.json`).
+- **Format:** `GHB1` | iv 12 byte | zip terenkripsi AES-256-GCM | tag 16 byte. Arsip ditulis langsung dalam keadaan
+  terenkripsi; tidak ada salinan plaintext di disk.
+- **Kunci:** server butuh kunci itu untuk menulis backup, dan server memang memegang semua datanya. Kunci melindungi
+  salinan yang keluar dari server atau HP. Mematikan backup otomatis menghapus salinan di server; salinan di HP tetap ada.
+- **Memulihkan:** saat kembali ke agent di HP, app menawarkan backup terbaru. Path workspace server dipetakan ke
+  workspace HP, rahasia dienkripsi ulang dengan kunci HP, dan pengaturan milik mesin (DNS, Linux, zona waktu, ntfy)
+  tetap milik HP. Kunci SSH HP tidak ditimpa bila sudah ada.
+
 ## Server yang lebih besar
 
 Contoh untuk server 4 core / 8 GB (mis. `agentai`): host 3 GB, box 4 GB.
