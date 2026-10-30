@@ -58,6 +58,7 @@ export const REPLAYED_TYPES = new Set([
 	"subagent_finished",
 	"subagent_approval_request",
 	"subagent_approval_dismiss",
+	"job",
 	"integrations",
 	"sync",
 	"models_changed",

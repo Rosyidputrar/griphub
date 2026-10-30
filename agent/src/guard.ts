@@ -65,7 +65,8 @@ const RISKY_BASH = [
  */
 function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
 	if (READ_ONLY.has(toolName)) return null;
-	if (toolName === "bash") {
+	// A background job is a bash command that runs a while: the same second look.
+	if (toolName === "bash" || toolName === "background_job") {
 		const cmd = String(input.command ?? "");
 		const hit = RISKY_BASH.find((re) => re.test(cmd));
 		return hit ? "This command can delete data, publish or reach other machines" : null;
@@ -85,7 +86,7 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, m
 
 /** Summary line for the approval card. */
 function describe(toolName: string, input: Record<string, unknown>) {
-	if (toolName === "bash") return String(input.command ?? "");
+	if (toolName === "bash" || toolName === "background_job") return String(input.command ?? "");
 	if (typeof input.path === "string") return input.path;
 	return JSON.stringify(input).slice(0, 400);
 }
@@ -184,8 +185,8 @@ export class Guard {
 				// `cd app && rm -rf ~`; storing only the tool name let one
 				// write allow every write.
 				const key =
-					event.toolName === "bash"
-						? `bash:${String(input.command ?? "").trim().replace(/\s+/g, " ")}`
+					event.toolName === "bash" || event.toolName === "background_job"
+						? `${event.toolName}:${String(input.command ?? "").trim().replace(/\s+/g, " ")}`
 						: event.toolName === "write" || event.toolName === "edit"
 							? `${event.toolName}:${String(input.path ?? "")}`
 							: `${event.toolName}:${JSON.stringify(input).slice(0, 400)}`;

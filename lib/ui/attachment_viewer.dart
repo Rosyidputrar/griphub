@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -23,6 +24,37 @@ Future<void> openAttachmentViewer(BuildContext context, SentAttachment attachmen
       builder: (_) => AttachmentViewerScreen(attachment: attachment, fs: fs),
     ),
   );
+}
+
+/// Shows a picture held in memory (one a tool returned) full screen, to zoom and pan.
+Future<void> openImageBytesViewer(BuildContext context, Uint8List bytes, {required String title}) {
+  return Navigator.of(context).push(
+    MaterialPageRoute(builder: (_) => ImageBytesViewerScreen(bytes: bytes, title: title)),
+  );
+}
+
+class ImageBytesViewerScreen extends StatelessWidget {
+  const ImageBytesViewerScreen({super.key, required this.bytes, required this.title});
+  final Uint8List bytes;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Scaffold(
+      appBar: AppBar(title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      body: InteractiveViewer(
+        maxScale: 4.0,
+        child: Center(
+          child: Image.memory(
+            bytes,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => Text(tr('Preview is not available for this file'), style: TextStyle(color: p.muted)),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AttachmentViewerScreen extends StatelessWidget {

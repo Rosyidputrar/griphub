@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
 import 'agent_fs.dart';
+import 'clock.dart';
 import 'features.dart';
 import 'integrations.dart';
+import 'jobs.dart';
 import 'models.dart';
 import 'remote_mode.dart';
 import 'sent_attachments.dart';
@@ -65,6 +67,18 @@ class AgentController extends ChangeNotifier {
   /// Live subagents, mirrored from the host's subagent_* records. They are
   /// never transcript entries: the card list is rendered from here.
   final subagentStore = SubagentStore();
+
+  /// Background jobs the agent started (`job` records). Their cards show them live; a job's result arrives in the chat
+  /// as a [JobEntry].
+  final jobStore = JobStore();
+
+  /// Whether the host's job list was read at least once: until then, a card without a job is just not loaded yet, not
+  /// a job the host lost (it forgets them when it restarts).
+  bool jobsLoaded = false;
+
+  /// When the running turn began, by this phone's clock (from the host's count when the app joins a turn already
+  /// under way); null between turns. The chat's live clock counts from here.
+  DateTime? turnStartedAt;
 
   /// The UI language for texts the controller produces (notifications). The
   /// app sets it to `tr`; tests and the default keep English.
@@ -141,6 +155,23 @@ class AgentController extends ChangeNotifier {
     }
   }
 
+  /// Re-reads the host's background jobs (at boot, and after a reconnect that could not replay what it missed).
+  /// All chats' jobs on purpose: the store draws other chats' cards after a switch, and the keep-alive counts every
+  /// running job on the host. The host caps what it keeps per chat, so this list stays small.
+  Future<void> refreshJobs() async {
+    final list = await client.call<List>('job_list');
+    jobStore.replaceAll(list.whereType<Map>().map((m) => m.cast<String, dynamic>()));
+    jobsLoaded = true;
+    features.setJobsRunning(jobStore.running);
+    notifyListeners();
+  }
+
+  /// Stops a background job; its chat is then told it was stopped.
+  Future<void> stopJob(String id) async {
+    jobStore.apply((await client.call<Map>('job_stop', {'jobId': id})).cast<String, dynamic>());
+    notifyListeners();
+  }
+
   /// Re-reads the host's live subagents (after a reconnect or restart of the app side).
   Future<void> refreshSubagents() async {
     final list = await client.call<List>('subagent_list');
@@ -163,6 +194,7 @@ class AgentController extends ChangeNotifier {
       _streaming = null;
       await loadHistory();
       await refreshSubagents();
+      await refreshJobs().catchError((_) {});
       await restoreApprovals();
       await features.refreshRuns().catchError((_) {});
       unawaited(integrations.refresh().catchError((_) {}));
@@ -301,6 +333,7 @@ class AgentController extends ChangeNotifier {
       unawaited(integrations.refreshSettings().then((_) {}).catchError((_) {}));
       // A server agent may have been waiting for answers while the app was closed: show them again.
       unawaited(refreshSubagents().then((_) => client.isRemote ? restoreApprovals() : null).catchError((_) {}));
+      unawaited(refreshJobs().catchError((_) {}));
       // A server keeps its own clock (UTC as a rule): schedules follow the phone's time zone instead.
       if (client.isRemote) {
         unawaited(
@@ -310,6 +343,8 @@ class AgentController extends ChangeNotifier {
               .catchError((_) {}),
         );
       }
+      // The server's newest automatic backup comes to this phone while the app is open (when they are on).
+      if (client.isRemote) remote.startBackupPulls();
       status = BootStatus.ready;
       bootFailures = 0;
     } catch (e) {
@@ -363,38 +398,78 @@ class AgentController extends ChangeNotifier {
   /// the home shell (it owns a navigator). Null or false keeps the turn.
   Future<bool> Function()? confirmStopToSwitch;
 
+  /// How long Stop and switch waits for the running turn to end (a stuck tool gets this long).
+  @visibleForTesting
+  static Duration stopToSwitchTimeout = const Duration(seconds: 10);
+
   /// Whether a chat switch may go ahead: always when idle; while the agent
   /// works only if the user agrees to stop it, then once it has stopped.
   Future<bool> readyToSwitch() async {
     if (!busy) return true;
     final ask = confirmStopToSwitch;
     if (ask == null || !await ask()) return false;
-    await abort();
-    // The turn ends on the host's agent_end; wait for it (a stuck tool gets 10 s).
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
-    while (busy && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+    stoppingToSwitch = true;
+    notifyListeners();
+    try {
+      await abort();
+      // The turn ends on the host's agent_settled; wait for it, in steps, up to the timeout.
+      const step = Duration(milliseconds: 100);
+      for (var waited = Duration.zero; busy && waited < stopToSwitchTimeout; waited += step) {
+        await Future<void>.delayed(step);
+      }
+    } catch (_) {
+      // The abort itself failed (the link dropped): the turn is still running, which is said below.
+    } finally {
+      stoppingToSwitch = false;
+      notifyListeners();
     }
+    if (busy) switchProblems.add('The agent did not stop in time. Try again in a moment.');
     return !busy;
   }
 
-  /// Starts a session, in [dir] when given (a project folder), else the
-  /// workspace. False when the user kept the running turn instead.
-  Future<bool> newSession({String? dir}) async {
-    if (!await readyToSwitch()) return false;
-    _applyState(await client.call<Map<String, dynamic>>('new_session', {'cwd': ?dir}));
-    _resetTranscript();
+  /// Where a chat switch is going while one runs: the chat's path, or `new:<folder>` for a new chat. One at a time: a
+  /// second tap while the first still waits on the host does nothing, so chats are never opened twice or on top of
+  /// each other. Rows show a spinner for the one being opened.
+  String? switchingTo;
+
+  /// The switch waits for the running turn to stop (the user chose Stop and switch).
+  bool stoppingToSwitch = false;
+
+  /// Why a switch did not happen, for the user (English; the app translates it).
+  final switchProblems = StreamController<String>.broadcast();
+
+  /// The [switchingTo] key of a new chat in [dir].
+  static String newChatKey(String? dir) => 'new:${dir ?? ''}';
+
+  /// Runs one switch to [target]; false when another is already running or the user kept the running turn.
+  Future<bool> _switch(String target, Future<void> Function() go) async {
+    if (switchingTo != null) return false;
+    switchingTo = target;
     notifyListeners();
-    return true;
+    try {
+      if (!await readyToSwitch()) return false;
+      await go();
+      return true;
+    } finally {
+      switchingTo = null;
+      notifyListeners();
+    }
   }
 
-  /// Opens another chat. False when the user kept the running turn instead.
+  /// Starts a session, in [dir] when given (a project folder), else the
+  /// workspace. False when the user kept the running turn instead, or another switch is still under way.
+  Future<bool> newSession({String? dir}) => _switch(newChatKey(dir), () async {
+    _applyState(await client.call<Map<String, dynamic>>('new_session', {'cwd': ?dir}));
+    _resetTranscript();
+  });
+
+  /// Opens another chat. False when the user kept the running turn instead, or another switch is still under way.
   Future<bool> openSession(String path) async {
-    if (path == sessionFile) return true;
-    if (!await readyToSwitch()) return false;
-    _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
-    await loadHistory();
-    return true;
+    if (path == sessionFile && switchingTo == null) return true;
+    return _switch(path, () async {
+      _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
+      await loadHistory();
+    });
   }
 
   Future<void> renameSession(String path, String name) async {
@@ -582,21 +657,42 @@ class AgentController extends ChangeNotifier {
     return first.length > 48 ? '${first.substring(0, 47)}…' : (first.isEmpty ? 'GripHub AI Agent' : first);
   }
 
+  /// The message an edit or fork is working on (its entry id, or `''` for a fork of the whole chat), while one runs.
+  /// The chat dims that message and shows a spinner on it; another edit or fork waits for this one.
+  String? rewinding;
+
+  /// Runs one edit or fork at a time. Throws [AgentError] when one is already running.
+  Future<String> _rewind(String? entryId, Future<String> Function() go) async {
+    if (rewinding != null || switchingTo != null) throw AgentError('Wait for the chat to finish updating.');
+    rewinding = entryId ?? '';
+    notifyListeners();
+    try {
+      return await go();
+    } finally {
+      rewinding = null;
+      notifyListeners();
+    }
+  }
+
   /// Rewinds to just before a user message; returns its text for editing.
-  Future<String> editMessage(String entryId) async {
+  Future<String> editMessage(String entryId) => _rewind(entryId, () async {
     final r = await client.call<Map>('edit_message', {'entryId': entryId});
     await loadHistory();
     return r['text'] as String? ?? '';
-  }
+  });
 
   /// Copies this chat into a new one, rewound to just before [entryId].
-  Future<String> forkAt(String? entryId) async {
-    if (!await readyToSwitch()) throw AgentError(busySwitchError);
-    final r = (await client.call<Map>('fork_session', {'entryId': ?entryId})).cast<String, dynamic>();
-    _applyState(r);
-    await loadHistory();
-    return r['text'] as String? ?? '';
-  }
+  Future<String> forkAt(String? entryId) => _rewind(entryId, () async {
+    String text = '';
+    final switched = await _switch('fork:${entryId ?? ''}', () async {
+      final r = (await client.call<Map>('fork_session', {'entryId': ?entryId})).cast<String, dynamic>();
+      _applyState(r);
+      await loadHistory();
+      text = r['text'] as String? ?? '';
+    });
+    if (!switched) throw AgentError(busySwitchError);
+    return text;
+  });
 
   Future<void> setThinking(String level) async {
     _applyState(await client.call<Map<String, dynamic>>('set_thinking', {'level': level}));
@@ -689,6 +785,16 @@ class AgentController extends ChangeNotifier {
         _scheduleNotify();
       case 'auth_prompt' || 'auth_event' || 'auth_dismiss':
         authRecords.add(record);
+      case 'job':
+        jobStore.apply((record['job'] as Map).cast<String, dynamic>());
+        features.setJobsRunning(jobStore.running);
+        _scheduleNotify();
+      // The turn is over: its last reply shows how long it took.
+      case 'agent_done' when record['turnMs'] is num && record['retrying'] != true:
+        final last = entries.lastWhere((e) => e is AssistantEntry, orElse: () => NoticeEntry(''));
+        if (last is AssistantEntry) last.turnMs = (record['turnMs'] as num).toInt();
+        turnStartedAt = null;
+        _scheduleNotify();
       // GripHub's model list changed on its daily refresh: reload the picker.
       case 'models_changed':
         unawaited(refreshProviders().catchError((_) {}));
@@ -724,6 +830,7 @@ class AgentController extends ChangeNotifier {
   void _onEvent(Map<String, dynamic> e) {
     switch (e['type']) {
       case 'agent_start':
+        turnStartedAt ??= clock();
         _setBusy(true);
       case 'agent_settled':
         _setBusy(false);
@@ -749,6 +856,7 @@ class AgentController extends ChangeNotifier {
       case 'tool_execution_end':
         final run = tools.putIfAbsent(e['toolCallId'] as String, () => ToolRun(e['toolCallId'] as String));
         run.output = contentText((e['result'] as Map?)?['content']);
+        run.images = contentImageData((e['result'] as Map?)?['content']);
         run.status = e['isError'] == true ? ToolStatus.failed : ToolStatus.done;
         runningTool = null;
       case 'compaction_start':
@@ -814,11 +922,16 @@ class AgentController extends ChangeNotifier {
       case 'toolResult':
         final run = tools.putIfAbsent(m['toolCallId'] as String, () => ToolRun(m['toolCallId'] as String));
         run.output = contentText(m['content']);
+        run.images = contentImageData(m['content']);
         run.status = m['isError'] == true ? ToolStatus.failed : ToolStatus.done;
       case 'bashExecution':
         entries.add(NoticeEntry('\$ ${m['command']}\n${m['output']}'));
       case 'compactionSummary':
         entries.add(NoticeEntry('Earlier messages were summarized to save context.'));
+      // A background job's result: the host's message to the agent, shown as a notice of the job's end.
+      case 'custom' when m['customType'] == 'griphub_job':
+        final job = (m['details'] as Map?)?['job'];
+        if (job is Map) entries.add(JobEntry(job.cast<String, dynamic>()));
     }
   }
 
@@ -901,6 +1014,13 @@ class AgentController extends ChangeNotifier {
     planMode = s['planMode'] == true;
     approvalMode = s['approvalMode'] as String? ?? approvalMode;
     if (s['isStreaming'] is bool) _setBusy(s['isStreaming'] as bool);
+    // A turn under way: count from where the host is (it may have begun before the app was there).
+    final elapsed = s['turnElapsedMs'];
+    if (elapsed is num) {
+      turnStartedAt = clock().subtract(Duration(milliseconds: elapsed.toInt()));
+    } else if (s.containsKey('turnElapsedMs') || !busy) {
+      turnStartedAt = null;
+    }
     // Another chat may now be on screen: its subagents stop (or start) needing the running notification.
     if (subagentStore.all.isNotEmpty) unawaited(_syncRunningNotification());
   }
@@ -928,6 +1048,7 @@ class AgentController extends ChangeNotifier {
   void dispose() {
     _notifyTimer?.cancel();
     authRecords.close();
+    switchProblems.close();
     super.dispose();
   }
 }

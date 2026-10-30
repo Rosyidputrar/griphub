@@ -3,7 +3,7 @@
 // shuts down cleanly). server_agent.md, phase 1.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -275,9 +275,9 @@ test("server mode: a second daemon on the same socket is refused", async (t) => 
 const mockRouter = pathToFileURL(join(here, "fixtures", "mock-router.mjs")).href;
 
 /** A daemon on the mock router with a GripHub key and model, connected and resumed. */
-async function withModel(t) {
+async function withModel(t, extra = {}) {
 	const dir = home(t);
-	const mock = { MOCK_LOG: join(dir, "mock.log"), MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Separuh laporan: 3 dari 5 berkas diperiksa." };
+	const mock = { MOCK_LOG: join(dir, "mock.log"), MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Separuh laporan: 3 dari 5 berkas diperiksa.", ...extra };
 	const d = daemon(t, dir, mock, ["--import", mockRouter]);
 	await started(d);
 	const c = await dial(d.sock);
@@ -568,4 +568,147 @@ test("server mode: schedules run on the phone's clock: the app gives its offset,
 
 	const again = await connected(t, dir, { TZ: "UTC" });
 	assert.equal((await again.c.call("health")).data.clock.offsetMinutes, 420);
+});
+
+// ---------------------------------------------------------------------------
+// Background jobs call their chat back, as a turn of its own with no message from the user
+
+test("a background job's result calls its chat back with no user message, and turns keep how long they took", async (t) => {
+	const tool = { name: "background_job", arguments: { command: "sleep 1; echo build-ok", label: "Build" } };
+	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool) });
+	const sent = await m.c.call("prompt", { text: "Bangun aplikasinya di latar" });
+	assert.equal(sent.ok, true, sent.error);
+
+	// The tool returns at once: the turn ends while the job still runs.
+	const started = await m.c.until((r) => r.type === "job" && r.job.status === "running", 30_000, "for the job to start");
+	assert.equal(started.job.label, "Build");
+	assert.equal(started.job.command, "sleep 1; echo build-ok");
+	assert.ok(started.job.toolCallId, "the job knows its tool call, for the card");
+	const firstDone = await m.c.until((r) => r.type === "agent_done" && typeof r.turnMs === "number", 30_000, "for the first turn");
+	assert.ok(firstDone.turnMs >= 0);
+
+	// The job ends; its chat goes on by itself.
+	const ended = await m.c.until((r) => r.type === "job" && r.job.status === "done", 30_000, "for the job to end");
+	assert.equal(ended.job.exitCode, 0);
+	assert.match(ended.job.tail, /build-ok/);
+	assert.ok(ended.job.elapsedMs >= 900, "how long it ran, by the host's clock");
+	const notice = await m.c.until(
+		(r) => r.type === "event" && r.event.type === "message_start" && r.event.message.role === "custom",
+		30_000,
+		"for the job's message",
+	);
+	assert.equal(notice.event.message.customType, "griphub_job");
+	assert.equal(notice.event.message.details.job.id, ended.job.id);
+	const reply = await m.c.until(
+		(r) => r.type === "event" && r.event.type === "message_end" && r.event.message.role === "assistant" && /Job said/.test(JSON.stringify(r.event.message.content)),
+		30_000,
+		"for the agent to answer the job",
+	);
+	assert.match(JSON.stringify(reply.event.message.content), /build-ok/, "the agent got the output");
+	await m.c.until((r) => r.type === "agent_done" && typeof r.turnMs === "number" && r.seq > firstDone.seq, 30_000, "for the second turn");
+
+	// In the chat: one user message (the user's), the job's own message, and each turn's time on its last reply.
+	const history = (await m.c.call("messages")).data;
+	assert.equal(history.filter((x) => x.role === "user").length, 1, "the callback is not a user message");
+	assert.equal(history.filter((x) => x.role === "custom" && x.customType === "griphub_job").length, 1);
+	assert.equal(history.filter((x) => x.role === "assistant" && typeof x.griphubTurnMs === "number").length, 2, "both turns kept their time");
+	assert.deepEqual((await m.c.call("job_list")).data.map((j) => j.status), ["done"]);
+});
+
+test("a background job can be stopped, and stops what it started; its chat is told it was stopped", async (t) => {
+	const tool = { name: "background_job", arguments: { command: "sleep 600 & sleep 600; wait" } };
+	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool) });
+	await m.c.call("prompt", { text: "Jalankan" });
+	const started = await m.c.until((r) => r.type === "job" && r.job.status === "running", 30_000, "for the job");
+	await m.c.until((r) => r.type === "agent_done" && typeof r.turnMs === "number", 30_000, "for the turn");
+	const stopped = await m.c.call("job_stop", { jobId: started.job.id });
+	assert.equal(stopped.ok, true, stopped.error);
+	const ended = await m.c.until((r) => r.type === "job" && r.job.status === "stopped", 10_000, "for the job to stop");
+	assert.equal(ended.job.id, started.job.id);
+	const notice = await m.c.until((r) => r.type === "event" && r.event.type === "message_start" && r.event.message.role === "custom", 30_000, "for the message");
+	assert.match(JSON.stringify(notice.event.message.content), /stopped by the user/);
+	// Nothing of it is left running (the job's own sleeps; no other test starts "sleep 600").
+	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === "sleep 600"), 10_000);
+});
+
+// ---------------------------------------------------------------------------
+// Automatic backups: made on the server with the phone's key, fetched over fs_*, never readable as files there
+
+test("server mode: automatic backups are off until the phone gives its key, then made and readable over fs_*", async (t) => {
+	const dir = home(t);
+	const { c } = await connected(t, dir);
+	const ws = join(dir, "workspace");
+	mkdirSync(join(ws, "site", ".git"), { recursive: true });
+	writeFileSync(join(ws, "site", "index.html"), "<h1>Halo</h1>");
+	writeFileSync(join(ws, "site", ".git", "HEAD"), "ref: refs/heads/main\n");
+
+	const off = await c.call("auto_backup_status");
+	assert.equal(off.data.enabled, false);
+	const bad = await c.call("auto_backup_configure", { key: "nope" });
+	assert.equal(bad.ok, false);
+	const on = await c.call("auto_backup_configure", { key: "cd".repeat(32) });
+	assert.equal(on.ok, true, on.error);
+	assert.equal(on.data.enabled, true);
+	const now = await c.call("auto_backup_now");
+	assert.equal(now.ok, true, now.error);
+	const [latest] = now.data.backups;
+	assert.match(latest.name, /^auto-\d+\.ghb$/);
+	assert.ok(latest.size > 0);
+	// The app fetches it like any file; it cannot be changed from there.
+	const read = await c.call("fs_read", { path: latest.path });
+	assert.equal(read.ok, true, read.error);
+	assert.equal(Buffer.from(read.data.data, "base64").subarray(0, 4).toString(), "GHB1");
+	const write = await c.call("fs_write", { path: latest.path, data: "" });
+	assert.equal(write.ok, false, "the backups folder is read-only for the app");
+	// Turning it off removes what that key made.
+	const offAgain = await c.call("auto_backup_configure", { key: null });
+	assert.deepEqual(offAgain.data.backups, []);
+});
+
+test("phone mode: a server's backup is restored on the phone's own agent with the key, and refused with another", async (t) => {
+	// The server makes it.
+	const srvDir = home(t);
+	const { c } = await connected(t, srvDir);
+	mkdirSync(join(srvDir, "workspace", "site", ".git"), { recursive: true });
+	writeFileSync(join(srvDir, "workspace", "site", "index.html"), "<h1>Dari server</h1>");
+	writeFileSync(join(srvDir, "workspace", "site", ".git", "HEAD"), "ref: refs/heads/main\n");
+	// A chat whose first line names the server's workspace: the restore must move it to the phone's.
+	mkdirSync(join(srvDir, ".pi", "agent", "sessions"), { recursive: true });
+	writeFileSync(
+		join(srvDir, ".pi", "agent", "sessions", "chat.jsonl"),
+		`${JSON.stringify({ cwd: join(srvDir, "workspace", "site") })}\n`,
+	);
+	const key = "cd".repeat(32);
+	await c.call("auto_backup_configure", { key });
+	const made = (await c.call("auto_backup_now")).data.backups[0];
+
+	// The phone restores it. A plain-text zip a dead host left behind is swept at start.
+	const dir = home(t);
+	mkdirSync(join(dir, ".pi", "agent", "griphub"), { recursive: true });
+	writeFileSync(join(dir, ".pi", "agent", "griphub", "restore-123.zip"), "leftover");
+	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	const send = (cmd) => child.stdin.write(`${JSON.stringify(cmd)}\n`);
+	send({ id: 1, type: "backup_restore_server", path: made.path, key: "ef".repeat(32) });
+	const refused = await until((r) => r.type === "response" && r.id === 1);
+	assert.equal(refused.ok, false);
+	assert.match(refused.error, /another key/);
+	assert.equal(existsSync(join(dir, "workspace", "site")), false, "nothing restored with a wrong key");
+	send({ id: 2, type: "backup_restore_server", path: made.path, key });
+	const restored = await until((r) => r.type === "response" && r.id === 2);
+	assert.equal(restored.ok, true, restored.error);
+	assert.ok(restored.data.restored >= 2);
+	assert.equal(readFileSync(join(dir, "workspace", "site", "index.html"), "utf8"), "<h1>Dari server</h1>");
+	assert.equal(readFileSync(join(dir, "workspace", "site", ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+	// The server restore (autobackup.ts), not the plain local one: it reports when the backup was made, and it moves
+	// the chat's folder from the server's workspace path to this phone's. A name clash once made host.ts restore with
+	// its own one-argument function, which does neither.
+	assert.ok(restored.data.createdAt, "a server restore reports when the backup was made");
+	const chat = readFileSync(join(dir, ".pi", "agent", "sessions", "chat.jsonl"), "utf8");
+	assert.equal(JSON.parse(chat.split("\n")[0]).cwd, join(dir, "workspace", "site"), "the chat's folder is this phone's");
+	// No decrypted copy is left behind.
+	const leftovers = execFileSync("find", [dir, "-name", "restore-*.zip"]).toString().trim();
+	assert.equal(leftovers, "");
 });

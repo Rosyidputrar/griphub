@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import 'agent_client.dart';
 import 'agent_controller.dart';
 import 'agent_fs.dart';
 import 'msg.dart';
@@ -228,6 +230,9 @@ class RemoteMode extends ChangeNotifier {
   Future<void> use(bool server) async {
     if (profile == null) return;
     if (server == active) return;
+    _pullTimer?.cancel();
+    // Back on the phone with a backup of the server here: the home screen offers it once the phone's agent is up.
+    _offerRestore = !server && profile!.backupKey != null && localBackups().isNotEmpty;
     profile = profile!.copyWith(active: server);
     store!.save(profile!);
     _apply();
@@ -235,8 +240,151 @@ class RemoteMode extends ChangeNotifier {
     await agent.restart();
   }
 
+  // -------------------------------------------------------------------------
+  // Automatic backups (agent/src/autobackup.ts)
+
+  /// What the server said about its automatic backups the last time it was asked; null before that.
+  Map<String, dynamic>? autoBackup;
+
+  /// Why fetching the newest backup failed the last time, if it did.
+  String? backupPullError;
+
+  /// A backup is being fetched to this phone.
+  bool pullingBackup = false;
+
+  Timer? _pullTimer;
+
+  /// Where this phone keeps the server's backups (private to the app; they hold API keys).
+  Directory get backupsDir => Directory('${setup!.home}/.griphub/server-backups');
+
+  /// How many fetched backups the phone keeps.
+  static const keepBackups = 3;
+
+  /// The server's backups on this phone, newest first.
+  List<File> localBackups() {
+    if (setup == null || !backupsDir.existsSync()) return const [];
+    final files = backupsDir.listSync().whereType<File>().where((f) => RegExp(r'/auto-\d+\.ghb$').hasMatch(f.path)).toList()
+      ..sort((a, b) => b.path.compareTo(a.path));
+    return files;
+  }
+
+  /// When a backup on this phone was made on the server, from its name.
+  static DateTime backupTime(File f) =>
+      DateTime.fromMillisecondsSinceEpoch(int.tryParse(RegExp(r'auto-(\d+)\.ghb$').firstMatch(f.path)?[1] ?? '') ?? 0);
+
+  /// Asks the server how its backups stand (only with the server in use).
+  Future<Map<String, dynamic>?> refreshAutoBackup() async {
+    if (!active) return null;
+    autoBackup = (await agent.client.call<Map>('auto_backup_status')).cast<String, dynamic>();
+    notifyListeners();
+    return autoBackup;
+  }
+
+  /// Turns the server's hourly backups on (with a key made here the first time) or off. Off deletes the server's
+  /// copies; the ones on this phone stay, and so does their key.
+  Future<void> setAutoBackup(bool on) async {
+    final p = profile;
+    if (p == null || !active) return;
+    String? key;
+    if (on) {
+      key = p.backupKey ?? _newKey();
+      if (p.backupKey == null) {
+        profile = p.copyWith(backupKey: key);
+        store!.save(profile!);
+      }
+    }
+    autoBackup = (await agent.client.call<Map>('auto_backup_configure', {'key': key})).cast<String, dynamic>();
+    notifyListeners();
+    if (on) unawaited(backupNow().catchError((_) => null));
+  }
+
+  /// Makes a backup on the server now (if anything changed since the last one), then fetches it.
+  Future<File?> backupNow({bool force = false}) async {
+    autoBackup = (await agent.client.call<Map>('auto_backup_now', {'force': force})).cast<String, dynamic>()
+      ..remove('made');
+    notifyListeners();
+    return pullLatestBackup();
+  }
+
+  /// The fetch under way: a second asker (the hourly timer, "Back up now") shares it instead of writing the same file.
+  Future<File?>? _pull;
+
+  /// Fetches the server's newest backup to this phone unless it is already here; keeps the newest few. Returns it.
+  Future<File?> pullLatestBackup({Progress? onProgress, CancelToken? cancel}) {
+    if (!active) return Future.value(null);
+    return _pull ??= _pullLatest(onProgress: onProgress, cancel: cancel).whenComplete(() => _pull = null);
+  }
+
+  Future<File?> _pullLatest({Progress? onProgress, CancelToken? cancel}) async {
+    final status = await refreshAutoBackup();
+    final list = (status?['backups'] as List? ?? const []).whereType<Map>().toList();
+    if (status?['enabled'] != true || list.isEmpty) return null;
+    final latest = list.first.cast<String, dynamic>();
+    final target = File('${backupsDir.path}/${latest['name']}');
+    if (target.existsSync() && target.lengthSync() == (latest['size'] as num?)?.toInt()) return target;
+    pullingBackup = true;
+    backupPullError = null;
+    notifyListeners();
+    try {
+      final fetched = await agent.fs.toPhoneFile(latest['path'] as String, onProgress: onProgress, cancel: cancel);
+      backupsDir.createSync(recursive: true);
+      final part = File('${target.path}.part');
+      await File(fetched).copy(part.path);
+      await part.rename(target.path);
+      // The download cache needs no second copy of it.
+      unawaited(File(fetched).delete().then((_) {}, onError: (_) {}));
+      for (final old in localBackups().skip(keepBackups)) {
+        old.deleteSync();
+      }
+      return target;
+    } catch (e) {
+      backupPullError = '$e';
+      rethrow;
+    } finally {
+      pullingBackup = false;
+      notifyListeners();
+    }
+  }
+
+  /// While the server is in use: fetch its newest backup soon after connecting, then every hour the app is open.
+  void startBackupPulls() {
+    _pullTimer?.cancel();
+    if (!active || profile?.backupKey == null) return;
+    Future<void> pull() => pullLatestBackup().then((_) {}, onError: (_) {});
+    _pullTimer = Timer.periodic(const Duration(hours: 1), (_) => pull());
+    Future<void>.delayed(const Duration(seconds: 15), () {
+      if (active) pull();
+    });
+  }
+
+  /// Puts a server backup on the agent on this phone (decrypted there with the key), then restarts it to read it all.
+  Future<Map<String, dynamic>> restoreOnPhone(File backup) async {
+    final key = profile?.backupKey;
+    if (key == null) throw AgentError('This phone has no key for the server\'s backups.');
+    if (active) throw AgentError('Switch to the agent on this phone first.');
+    final r = (await agent.client.call<Map>('backup_restore_server', {'path': backup.path, 'key': key}))
+        .cast<String, dynamic>();
+    await agent.restart();
+    return r;
+  }
+
+  bool _offerRestore = false;
+
+  /// Whether to offer the server's newest backup now (once, after switching back to the phone).
+  bool takeRestoreOffer() {
+    final offer = _offerRestore && !active;
+    _offerRestore = false;
+    return offer;
+  }
+
+  static String _newKey() {
+    final r = Random.secure();
+    return [for (var i = 0; i < 32; i++) r.nextInt(256).toRadixString(16).padLeft(2, '0')].join();
+  }
+
   /// Forgets the server: stops using it, deletes the ssh files and the key.
   Future<void> forget() async {
+    _pullTimer?.cancel();
     final wasActive = active;
     profile = null;
     store!.clear();

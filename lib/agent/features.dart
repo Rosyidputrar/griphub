@@ -72,6 +72,9 @@ class GitStatus {
   int get ahead => json['ahead'] as int? ?? 0;
   int get behind => json['behind'] as int? ?? 0;
   String? get remote => json['remote'] as String?;
+
+  /// The repository's top folder: the [files]' paths start there (null from a host before this was sent).
+  String? get root => json['root'] as String?;
   List<GitFile> get files => _l(json['files']).map(GitFile.new).toList();
 }
 
@@ -248,6 +251,9 @@ class Features extends ChangeNotifier {
   /// while the agent works — previously only runs/schedules did, so
   /// Android could kill the host mid-chat when the app was backgrounded.
   bool chatBusy = false;
+
+  /// Background jobs running on this phone's host (they outlive the turn that started them).
+  int jobsRunning = 0;
   bool _runsKeepAlive = false;
   List<McpServer> mcpServers = const [];
 
@@ -310,9 +316,16 @@ class Features extends ChangeNotifier {
     _updateKeepAlive();
   }
 
+  /// How many background jobs run, so the host is kept alive for them while the app is in the background.
+  void setJobsRunning(int count) {
+    if (jobsRunning == count) return;
+    jobsRunning = count;
+    _updateKeepAlive();
+  }
+
   void _updateKeepAlive() {
     // A server agent works on the server; the phone has nothing to keep alive for it.
-    final next = !client.isRemote && (_runsKeepAlive || chatBusy);
+    final next = !client.isRemote && (_runsKeepAlive || chatBusy || jobsRunning > 0);
     if (keepAlive == next) return;
     keepAlive = next;
     unawaited(client.keepAlive(keepAlive, text: _keepAliveText()));
@@ -332,6 +345,7 @@ class Features extends ChangeNotifier {
     final queued = runs.where((r) => r.status == 'queued').length;
     if (running + queued > 0) return '$running running, $queued queued';
     if (chatBusy) return 'Agent is working';
+    if (jobsRunning > 0) return jobsRunning == 1 ? '1 background job running' : '$jobsRunning background jobs running';
     return '${schedules.where((s) => s.enabled).length} scheduled tasks';
   }
 

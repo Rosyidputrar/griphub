@@ -13,7 +13,7 @@
  * stdout is reserved for protocol records; logs go to stderr.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -28,6 +28,7 @@ import {
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { agentsFileText, isManaged } from "./agents-file.js";
+import { AutoBackup, decryptBackup, restoreBackup } from "./autobackup.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
 import { installDohLookup } from "./dns.js";
@@ -36,6 +37,7 @@ import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
 import { Integrations, type Log, run } from "./integrations.js";
+import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
@@ -97,9 +99,12 @@ let mcp: Mcp;
 let customProviders: CustomProviders;
 let sync: GitHubSync;
 let subagents: SubagentManager;
+let jobs: Jobs;
 let router: Router;
 let fsService: Fs;
 let preview: Preview;
+/** Server only: hourly encrypted backups for the phone to keep (autobackup.ts). */
+let autoBackup: AutoBackup | undefined;
 const tunnels = new Tunnels();
 let unsubscribe: (() => void) | undefined;
 
@@ -256,6 +261,12 @@ function notifyFor(record: Record<string, any>) {
 			}
 			return;
 		}
+		case "job":
+			if (record.job?.status === "done") void notifier.send("job_done", "Background job finished", { tags: ["white_check_mark"] });
+			else if (record.job?.status === "failed" || record.job?.status === "timeout") {
+				void notifier.send("job_failed", "Background job failed", { priority: 4, tags: ["x"] });
+			}
+			return;
 		case "subagent_approval_request":
 			if (integrations?.settings.subagentNotifyApproval !== false) {
 				void notifier.send("subagent_approval", "Subagent needs approval", { priority: 4, tags: ["raised_hand"] });
@@ -338,6 +349,8 @@ function state() {
 		billingNotice: billingNotice(),
 		planMode: guard.planMode,
 		approvalMode: guard.mode,
+		// How long the running turn has taken so far, by this host's clock (the app counts on from there).
+		turnElapsedMs: turnStartedAt === null ? null : Date.now() - turnStartedAt,
 	};
 }
 
@@ -371,7 +384,7 @@ async function buildSession(
 		resourceLoader,
 		// "subagent" must be named here: the SDK drops custom tools whose
 		// name is not in this allow-list (that is why 1.0.42 never showed it).
-		tools: [...TOOLS, ...(opts.interactive ? ["subagent"] : []), ...mcpTools.map((t) => t.name)],
+		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...mcpTools.map((t) => t.name)],
 		customTools: [
 			...webTools(
 				() => ({
@@ -391,6 +404,8 @@ async function buildSession(
 			// only: background runs and subagent sessions never get this tool,
 			// so a subagent can never spawn another one.
 			...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
+			// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
+			...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
 		] as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
@@ -489,6 +504,7 @@ async function openSession(sessionManager: SessionManager) {
 	unsubscribe?.();
 	guard.cancelAll();
 	session?.dispose();
+	turnStartedAt = null;
 	// Queued follow-ups belong to the chat being left (pi drops them with it).
 	promptQueue.clear();
 	const result = await buildSession(sessionManager, {
@@ -501,6 +517,8 @@ async function openSession(sessionManager: SessionManager) {
 		onSessionEvent(event);
 	});
 	if (result.modelFallbackMessage) send({ type: "notice", message: result.modelFallbackMessage });
+	// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
+	setTimeout(deliverJobs, 0);
 	return state();
 }
 
@@ -519,18 +537,141 @@ function onSessionEvent(event: AgentSessionEvent) {
 		const m = (event as any).message;
 		if (m?.role === "assistant" && m.stopReason === "error") void tryFallback(String(m.errorMessage ?? ""));
 	}
+	if (event.type === "agent_start" && turnStartedAt === null) turnStartedAt = Date.now();
 	if (event.type === "agent_end" || (event as any).type === "agent_settled") {
 		const text = session?.getLastAssistantText?.() ?? "";
+		const over = (event as any).type === "agent_settled" && !session?.isStreaming && !fallbackPending;
+		const turnMs = over && turnStartedAt !== null ? Date.now() - turnStartedAt : undefined;
+		if (over) {
+			if (turnMs !== undefined) recordTurnTime(turnMs);
+			turnStartedAt = null;
+		}
 		send({
 			type: "agent_done",
 			sessionFile: session?.sessionFile ?? null,
 			preview: text.slice(0, 200),
 			// A fallback model is taking over (or already running): not finished, and not failed.
 			retrying: fallbackPending || !!session?.isStreaming,
+			...(turnMs !== undefined && { turnMs }),
 		});
 		// Sync a little after the turn, so a quick follow-up doesn't cause two pushes.
 		sync?.schedule(90_000);
+		// A job that ended while this turn ran calls the chat back now.
+		if (over) deliverJobs();
 	}
+}
+
+// ---------------------------------------------------------------------------
+// How long turns take, and background jobs calling their chat back
+
+/** When the open chat's running turn began (its first agent_start), or null between turns. */
+let turnStartedAt: number | null = null;
+
+/** Session entry type that keeps a turn's duration with the chat. It is not a message: the model never sees it. */
+const TURN_TIME = "griphub_turn";
+
+/** Keeps how long the turn took next to its last reply, so the chat shows it again when reopened. */
+function recordTurnTime(ms: number) {
+	const s = session;
+	const last = (s?.messages as any[] | undefined)?.findLast((m) => m.role === "assistant");
+	if (!s || !last?.timestamp) return;
+	try {
+		s.sessionManager.appendCustomEntry(TURN_TIME, { at: last.timestamp, ms });
+	} catch (e) {
+		log("turn time:", (e as Error).message);
+	}
+}
+
+/** Turn durations of the open chat, by the timestamp of each turn's last reply. */
+function turnTimes(s: AgentSession): Map<number, number> {
+	const out = new Map<number, number>();
+	for (const e of s.sessionManager.getBranch() as any[]) {
+		if (e.type === "custom" && e.customType === TURN_TIME && typeof e.data?.at === "number") out.set(e.data.at, e.data.ms);
+	}
+	return out;
+}
+
+/** Message type of a job's result in the chat: shown by the app as a notice, read by the model as a message. */
+const JOB_MESSAGE = "griphub_job";
+
+/** Jobs that ended and have not called their chat back yet (it was busy, or another chat was open). */
+const finishedJobs: JobRecord[] = [];
+
+/** How many turns in a row job callbacks may start with no word from the user; then the results only land in the chat. */
+const JOB_CHAIN_LIMIT = 5;
+
+/** Job-callback turns since the user last said something (host.ts "prompt" resets it). */
+let jobChain = 0;
+
+/**
+ * Whether a deliverJobs is under way. It is called from a job ending, from a turn ending and from a timer, and it
+ * awaits in the middle; a job leaves the queue only once sent, so two overlapping runs would send it twice.
+ */
+let deliveringJobs = false;
+
+/** A call came in while one was under way: the running one goes round once more. */
+let deliverAgain = false;
+
+/**
+ * Calls the open chat back with the jobs of it that ended, once it is idle: one turn for all of them, with no message
+ * from the user. Waits while it works (its turn ends first) and while another chat is open (it is called back when it
+ * is opened again). Never past the daily budget, onto a full disk, or past JOB_CHAIN_LIMIT turns with no word from the
+ * user: the results are then added without a turn, and the user is told why the agent did not go on.
+ */
+async function deliverJobs() {
+	if (deliveringJobs) {
+		// One is under way: it looks again before it ends, so a job that ended just now is not missed.
+		deliverAgain = true;
+		return;
+	}
+	deliveringJobs = true;
+	try {
+		do {
+			deliverAgain = false;
+			await deliverFinishedJobs();
+		} while (deliverAgain);
+	} finally {
+		deliveringJobs = false;
+	}
+}
+
+/** The body of [deliverJobs]; it loops until nothing of the open chat is left, so a job that ends meanwhile is sent too. */
+async function deliverFinishedJobs() {
+	const s = session;
+	if (!s || s.isStreaming || fallbackPending) return;
+	const key = s.sessionFile ?? s.sessionId;
+	if (!finishedJobs.some((j) => j.sessionFile === key)) return;
+	let held = budgetError();
+	if (!held) {
+		try {
+			await health.assertRoom();
+		} catch (e) {
+			held = (e as Error).message;
+		}
+	}
+	if (!held && jobChain >= JOB_CHAIN_LIMIT) held = `it already went on ${jobChain} times since your last message`;
+	// One at a time, each taken off the queue only once it was sent: when a send fails, the rest stay queued and are
+	// delivered on the next try (they used to be dropped with it).
+	let started = false;
+	for (;;) {
+		const at = finishedJobs.findIndex((j) => j.sessionFile === key);
+		if (at < 0) break;
+		const job = finishedJobs[at];
+		const lastOne = !finishedJobs.some((j, i) => i > at && j.sessionFile === key);
+		try {
+			await s.sendCustomMessage(
+				{ customType: JOB_MESSAGE, content: jobReport(job), display: true, details: { job: jobWire(job) } },
+				{ triggerTurn: lastOne && !held },
+			);
+		} catch (e) {
+			send({ type: "error", message: `Could not continue after the background job: ${(e as Error).message}` });
+			return;
+		}
+		finishedJobs.splice(at, 1);
+		if (lastOne && !held) started = true;
+	}
+	if (started) jobChain++;
+	else if (held) send({ type: "notice", message: `The background job ended, but the agent did not continue: ${held}` });
 }
 
 function messageText(m: any): string {
@@ -797,6 +938,11 @@ async function deleteSessions(paths: string[], cwd?: string) {
 			// Already gone.
 		}
 	}
+	// A deleted chat's jobs die with it: nothing to call back, no records that outlive their chat. Job records carry
+	// the session file as the chat gave it, so both sides are resolved before they are compared.
+	const gone = new Set(files);
+	for (const file of new Set(jobs.list().map((j) => j.sessionFile))) if (gone.has(resolve(file))) jobs.forgetSession(file);
+	for (let i = finishedJobs.length - 1; i >= 0; i--) if (gone.has(resolve(finishedJobs[i].sessionFile))) finishedJobs.splice(i, 1);
 	return { deleted, ...state() };
 }
 
@@ -923,7 +1069,9 @@ const RESTORE_AGENT_ALLOW = [
 	(rel: string) => rel.startsWith("prompts/"),
 ];
 
-function restoreBackup(path: string) {
+// Named apart from autobackup's restoreBackup (a server backup onto this phone), which host.ts also calls:
+// the import used to be shadowed by this declaration, and backup_restore_server restored with the wrong one.
+function restoreLocalBackup(path: string) {
 	const entries = readZip(readFileSync(path));
 	let restored = 0;
 	let skipped = 0;
@@ -988,6 +1136,8 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "prompt": {
 			// Remembered before anything can refuse it, so Try again knows what was asked.
 			lastPrompt = { text: cmd.text, images: cmd.images, sessionId: s.sessionId };
+			// The user spoke: job callbacks may start turns again (deliverJobs).
+			jobChain = 0;
 			checkBudget();
 			// A server with a nearly full disk takes no new work (health.ts); on the phone this never refuses.
 			await health.assertRoom();
@@ -1055,6 +1205,12 @@ async function handle(cmd: Command): Promise<unknown> {
 		// What is still waiting for an answer, chat and subagents alike: an app that reconnects shows these again.
 		case "approvals_pending":
 			return [...guard.pendingApprovals(), ...subagents.pendingApprovals()];
+
+		// Background jobs (jobs.ts): the agent starts them with its `background_job` tool; the app lists and stops them.
+		case "job_list":
+			return jobs.list(cmd.sessionFile).map((j) => jobWire(j));
+		case "job_stop":
+			return jobWire(jobs.stop(String(cmd.jobId)));
 		case "host_restart":
 			if (!listenPath) throw new Error("Restarting is only available when the host runs as a daemon on a server");
 			return restartGate.request(cmd.whenIdle !== false);
@@ -1227,8 +1383,15 @@ async function handle(cmd: Command): Promise<unknown> {
 			return projectDeleteCheck(cmd.path);
 		case "delete_project":
 			return deleteProject(cmd.path, !!cmd.deleteChats);
-		case "messages":
-			return s.messages.map(withCost);
+		case "messages": {
+			// Each turn's last reply carries how long the turn took, when the chat kept it.
+			const times = turnTimes(s);
+			return s.messages.map((m: any) => {
+				const out = withCost(m);
+				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
+				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
+			});
+		}
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":
@@ -1440,10 +1603,33 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 
 		// Backups.
+		// Automatic backups on a server (autobackup.ts): the app turns them on with its key, and fetches the newest.
+		case "auto_backup_status":
+			return autoBackup?.status() ?? { enabled: false, available: false, backups: [] };
+		case "auto_backup_configure":
+			if (!autoBackup) throw new Error("Automatic backups are made by a server agent");
+			return autoBackup.configure(cmd.key ?? null);
+		case "auto_backup_now": {
+			if (!autoBackup) throw new Error("Automatic backups are made by a server agent");
+			const made = await autoBackup.tick(cmd.force !== false);
+			return { made, ...autoBackup.status() };
+		}
+		// A server's backup, on this phone: decrypted with the phone's key, then put in place. The app restarts the host
+		// afterwards, so every part reads what was restored.
+		case "backup_restore_server": {
+			if (session?.isStreaming) throw new Error("Stop the agent before restoring");
+			const tmp = join(stateDir, `restore-${Date.now()}.zip`);
+			try {
+				decryptBackup(String(cmd.path), String(cmd.key ?? ""), tmp);
+				return restoreBackup(tmp, { agentDir, workspace, home: process.env.HOME ?? agentDir });
+			} finally {
+				rmSync(tmp, { force: true });
+			}
+		}
 		case "backup_create":
 			return createBackup(!!cmd.includeWorkspace);
 		case "backup_restore":
-			return restoreBackup(cmd.path);
+			return restoreLocalBackup(cmd.path);
 
 		// Linux container. On the phone: container.ts (proot). On a server: the rootless Podman box (podmanbox.ts), which
 		// the setup script builds; the same commands serve both, so the screens do not need to know which one they talk to.
@@ -1629,6 +1815,7 @@ function isIdle(): boolean {
 		!session?.isStreaming &&
 		guard.pendingApprovals().length === 0 &&
 		!subagents?.busy() &&
+		!jobs?.busy() &&
 		!runs?.running &&
 		!runs?.runs.some((r) => r.status === "queued")
 	);
@@ -1654,6 +1841,8 @@ async function shutdown(code = 0) {
 	if (shuttingDown) return;
 	shuttingDown = true;
 	tunnels.stopAll();
+	jobs?.stopAll();
+	autoBackup?.stop();
 	health.stop();
 	preview?.stopAll();
 	// The phone's app force-kills the host 1.5 s after closing stdin (AgentRuntime.stop), so it only waits long enough for
@@ -1689,6 +1878,11 @@ async function main() {
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(workspace, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
+	// A decrypted server backup (backup_restore_server) is a plain-text zip for a moment; a host that died mid-restore
+	// would leave it behind, so it is swept here.
+	for (const f of readdirSync(stateDir)) {
+		if (/^restore-\d+\.zip$/.test(f)) rmSync(join(stateDir, f), { force: true });
+	}
 
 	// Route every lookup through DNS-over-HTTPS (configurable in settings; a server defaults to its own resolver).
 	installDohLookup();
@@ -1714,7 +1908,23 @@ async function main() {
 	);
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
 	// read its disk any other way; on the phone the same commands work too, inside the same folders.
-	fsService = new Fs([{ path: workspace }, { path: join(agentDir, "skills"), readOnly: true }]);
+	// On a server the app also fetches the automatic backups from here (read-only).
+	autoBackup = server
+		? new AutoBackup({
+				dir: join(griphubDir, "backups"),
+				configFile: join(stateDir, "auto-backup.json"),
+				agentDir,
+				workspace,
+				home: process.env.HOME ?? agentDir,
+				intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
+				log: (m) => log(m),
+			})
+		: undefined;
+	fsService = new Fs([
+		{ path: workspace },
+		{ path: join(agentDir, "skills"), readOnly: true },
+		...(server ? [{ path: join(griphubDir, "backups"), readOnly: true }] : []),
+	]);
 	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.GRIPHUB_PREVIEW_IDLE_MS) || undefined });
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
@@ -1752,6 +1962,14 @@ async function main() {
 				minutesLimit: st.subagentMinutesLimit ?? 30,
 				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
 			};
+		},
+	});
+	jobs = new Jobs({
+		send: (r) => send(r),
+		shellPath: () => settingsManager.getShellPath(),
+		finished: (job) => {
+			finishedJobs.push(job);
+			void deliverJobs();
 		},
 	});
 	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user
@@ -1856,6 +2074,7 @@ async function main() {
 	// A server is watched for a filling disk; a phone's storage is the user's business (the `health` command still
 	// answers there).
 	if (server) health.start();
+	autoBackup?.start();
 }
 
 main().catch((e) => {

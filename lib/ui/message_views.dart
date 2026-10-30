@@ -9,6 +9,7 @@ import 'package:markdown/markdown.dart' as md;
 
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
+import '../agent/jobs.dart';
 import '../agent/models.dart';
 import '../agent/pricing.dart';
 import '../agent/sent_attachments.dart';
@@ -19,13 +20,18 @@ import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
 import 'links.dart';
+import 'live_clock.dart';
 import 'i18n.dart';
 import 'theme.dart';
 import 'todo_views.dart';
 
 class UserMessageView extends StatelessWidget {
-  const UserMessageView(this.entry, {super.key, this.onLongPress, this.fs = const LocalFs()});
+  const UserMessageView(this.entry, {super.key, this.onLongPress, this.fs = const LocalFs(), this.working});
   final UserEntry entry;
+
+  /// What is being done to this message right now ("Rewinding…", "Forking…"), or null. The bubble dims, shows it with
+  /// a spinner, and takes no long-press until it is done.
+  final String? working;
 
   /// Where the attachment copies are (the agent's machine).
   final AgentFs fs;
@@ -45,16 +51,38 @@ class UserMessageView extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
         child: Builder(
           builder: (bubbleContext) => GestureDetector(
-            onLongPress: onLongPress == null ? null : () => onLongPress!(bubbleContext),
+            onLongPress: onLongPress == null || working != null ? null : () => onLongPress!(bubbleContext),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (attachments.isNotEmpty) ...[
-                  MessageAttachments(attachments: attachments, fs: fs),
-                  const SizedBox(height: 8),
-                ],
-                if (text.isNotEmpty) UserBubble(text),
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: working != null ? 0.5 : 1,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (attachments.isNotEmpty) ...[
+                        MessageAttachments(attachments: attachments, fs: fs),
+                        const SizedBox(height: 8),
+                      ],
+                      if (text.isNotEmpty) UserBubble(text),
+                    ],
+                  ),
+                ),
+                if (working != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, right: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const BusySpinner(size: 12),
+                        const SizedBox(width: 6),
+                        Text(working!, style: TextStyle(fontSize: 12, color: context.palette.muted)),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),
@@ -387,6 +415,8 @@ class AssistantMessageView extends StatelessWidget {
           text: f.text,
           model: model == null ? null : (modelLabel?.call(model) ?? model),
           cost: f.cost,
+          took: f.took,
+          outcome: f.outcome,
           subagents: subagents.isEmpty
               ? null
               : (count: subagents.length, credits: subagents.any((c) => c.credits == null) ? null : subagents.fold<double>(0, (a, c) => a + c.credits!)),
@@ -483,11 +513,17 @@ typedef SubagentsCost = ({int count, double? credits});
 String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
 
 class _MessageFooter extends StatelessWidget {
-  const _MessageFooter({required this.text, this.model, this.cost, this.subagents});
+  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done});
   final String text;
   final String? model;
   final TurnCost? cost;
   final SubagentsCost? subagents;
+
+  /// How the turn ended; a stopped or failed one must not show the green Done.
+  final TurnOutcome outcome;
+
+  /// How long the turn took: the live clock stopped at its end, by the tokens.
+  final Duration? took;
 
   @override
   Widget build(BuildContext context) {
@@ -506,6 +542,15 @@ class _MessageFooter extends StatelessWidget {
     final details = Wrap(
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
+        if (took != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: switch (outcome) {
+              TurnOutcome.done => LiveClock(label: tr('Done'), took: took, state: ClockState.done),
+              TurnOutcome.stopped => LiveClock(label: tr('Stopped'), took: took, state: ClockState.stopped),
+              TurnOutcome.failed => LiveClock(label: tr('Failed'), took: took, state: ClockState.failed),
+            },
+          ),
         if (model != null)
           Text(
             // The separator ends the model's line, so a wrapped cost starts clean.
@@ -524,7 +569,7 @@ class _MessageFooter extends StatelessWidget {
           offset: const Offset(-8, 0),
           child: CopyButton(text: text, showLabel: false),
         ),
-        if (model != null || c != null)
+        if (model != null || c != null || took != null)
           Expanded(
             child: c == null
                 ? details
@@ -1012,6 +1057,14 @@ class _ToolCallViewState extends State<ToolCallView> {
     return args?['content'] as String? ?? '';
   }
 
+  Future<void> _stopJob(String id) async {
+    try {
+      await widget.agent!.stopJob(id);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   /// Whether the agent's files are on this phone.
   bool get _local => widget.agent?.fs.isLocal ?? true;
 
@@ -1069,6 +1122,9 @@ class _ToolCallViewState extends State<ToolCallView> {
       'bash' => args?['command'],
       _ => null,
     } as String?;
+
+    // The background job this call started, while the app knows it.
+    final job = b.toolName == 'background_job' ? widget.agent?.jobStore.forToolCall(b.toolCallId) : null;
 
     final Widget indicator = switch (status) {
       ToolStatus.done => Icon(LucideIcons.check, size: 15, color: p.success),
@@ -1132,6 +1188,28 @@ class _ToolCallViewState extends State<ToolCallView> {
               ),
             ),
           ),
+          // A background job runs on after its call: its clock (and Stop) stay on the card until it ends.
+          if (job != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 6, 8),
+              child: JobClock(job: job, onStop: job.running ? () => _stopJob(job.id) : null),
+            )
+          // The host forgets its jobs when it restarts (and keeps only a chat's latest ones): an old card says so
+          // instead of showing nothing, which would look like a job that never ended.
+          else if (b.toolName == 'background_job' && status == ToolStatus.done && (widget.agent?.jobsLoaded ?? false))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(
+                tr('The host no longer tracks this job'),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint),
+              ),
+            ),
+          // A picture the tool returned (a `read` of an image) is shown, folded or not; a tap opens it full screen.
+          if (run != null && run.images.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: ToolImages(images: run.images, title: path?.split('/').last ?? b.toolName ?? 'image'),
+            ),
           if ((writing || sawLive) && !open && liveText != null && liveText.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
@@ -1208,6 +1286,181 @@ class _ToolCallViewState extends State<ToolCallView> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A background job's clock: running (blue, live), or how it ended. With Stop while it runs.
+class JobClock extends StatelessWidget {
+  const JobClock({super.key, required this.job, this.onStop});
+  final JobState job;
+  final VoidCallback? onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Row(
+      children: [
+        Expanded(
+          child: LiveClock(
+            label: job.label,
+            startedAt: job.startedAt,
+            took: job.took,
+            state: jobClockState(job.status),
+            detail: jobOutcome(job.status, job.exitCode),
+          ),
+        ),
+        if (onStop != null)
+          TextButton.icon(
+            onPressed: onStop,
+            style: TextButton.styleFrom(
+              foregroundColor: p.danger,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              textStyle: Theme.of(context).textTheme.labelMedium?.copyWith(fontSize: 12),
+            ),
+            icon: const Icon(LucideIcons.square, size: 14),
+            label: Text(tr('Stop')),
+          ),
+      ],
+    );
+  }
+}
+
+ClockState jobClockState(String status) => switch (status) {
+  'running' => ClockState.running,
+  'done' => ClockState.done,
+  'stopped' => ClockState.stopped,
+  _ => ClockState.failed,
+};
+
+/// How a job ended, in words (none while it runs or when it went well).
+String? jobOutcome(String status, int? exitCode) => switch (status) {
+  'failed' => tr('exit code {n}').replaceAll('{n}', '${exitCode ?? '?'}'),
+  'timeout' => tr('time limit reached'),
+  'stopped' => tr('stopped'),
+  _ => null,
+};
+
+/// A background job's result in the chat: a notice of how it ended (not a bubble: the user did not send it), and the
+/// agent's next turn goes on from it. A tap shows what it printed.
+class JobNoticeView extends StatelessWidget {
+  const JobNoticeView(this.entry, {super.key});
+  final JobEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Radii.sm),
+        onTap: () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (context) => _JobOutputSheet(entry: entry),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Flexible(
+                child: LiveClock(
+                  label: '${tr('Background job')} · ${entry.label}',
+                  took: entry.took,
+                  state: jobClockState(entry.status),
+                  detail: jobOutcome(entry.status, entry.exitCode),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(LucideIcons.chevronRight, size: 14, color: context.palette.faint),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _JobOutputSheet extends StatelessWidget {
+  const _JobOutputSheet({required this.entry});
+  final JobEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.6,
+      maxChildSize: 0.95,
+      builder: (context, scroll) => ListView(
+        controller: scroll,
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
+        children: [
+          Text(entry.label, style: text.titleMedium),
+          const SizedBox(height: 4),
+          LiveClock(
+            label: tr('Background job'),
+            took: entry.took,
+            state: jobClockState(entry.status),
+            detail: jobOutcome(entry.status, entry.exitCode),
+          ),
+          const SizedBox(height: 14),
+          CodeBox(text: entry.command, label: 'command', language: 'bash', lineNumbers: false),
+          const SizedBox(height: 10),
+          if (entry.tail.trim().isEmpty)
+            Text(tr('It printed nothing.'), style: text.bodySmall)
+          else
+            CodeBox(text: entry.tail.trimRight(), label: 'output', lineNumbers: false),
+        ],
+      ),
+    );
+  }
+}
+
+/// Thumbnails of the pictures a tool returned; each opens full screen.
+class ToolImages extends StatelessWidget {
+  const ToolImages({super.key, required this.images, required this.title});
+  final List<ToolImage> images;
+  final String title;
+
+  static const size = 112.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final (i, image) in images.indexed)
+          Semantics(
+            button: true,
+            image: true,
+            label: '${tr('Open picture')} ${images.length > 1 ? '${i + 1} ' : ''}$title',
+            child: GestureDetector(
+              onTap: () => openImageBytesViewer(context, image.bytes, title: title),
+              child: Container(
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  color: p.raised,
+                  borderRadius: BorderRadius.circular(Radii.md),
+                  border: Border.all(color: p.border),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Image.memory(
+                  image.bytes,
+                  fit: BoxFit.cover,
+                  // Decoded at thumbnail size, not the picture's own.
+                  cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+                  gaplessPlayback: true,
+                  errorBuilder: (_, _, _) => Icon(LucideIcons.imageOff, size: 22, color: p.muted),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

@@ -72,6 +72,43 @@ test("#7 git status: renames and odd names come through -z intact", async () => 
 	assert.ok((await status(repo)).files.some((f) => f.code === "R " && f.from === "old name.txt"));
 });
 
+test("git in a subfolder of a repository: diff, stage, unstage and discard reach the files the status names", async () => {
+	const { status, diff, stage, unstage, discard } = await bundle("gitops");
+	const repo = tmp("repo-");
+	sh(repo, "init", "-q", "-b", "main");
+	sh(repo, "config", "user.email", "t@t");
+	sh(repo, "config", "user.name", "t");
+	write(repo, "site/index.html", "<h1>v1</h1>\n");
+	write(repo, "site/old.css", "a{}\n");
+	sh(repo, "add", "-A");
+	sh(repo, "commit", "-qm", "init");
+	const project = join(repo, "site");
+	write(repo, "site/index.html", "<h1>v2</h1>\n");
+	write(repo, "site/old.css", "a{color:red}\n");
+	write(repo, "site/new.js", "x\n");
+
+	const s = await status(project);
+	assert.equal(s.root, sh(repo, "rev-parse", "--show-toplevel").trim(), "where the paths start");
+	assert.deepEqual(s.files.map((f) => f.path).sort(), ["site/index.html", "site/new.js", "site/old.css"]);
+	// The diff of one file, as the status names it (it was empty when run from the subfolder).
+	assert.match((await diff(project, "site/index.html")).patch, /\+<h1>v2<\/h1>/);
+	assert.match((await diff(project, "site/new.js")).patch, /\+x/, "an untracked file shows as all new");
+	// The whole project's diff is still its own.
+	assert.match((await diff(project)).patch, /index\.html/);
+
+	await stage(project, ["site/index.html"]);
+	assert.equal((await status(project)).files.find((f) => f.path === "site/index.html").code, "M ");
+	assert.match((await diff(project, "site/index.html", true)).patch, /\+<h1>v2<\/h1>/);
+	await unstage(project, ["site/index.html"]);
+	assert.equal((await status(project)).files.find((f) => f.path === "site/index.html").code, " M");
+
+	// A tracked file goes back to its committed text; an untracked one goes away.
+	await discard(project, ["site/old.css", "site/new.js"]);
+	assert.equal(readFileSync(join(repo, "site/old.css"), "utf8"), "a{}\n");
+	assert.equal(existsSync(join(repo, "site/new.js")), false);
+	assert.equal(readFileSync(join(repo, "site/index.html"), "utf8"), "<h1>v2</h1>\n", "only what was named");
+});
+
 test("#6 undo: lists what it deletes, and keeps what the user ticks", async () => {
 	const { Checkpoints } = await bundle("checkpoints");
 	const cwd = tmp("proj-");

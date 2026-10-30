@@ -509,6 +509,8 @@ void main() {
       final saved = store.load()!;
       expect([saved.host, saved.active], ['new.example.com', false]);
       expect(agent.client.isRemote, isFalse, reason: 'the chat no longer talks to the old server');
+      // The list was scrolled down to "Save server"; step 3 is further up.
+      await tester.scrollUntilVisible(find.text('3 · Test connection'), -300, scrollable: find.byType(Scrollable).first);
       expect(find.text('3 · Test connection'), findsOneWidget, reason: 'on to the next step');
       expect(setup.checks, greaterThanOrEqualTo(1), reason: 'the new server is tested at once');
     });

@@ -1,6 +1,7 @@
 package id.griphub.agent
 
 import android.Manifest
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -34,6 +35,9 @@ class MainActivity : FlutterFragmentActivity() {
         /** A notification tap; the launch map rides along (Notifications.kt). */
         const val ACTION_OPEN = "id.griphub.agent.OPEN"
         private const val VOICE_REQUEST = 4101
+
+        /** How old a pasted or shared copy in the cache is before it is swept. */
+        private const val OLD_COPY_MS = 24L * 60 * 60 * 1000
     }
 
     private var events: EventChannel.EventSink? = null
@@ -44,7 +48,10 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) handleIntent(intent)
+        if (savedInstanceState == null) {
+            sweepOldCopies()
+            handleIntent(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -232,6 +239,10 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("unavailable", "No speech recognizer on this device", null)
                         }
                     }
+                    // A picture on the clipboard (copied from a browser, a gallery, a screenshot tool): whether there is one,
+                    // for the composer's "Paste image", and a copy of it in the cache to attach.
+                    "clipboardHasImage" -> result.success(clipboardImageUri() != null)
+                    "clipboardImage" -> result.success(clipboardImageUri()?.let { copyClipboardImage(it) })
                     "takeLaunch" -> {
                         result.success(pendingLaunch)
                         pendingLaunch = null
@@ -342,6 +353,50 @@ class MainActivity : FlutterFragmentActivity() {
         val target = File(dir, name.replace('/', '_'))
         contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
         mapOf("path" to target.path, "name" to target.name, "mime" to contentResolver.getType(uri))
+    } catch (e: Exception) {
+        null
+    }
+
+    /** The clipboard's first item when it is a picture behind a content:// URI, else null. */
+    private fun clipboardImageUri(): Uri? {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
+        val clip = clipboard.primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+        val uri = clip.getItemAt(0).uri ?: return null
+        // Same rule as shares: only content:// URIs, which the app that copied it grants us.
+        if (uri.scheme != "content") return null
+        val type = clip.description.let { d -> (0 until d.mimeTypeCount).map { d.getMimeType(it) } }
+            .firstOrNull { it.startsWith("image/") } ?: contentResolver.getType(uri)
+        return if (type?.startsWith("image/") == true) uri else null
+    }
+
+    /**
+     * Removes copies the app made in its cache for pastes and shares once they are a day old: a chat that still needs
+     * one has long since copied it into its own project (.attachments/), and Android only empties the cache when it
+     * is short of space. Runs off the main thread; a failure is harmless and ignored.
+     */
+    private fun sweepOldCopies() {
+        val cache = cacheDir ?: return
+        val cutoff = System.currentTimeMillis() - OLD_COPY_MS
+        Thread {
+            for (name in listOf("paste", "shared", "griphub-paste")) {
+                try {
+                    File(cache, name).listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
+                } catch (e: Exception) {
+                    // Gone or unreadable: nothing to sweep.
+                }
+            }
+        }.start()
+    }
+
+    /** Copies the clipboard's picture into the cache; its path, name and type, or null when it cannot be read. */
+    private fun copyClipboardImage(uri: Uri): Map<String, Any?>? = try {
+        val mime = contentResolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/png"
+        val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime) ?: "png"
+        val dir = File(cacheDir, "paste/${System.currentTimeMillis()}").apply { mkdirs() }
+        val target = File(dir, "pasted-image.$ext")
+        contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+        if (target.length() > 0) mapOf("path" to target.path, "name" to target.name, "mime" to mime) else null
     } catch (e: Exception) {
         null
     }

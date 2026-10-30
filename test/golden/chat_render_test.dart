@@ -65,7 +65,7 @@ void main() {
       final t = <ChatEntry>[UserEntry('a'), assistant('Jawaban.'), assistant(null, tool: true, model: 'gpt-6-sol')];
       final f = turnFooters(t, busy: false);
       expect(f.keys, [2]);
-      expect(f[2], (text: 'Jawaban.', model: 'gpt-6-sol', cost: null));
+      expect(f[2], (text: 'Jawaban.', model: 'gpt-6-sol', cost: null, took: null, outcome: TurnOutcome.done));
     });
 
     test('nothing while a message still streams, nothing for a turn without text', () {

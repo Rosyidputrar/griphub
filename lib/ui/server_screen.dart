@@ -10,6 +10,7 @@ import '../agent/agent_controller.dart';
 import '../agent/remote_profile.dart';
 import 'backup_screen.dart';
 import 'box_screen.dart';
+import 'server_guide.dart';
 import 'i18n.dart';
 import 'kit.dart';
 import 'theme.dart';
@@ -748,7 +749,17 @@ class _ServerScreenState extends State<ServerScreen> {
         final profile = mode.profile;
         final link = agent.client.connection.value;
         return Scaffold(
-          appBar: AppBar(title: Text(tr('Server agent'))),
+          appBar: AppBar(
+            title: Text(tr('Server agent')),
+            actions: [
+              IconButton(
+                tooltip: tr('Server guide'),
+                icon: const Icon(LucideIcons.bookOpen, size: 20),
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ServerGuideScreen())),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
             children: [
@@ -1250,50 +1261,10 @@ class _ServerScreenState extends State<ServerScreen> {
     );
   }
 
-  /// What to do when something goes wrong, for someone who has never used a VPS: the repository with the server notes
-  /// is private, so the app carries them.
+  /// What to do when something goes wrong (server_guide.dart), with the whole guide one tap away.
   List<Widget> _help(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final entries = [
-      (
-        tr('Getting to the server\'s terminal'),
-        tr(
-          'Use the web console in your VPS provider\'s control panel, or an SSH app (Termius, JuiceSSH) with the address and the root password or key the provider gave you.',
-        ),
-      ),
-      (
-        tr('The paste "arrived damaged"'),
-        tr(
-          'The terminal changed the text on the way. Use "Share the setup file instead", or paste in another SSH app.',
-        ),
-      ),
-      (
-        tr('No sudo, or "run this as root"'),
-        tr('Log in as root, or as an account that may use sudo; the setup needs it once.'),
-      ),
-      (
-        tr('"rootless podman does not work", or the box is not built'),
-        tr(
-          'Paste the setup command again: it repairs Podman on Ubuntu 24.04. Then build the box in Settings > The agent\'s box.',
-        ),
-      ),
-      (
-        tr('"Could not reach" the server'),
-        tr(
-          'Check the address, that this phone is online, and that the provider\'s firewall lets SSH in (port 22).',
-        ),
-      ),
-      (
-        tr('"Host key" warning'),
-        tr('Do not continue unless you reinstalled the server; then run the setup again and paste the new code.'),
-      ),
-      (
-        tr('This phone was lost'),
-        tr(
-          'On the server, remove the line ending in griphub-app from /home/griphub/.ssh/authorized_keys. Then set up the new phone with the setup command.',
-        ),
-      ),
-    ];
+    final entries = serverTroubleshooting();
     return [
       SectionLabel(tr('When something goes wrong')),
       SurfaceCard(
@@ -1312,6 +1283,14 @@ class _ServerScreenState extends State<ServerScreen> {
                 ),
             ],
           ),
+        ),
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          icon: const Icon(LucideIcons.bookOpen, size: 16),
+          label: Text(tr('Read the server guide')),
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ServerGuideScreen())),
         ),
       ),
     ];

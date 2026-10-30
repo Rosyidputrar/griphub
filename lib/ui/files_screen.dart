@@ -8,6 +8,7 @@ import '../agent/agent_fs.dart';
 import 'db_screen.dart';
 import 'editor_screen.dart';
 import 'illustration.dart';
+import 'kit.dart';
 import 'preview_open.dart';
 import 'search_screen.dart';
 import 'i18n.dart';
@@ -105,13 +106,17 @@ class FilesScreen extends StatefulWidget {
   State<FilesScreen> createState() => _FilesScreenState();
 }
 
-class _FilesScreenState extends State<FilesScreen> {
+class _FilesScreenState extends State<FilesScreen> with BusyActions {
   late final String _root = _normalize(widget.root ?? widget.agent.cwd);
   late String _dir = _root;
   List<_Entry> _entries = [];
   bool _loading = true;
   bool _showHidden = false;
   String? _error;
+
+  /// Counts listings, so one that comes back after the user moved on (a slow folder, a slow server) is dropped instead
+  /// of showing the old folder's entries under the new folder's title.
+  int _listing = 0;
 
   AgentController get agent => widget.agent;
 
@@ -127,20 +132,23 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _load() async {
+    final dir = _dir;
+    final listing = ++_listing;
+    if (!_loading) setState(() => _loading = true);
     try {
-      final items = await fs.list(_dir);
+      final items = await fs.list(dir);
       items.sort((a, b) {
         if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       });
-      if (!mounted) return;
+      if (!mounted || listing != _listing) return;
       setState(() {
         _entries = items;
         _error = null;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || listing != _listing) return;
       setState(() {
         _entries = [];
         _error = '$e';
@@ -149,9 +157,13 @@ class _FilesScreenState extends State<FilesScreen> {
     }
   }
 
+  /// Opens [dir]. The old folder's entries go at once: until the new listing arrives there is nothing to act on.
   void _go(String dir) {
+    if (busy()) return;
     setState(() {
       _dir = _normalize(dir);
+      _entries = [];
+      _error = null;
       _loading = true;
     });
     _load();
@@ -263,10 +275,14 @@ class _FilesScreenState extends State<FilesScreen> {
     if (name == null) return;
     final path = _join(_dir, name);
     try {
-      if (await fs.exists(path)) return _snack('$name already exists');
-      await fs.createFile(path);
-      await _load();
-      if (!mounted) return;
+      final created = await runBusy(path, () async {
+        if (await fs.exists(path)) return false;
+        await fs.createFile(path);
+        await _load();
+        return true;
+      });
+      if (created == false) return _snack('$name already exists');
+      if (created == null || !mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => EditorScreen(agent: agent, path: path),
@@ -283,9 +299,13 @@ class _FilesScreenState extends State<FilesScreen> {
     if (name == null) return;
     final path = _join(_dir, name);
     try {
-      if (await fs.exists(path)) return _snack('$name already exists');
-      await fs.mkdir(path);
-      await _load();
+      final created = await runBusy(path, () async {
+        if (await fs.exists(path)) return false;
+        await fs.mkdir(path);
+        await _load();
+        return true;
+      });
+      if (created == false) _snack('$name already exists');
     } catch (e) {
       _snack('$e');
     }
@@ -296,9 +316,13 @@ class _FilesScreenState extends State<FilesScreen> {
     if (name == null || name == e.name) return;
     final target = _join(_dirName(e.path), name);
     try {
-      if (await fs.exists(target)) return _snack('$name already exists');
-      await fs.rename(e.path, target);
-      await _load();
+      final renamed = await runBusy(e.path, () async {
+        if (await fs.exists(target)) return false;
+        await fs.rename(e.path, target);
+        await _load();
+        return true;
+      });
+      if (renamed == false) _snack('$name already exists');
     } catch (err) {
       _snack('$err');
     }
@@ -309,14 +333,15 @@ class _FilesScreenState extends State<FilesScreen> {
     final ext = e.isDir ? '' : _extOf(e.name);
     final stem = ext.isEmpty ? e.name : e.name.substring(0, e.name.length - ext.length - 1);
     String candidate(int n) => '$stem copy${n > 1 ? ' $n' : ''}${ext.isEmpty ? '' : '.$ext'}';
-    var n = 1;
-    while (await fs.exists(_join(dir, candidate(n)))) {
-      n++;
-    }
-    final target = _join(dir, candidate(n));
     try {
-      await fs.copy(e.path, target);
-      await _load();
+      await runBusy(e.path, () async {
+        var n = 1;
+        while (await fs.exists(_join(dir, candidate(n)))) {
+          n++;
+        }
+        await fs.copy(e.path, _join(dir, candidate(n)));
+        await _load();
+      });
     } catch (err) {
       _snack('$err');
     }
@@ -343,8 +368,10 @@ class _FilesScreenState extends State<FilesScreen> {
     );
     if (ok != true) return;
     try {
-      await fs.delete(e.path, recursive: e.isDir);
-      await _load();
+      await runBusy(e.path, () async {
+        await fs.delete(e.path, recursive: e.isDir);
+        await _load();
+      });
     } catch (err) {
       _snack('$err');
     }
@@ -356,6 +383,9 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _entryAction(_Entry e, String action) async {
+    // One change at a time, and only to what this folder lists now: a menu opened on an entry of a folder the user has
+    // since left must not rename or delete it.
+    if (busy() || _dirName(e.path) != _dir) return;
     switch (action) {
       case 'open':
         await _open(e);
@@ -433,6 +463,7 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _showEntrySheet(_Entry e) async {
+    if (busy()) return;
     final p = context.palette;
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -505,6 +536,7 @@ class _FilesScreenState extends State<FilesScreen> {
             PopupMenuButton<String>(
               icon: const Icon(LucideIcons.plus, size: 22),
               tooltip: tr('New'),
+              enabled: !busy(),
               onSelected: (v) => switch (v) {
                 'file' => _newFile(),
                 'folder' => _newFolder(),
@@ -543,6 +575,8 @@ class _FilesScreenState extends State<FilesScreen> {
         body: Column(
           children: [
             _Breadcrumbs(root: _root, dir: _dir, onTap: _go),
+            // A reload after a change, or a change on its way: the list stays, the bar says it is not final yet.
+            BusyBar(busy: busy() || (_loading && _entries.isNotEmpty)),
             Expanded(child: _list(context)),
           ],
         ),
@@ -624,8 +658,8 @@ class _FilesScreenState extends State<FilesScreen> {
     final meta = [if (!e.isDir) _formatSize(e.size), _formatTime(e.modified)].join(' · ');
     return InkWell(
       borderRadius: BorderRadius.circular(Radii.md),
-      onTap: () => _open(e),
-      onLongPress: () => _showEntrySheet(e),
+      onTap: busy() ? null : () => _open(e),
+      onLongPress: busy() ? null : () => _showEntrySheet(e),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
         child: Row(
@@ -655,17 +689,21 @@ class _FilesScreenState extends State<FilesScreen> {
                 ),
               ),
             ),
-            PopupMenuButton<String>(
-              icon: Icon(LucideIcons.ellipsisVertical, size: 18, color: p.muted),
-              onSelected: (a) => _entryAction(e, a),
-              itemBuilder: (_) => [
-                for (final m in _menuItems(e))
-                  PopupMenuItem(
-                    value: m.$1,
-                    child: Text(m.$2, style: m.$1 == 'delete' ? TextStyle(color: p.danger) : null),
-                  ),
-              ],
-            ),
+            if (busy(e.path))
+              const Padding(padding: EdgeInsets.all(16), child: BusySpinner())
+            else
+              PopupMenuButton<String>(
+                icon: Icon(LucideIcons.ellipsisVertical, size: 18, color: p.muted),
+                enabled: !busy(),
+                onSelected: (a) => _entryAction(e, a),
+                itemBuilder: (_) => [
+                  for (final m in _menuItems(e))
+                    PopupMenuItem(
+                      value: m.$1,
+                      child: Text(m.$2, style: m.$1 == 'delete' ? TextStyle(color: p.danger) : null),
+                    ),
+                ],
+              ),
           ],
         ),
       ),

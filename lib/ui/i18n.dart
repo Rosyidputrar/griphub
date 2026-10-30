@@ -1548,4 +1548,139 @@ const _id = <String, String>{
   'Message cancelled': 'Pesan dibatalkan',
   '1 image': '1 gambar',
   'That message was already sent': 'Pesan itu sudah terkirim',
+  // Work in progress (loading states)
+  'Sending…': 'Mengirim…',
+  'Rewinding…': 'Memundurkan…',
+  'Forking…': 'Membuat cabang…',
+  'Stopping the agent…': 'Menghentikan agent…',
+  'The agent did not stop in time. Try again in a moment.': 'Agent belum berhenti tepat waktu. Coba lagi sebentar lagi.',
+  'Starting the chat…': 'Memulai chat…',
+  'Could not prepare the deploy': 'Deploy gagal disiapkan',
+  'Checking what will be uploaded…': 'Memeriksa apa yang akan diunggah…',
+  'Could not change approvals': 'Persetujuan gagal diubah',
+  'Could not switch the model': 'Model gagal diganti',
+  'Wait for the chat to finish updating.': 'Tunggu sampai chat selesai diperbarui.',
+  // Paste image, tool pictures, git file contents
+  'Paste image': 'Tempel gambar',
+  'The picture you copied': 'Gambar yang kamu salin',
+  'The clipboard has no picture to paste': 'Tidak ada gambar di clipboard untuk ditempel',
+  'Open picture': 'Buka gambar',
+  'File': 'File',
+  'This file is not in the folder.': 'File ini tidak ada di folder.',
+  'Too large to show here ({size}).': 'Terlalu besar untuk ditampilkan di sini ({size}).',
+  'Binary file ({size}), not shown as text.': 'File biner ({size}), tidak ditampilkan sebagai teks.',
+  // Live clock and background jobs
+  'running': 'berjalan',
+  'Background job': 'Pekerjaan latar',
+  'The host no longer tracks this job': 'Host tidak lagi melacak pekerjaan ini',
+  "Could not read the server's backup status": 'Status backup server tidak bisa dibaca',
+  'exit code {n}': 'kode keluar {n}',
+  'time limit reached': 'batas waktu tercapai',
+  'stopped': 'dihentikan',
+  'It printed nothing.': 'Tidak ada output.',
+  'Staged changes': 'Perubahan yang di-stage',
+  'Unstaged changes': 'Perubahan yang belum di-stage',
+  // Automatic server backup
+  'Automatic server backup': 'Backup otomatis server',
+  'Back up now': 'Backup sekarang',
+  'Every hour when something changed: chats, projects with their .git, skills, API keys and accounts. Dependencies such as node_modules are left out. Encrypted with a key only this phone and your server have; the newest one comes to this phone while the app is open.':
+      'Setiap jam bila ada perubahan: chat, proyek beserta .git-nya, skill, API key dan akun. Dependensi seperti node_modules tidak ikut. Dienkripsi dengan kunci yang hanya dimiliki HP ini dan server kamu; backup terbaru dibawa ke HP ini selama aplikasi terbuka.',
+  'Fetching the newest backup…': 'Mengambil backup terbaru…',
+  "From the backup of {when}: the server's chats, projects with their .git, skills, schedules, API keys and accounts come to this phone. Files with the same name are replaced. This phone keeps its own DNS and Linux settings.":
+      'Dari backup {when}: chat, proyek beserta .git-nya, skill, jadwal, API key dan akun dari server dipindah ke HP ini. File dengan nama yang sama diganti. HP ini tetap memakai pengaturan DNS dan Linux miliknya sendiri.',
+  'Newest on the server': 'Terbaru di server',
+  'Newest on this phone': 'Terbaru di HP ini',
+  'Not now': 'Nanti saja',
+  'Restore on this phone': 'Pulihkan di HP ini',
+  "Restore the server's data on this phone?": 'Pulihkan data server di HP ini?',
+  'Restored {n} files from the server.': '{n} file dari server dipulihkan.',
+  'Restoring…': 'Memulihkan…',
+  "This phone's own SSH key was kept.": 'Kunci SSH milik HP ini tetap dipakai.',
+  // Server guide
+  'Disk space warnings':
+      'Peringatan ruang disk',
+  '"Up to date", or "A newer one is in this app": tap "Install / update agent" on the same screen. "Restarts when the current work is done": the update is copied and waits for the work to end.':
+      '"Terbaru", atau "Versi lebih baru ada di aplikasi ini": ketuk "Pasang / perbarui agent" di layar yang sama. "Restart setelah pekerjaan saat ini selesai": update sudah disalin dan menunggu pekerjaan selesai.',
+  '"ready": commands run inside it. "off": on the server itself. "not built": commands are refused until you build it. "none": this server has no box.':
+      '"siap": perintah berjalan di dalamnya. "mati": langsung di server. "belum dibangun": perintah ditolak sampai box dibangun. "tidak ada": server ini tidak punya box.',
+  'An update says it restarts when the work is done':
+      'Update bilang akan restart setelah pekerjaan selesai',
+  'Background tasks running now, and how many wait their turn.':
+      'Tugas latar yang sedang berjalan, dan berapa yang menunggu giliran.',
+  'Build the box on its screen, so the agent\'s commands run inside it.':
+      'Bangun box di layarnya, supaya perintah agent berjalan di dalamnya.',
+  'Builds it again from the Containerfile on the server: after an update, or when tools are missing.':
+      'Membangunnya lagi dari Containerfile di server: setelah update, atau saat ada tool yang hilang.',
+  'Deletes its ssh and git settings, shell history and caches. Projects in the workspace stay.':
+      'Menghapus pengaturan ssh dan git, riwayat shell dan cache-nya. Proyek di workspace tetap ada.',
+  'Everything lives on the server: chats, projects and background tasks. The agent on this phone keeps its own chats; switch between the two from the Agent row in Settings.':
+      'Semuanya ada di server: chat, proyek dan tugas latar. Agent di HP ini punya chat sendiri; pindah di antara keduanya lewat baris Agent di Pengaturan.',
+  'Frees its memory. Nothing is lost; the next command starts it again.':
+      'Membebaskan memorinya. Tidak ada yang hilang; perintah berikutnya menyalakannya lagi.',
+  'How long the agent has run since it last started.':
+      'Sudah berapa lama agent berjalan sejak terakhir dinyalakan.',
+  'How much the agent uses. Orange above 1.6 GB: the agent and its subagents share 2 GB.':
+      'Berapa banyak yang dipakai agent. Oranye di atas 1,6 GB: agent dan subagent-nya berbagi 2 GB.',
+  'In the app: Settings, the Agent row. Enter the server\'s address.':
+      'Di aplikasi: Pengaturan, baris Agent. Isi alamat server.',
+  'Install the ntfy app, subscribe to the exact topic shown on the server screen, and use "Send a test notification". Notifications only come while the app is closed or in the background.':
+      'Pasang aplikasi ntfy, langganan topik yang persis sama dengan yang tampil di layar server, lalu pakai "Kirim notifikasi uji". Notifikasi hanya datang saat aplikasi ditutup atau di latar belakang.',
+  'Its reason is under Settings > Backup & restore. Usually the disk is full; free some space and use "Back up now".':
+      'Alasannya ada di Pengaturan > Backup & pulihkan. Biasanya disk penuh; kosongkan sebagian lalu pakai "Backup sekarang".',
+  'Memory, swap and CPUs for the box are set in ~/.griphub/box.conf on the server.':
+      'Memori, swap dan CPU untuk box diatur di ~/.griphub/box.conf di server.',
+  'Notifications do not arrive':
+      'Notifikasi tidak masuk',
+  'On the server, as root, paste it into the terminal. It takes a few minutes and prints a setup code (griphub1:…). Run it again any time: it only repairs and updates.':
+      'Di server, sebagai root, tempel ke terminal. Prosesnya beberapa menit lalu mencetak setup code (griphub1:…). Boleh dijalankan lagi kapan saja: hanya memperbaiki dan memperbarui.',
+  'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built.':
+      'Nyala: setiap perintah agent berjalan di dalam box. Mati: perintah langsung berjalan di server sebagai akun griphub, tanpa dinding box. Biarkan menyala kecuali box tidak bisa dibangun.',
+  'Paste the setup code in the app, then tap "Install / update agent".':
+      'Tempel setup code di aplikasi, lalu ketuk "Pasang / perbarui agent".',
+  'Read the server guide':
+      'Baca panduan server',
+  'Server guide':
+      'Panduan server',
+  'Setting it up':
+      'Cara memasang',
+  'Tap "Copy setup command". It holds the setup files and this phone\'s key.':
+      'Ketuk "Salin perintah setup". Isinya file setup dan kunci HP ini.',
+  'The agent and its subagents share 2 GB. Let fewer subagents work at once; "Install / update agent" also restarts it, once nothing is running.':
+      'Agent dan subagent-nya berbagi 2 GB. Kurangi subagent yang bekerja bersamaan; "Pasang / perbarui agent" juga me-restart-nya begitu tidak ada yang berjalan.',
+  'The agent can run on a server of your own (a VPS) instead of on this phone. It then keeps working when the phone is off or the app is closed, and this app is its remote control: chats, files, previews, the terminal and deploys all go over one SSH connection.':
+      'Agent bisa berjalan di server milikmu sendiri (VPS), bukan di HP ini. Agent tetap bekerja walau HP mati atau aplikasi ditutup, dan aplikasi ini jadi remote-nya: chat, file, pratinjau, terminal dan deploy semuanya lewat satu koneksi SSH.',
+  'The agent says commands are refused':
+      'Agent bilang perintah ditolak',
+  'The agent uses a lot of memory':
+      'Agent memakai banyak memori',
+  'The automatic backup failed':
+      'Backup otomatis gagal',
+  'The box':
+      'Box',
+  'The box is a container (rootless Podman) on your server where the agent\'s commands run. Root inside it is only the griphub account outside, so a command cannot touch the rest of the server.':
+      'Box adalah container (Podman rootless) di server tempat perintah agent berjalan. Root di dalamnya hanyalah akun griphub di luar, jadi perintah tidak bisa menyentuh bagian server lainnya.',
+  'The box is switched on but its image is not built yet. Build it in Settings > The agent\'s box, or turn the box off there to run commands on the server itself.':
+      'Box menyala tetapi image-nya belum dibangun. Bangun di Pengaturan > Box agent, atau matikan box di sana agar perintah berjalan langsung di server.',
+  'The key is made on this phone and given to the server: the server needs it to write backups. A copy that leaves the phone or the server cannot be read without it.':
+      'Kuncinya dibuat di HP ini dan diberikan ke server: server butuh kunci itu untuk menulis backup. Salinan yang keluar dari HP atau server tidak bisa dibaca tanpa kunci itu.',
+  'The new files are on the server; the agent switches to them once no chat, subagent or background task is running. Stop the work if it should happen now.':
+      'File baru sudah ada di server; agent beralih ke file itu begitu tidak ada chat, subagent atau tugas latar yang berjalan. Hentikan pekerjaannya bila ingin sekarang juga.',
+  'The table on the server screen, row by row:':
+      'Tabel di layar server, baris per baris:',
+  'Throws the running container away and makes a fresh one. Projects in the workspace stay.':
+      'Membuang container yang berjalan dan membuat yang baru. Proyek di workspace tetap ada.',
+  'Turn it on in Settings > Backup & restore. Every hour, when something changed, the server writes an encrypted backup of everything, API keys and each project\'s .git included, without dependencies. The newest comes to this phone while the app is open, and is offered when you switch back to the agent on this phone.':
+      'Nyalakan di Pengaturan > Backup & pulihkan. Setiap jam, bila ada perubahan, server menulis backup terenkripsi dari semuanya, termasuk API key dan .git tiap proyek, tanpa dependensi. Backup terbaru dibawa ke HP ini selama aplikasi terbuka, dan ditawarkan saat kamu kembali ke agent di HP ini.',
+  'Turns orange under 10 GB free. Under 5 GB the agent refuses new prompts and tasks until you free space.':
+      'Berubah oranye bila sisa di bawah 10 GB. Di bawah 5 GB agent menolak prompt dan tugas baru sampai ruang dikosongkan.',
+  'Under 5 GB free the agent takes no new work. Delete what you no longer need (old projects, build output, node_modules you can install again), or empty the box\'s home folder.':
+      'Di bawah 5 GB agent tidak menerima pekerjaan baru. Hapus yang tidak diperlukan lagi (proyek lama, hasil build, node_modules yang bisa dipasang lagi), atau kosongkan folder home box.',
+  'What the box is':
+      'Apa itu box',
+  'What the server agent is':
+      'Apa itu agent server',
+  'Whether subagents are working right now.':
+      'Apakah subagent sedang bekerja sekarang.',
+  'You need an Ubuntu or Debian server (x86_64 or arm64) with at least 2 cores, 4 GB of memory and 20 GB of disk, and root access once. Use a server for the agent only: its box shares the server\'s network.':
+      'Kamu butuh server Ubuntu atau Debian (x86_64 atau arm64) dengan minimal 2 core, memori 4 GB dan disk 20 GB, serta akses root sekali. Pakai server khusus untuk agent: box-nya berbagi jaringan dengan server.',
 };

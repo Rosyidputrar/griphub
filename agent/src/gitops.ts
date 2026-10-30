@@ -64,19 +64,33 @@ export function parseStatus(raw: string) {
 	return { head, files };
 }
 
+/**
+ * The repository's top folder. `git status --porcelain` names files from there whatever folder it runs in, while a
+ * pathspec (`git diff -- x`, `git add -- x`) is read from the folder git runs in; so every command that takes a path
+ * from the status runs here, or a project in a subfolder of a repository saw empty diffs and could not stage, unstage
+ * or discard its files.
+ */
+async function top(cwd: string): Promise<string> {
+	return (await git(cwd, ["rev-parse", "--show-toplevel"])).out.trim() || cwd;
+}
+
 export async function status(cwd: string) {
 	const inRepo = await git(cwd, ["rev-parse", "--is-inside-work-tree"]);
 	if (inRepo.code !== 0) return { repo: false as const };
+	const root = await top(cwd);
 	const { head, files } = parseStatus(await ok(cwd, ["status", "--porcelain=v1", "-z", "-b", "-uall"]));
 	// "## main...origin/main [ahead 1, behind 2]"
 	const m = head.match(/^## (?:No commits yet on )?([^.\s]+)(?:\.\.\.(\S+))?(?: \[(.+)\])?/);
 	const ahead = Number(head.match(/ahead (\d+)/)?.[1] ?? 0);
 	const behind = Number(head.match(/behind (\d+)/)?.[1] ?? 0);
 	const remote = (await git(cwd, ["remote", "get-url", "origin"])).out.trim() || null;
-	return { repo: true as const, branch: m?.[1] ?? "HEAD", upstream: m?.[2] ?? null, ahead, behind, remote, files };
+	// root: where the files' paths start (the app reads a changed file's contents from there).
+	return { repo: true as const, root, branch: m?.[1] ?? "HEAD", upstream: m?.[2] ?? null, ahead, behind, remote, files };
 }
 
 export async function diff(cwd: string, file?: string, staged = false) {
+	// A file's path comes from the status: relative to the top. The whole diff stays the project folder's own.
+	if (file) cwd = await top(cwd);
 	const args = ["diff", "--no-color", "-U3"];
 	if (staged) args.push("--cached");
 	if (file) args.push("--", file);
@@ -90,14 +104,17 @@ export async function diff(cwd: string, file?: string, staged = false) {
 }
 
 export async function stage(cwd: string, paths: string[] | "all") {
-	await ok(cwd, paths === "all" ? ["add", "-A"] : ["add", "--", ...paths]);
+	if (paths === "all") return void (await ok(cwd, ["add", "-A"]));
+	await ok(await top(cwd), ["add", "--", ...paths]);
 }
 
 export async function unstage(cwd: string, paths: string[] | "all") {
-	await ok(cwd, paths === "all" ? ["reset", "-q"] : ["reset", "-q", "--", ...paths]);
+	if (paths === "all") return void (await ok(cwd, ["reset", "-q"]));
+	await ok(await top(cwd), ["reset", "-q", "--", ...paths]);
 }
 
 export async function discard(cwd: string, paths: string[]) {
+	cwd = await top(cwd);
 	for (const p of paths) {
 		const tracked = (await git(cwd, ["ls-files", "--error-unmatch", "--", p])).code === 0;
 		if (tracked) await ok(cwd, ["checkout", "--", p]);

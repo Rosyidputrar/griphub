@@ -38,7 +38,7 @@ class TasksScreen extends StatefulWidget {
   State<TasksScreen> createState() => _TasksScreenState();
 }
 
-class _TasksScreenState extends State<TasksScreen> {
+class _TasksScreenState extends State<TasksScreen> with BusyActions {
   final _prompt = TextEditingController();
   bool _queueing = false;
 
@@ -155,14 +155,30 @@ class _TasksScreenState extends State<TasksScreen> {
         ],
       ),
     );
-    if (ok == true) await _guard(() => f.deleteSchedule(s.id));
+    if (ok == true) await _onSchedule(s, () => f.deleteSchedule(s.id));
+  }
+
+  /// One change to a schedule at a time (run, switch, delete), with a spinner on its row meanwhile.
+  Future<bool> _onSchedule(ScheduleInfo s, Future<void> Function() task) async {
+    if (busy(s.id)) return false;
+    try {
+      return await runBusy(s.id, () async {
+            await task();
+            return true;
+          }) ??
+          false;
+    } catch (e) {
+      _error(e);
+      return false;
+    }
   }
 
   Future<void> _runNow(ScheduleInfo s) async {
-    await _guard(() => f.runScheduleNow(s.id));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Queued')}: "${s.name}"')));
-    }
+    // "Queued" only when it was: a refusal (budget, a full disk, no GitHub sign-in) says so instead.
+    if (!await _onSchedule(s, () => f.runScheduleNow(s.id)) || !mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('${tr('Queued')}: "${s.name}"')));
   }
 
   @override
@@ -306,8 +322,9 @@ class _TasksScreenState extends State<TasksScreen> {
                       for (final s in f.schedules)
                         _ScheduleRow(
                           schedule: s,
+                          busy: busy(s.id),
                           onTap: () => _editSchedule(s),
-                          onToggle: (v) => _guard(() => f.saveSchedule({...s.json, 'enabled': v})),
+                          onToggle: (v) => _onSchedule(s, () => f.saveSchedule({...s.json, 'enabled': v})),
                           onRunNow: () => _runNow(s),
                           onDelete: () => _deleteSchedule(s),
                         ),
@@ -455,8 +472,12 @@ class _ScheduleRow extends StatelessWidget {
     required this.onToggle,
     required this.onRunNow,
     required this.onDelete,
+    this.busy = false,
   });
   final ScheduleInfo schedule;
+
+  /// A change to it is on its way: a spinner, and its switch and menu wait.
+  final bool busy;
   final VoidCallback onTap;
   final ValueChanged<bool> onToggle;
   final VoidCallback onRunNow;
@@ -474,12 +495,14 @@ class _ScheduleRow extends StatelessWidget {
           : IconTile(icon: LucideIcons.calendarClock, color: s.enabled ? p.accentAlt : p.faint),
       title: s.name,
       subtitle: '${_describeSchedule(s)}${last != null ? ' · ${tr('last run')} ${formatAgo(last)}' : ''}',
-      onTap: onTap,
+      onTap: busy ? null : onTap,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Switch(value: s.enabled, onChanged: onToggle),
+          if (busy) ...[const BusySpinner(), const SizedBox(width: 4)],
+          Switch(value: s.enabled, onChanged: busy ? null : onToggle),
           PopupMenuButton<String>(
+            enabled: !busy,
             icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
             onSelected: (v) => switch (v) {
               'run' => onRunNow(),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'agent/agent_client.dart';
 import 'agent/agent_controller.dart';
 import 'ui/app_lock.dart';
+import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger;
 import 'ui/home_shell.dart';
 import 'ui/onboarding.dart';
 import 'ui/predictive_back.dart';
@@ -37,6 +38,7 @@ class GripHubApp extends StatelessWidget {
         title: tr('GripHub AI Agent'),
         debugShowCheckedModeBanner: false,
         navigatorObservers: [PredictiveBack.instance],
+        scaffoldMessengerKey: rootMessenger,
         themeMode: appearance.value,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
@@ -44,7 +46,7 @@ class GripHubApp extends StatelessWidget {
           data: MediaQuery.of(context).copyWith(
             textScaler: TextScaler.linear(appearance.textScale * MediaQuery.textScalerOf(context).scale(14) / 14),
           ),
-          child: AppLockGate(child: child!),
+          child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
         ),
         home: ListenableBuilder(
           listenable: agent,

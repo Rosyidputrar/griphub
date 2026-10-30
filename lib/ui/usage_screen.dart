@@ -72,6 +72,9 @@ class UsageScreen extends StatefulWidget {
 
 class _UsageScreenState extends State<UsageScreen> {
   int _days = 7;
+
+  /// The rows of the period [_days] names; null while that period is being read. Rows of another period are never
+  /// shown under its tab.
   List<UsageRow>? _rows;
   Map<String, dynamic>? _session;
   Object? _error;
@@ -79,6 +82,10 @@ class _UsageScreenState extends State<UsageScreen> {
   Object? _accountError;
   bool _loadingAccount = false;
   bool _allRequests = false;
+
+  /// Counts reads of the rows, so one that comes back after a newer one (the same period asked twice: a pull to refresh
+  /// over a slow first read) cannot overwrite it. The period check alone only guards against another period's tab.
+  int _reading = 0;
 
   AgentController get agent => widget.agent;
 
@@ -97,13 +104,25 @@ class _UsageScreenState extends State<UsageScreen> {
   }
 
   Future<void> _load() async {
+    final days = _days;
+    final reading = ++_reading;
     setState(() => _error = null);
     try {
-      final rows = await agent.features.usage(days: _days);
-      if (mounted) setState(() => _rows = rows);
+      final rows = await agent.features.usage(days: days);
+      // A newer read (another period, or the same one asked again) is on its way or done: this one is stale.
+      if (mounted && reading == _reading) setState(() => _rows = rows);
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && reading == _reading) setState(() => _error = e);
     }
+  }
+
+  void _setDays(int days) {
+    if (days == _days) return;
+    setState(() {
+      _days = days;
+      _rows = null;
+    });
+    _load();
   }
 
   Future<void> _loadAccount({bool force = false}) async {
@@ -196,10 +215,7 @@ class _UsageScreenState extends State<UsageScreen> {
               child: PillSegments<int>(
                 value: _days,
                 options: {for (final d in const [7, 30]) d: '$d ${tr('days')}'},
-                onChanged: (d) {
-                  setState(() => _days = d);
-                  _load();
-                },
+                onChanged: _setDays,
                 expand: false,
               ),
             ),

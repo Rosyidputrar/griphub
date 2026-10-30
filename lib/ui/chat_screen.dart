@@ -18,6 +18,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
+import 'live_clock.dart';
 import 'illustration.dart';
 import 'mesh.dart';
 import 'model_sheet.dart';
@@ -68,6 +69,11 @@ class _ChatScreenState extends State<ChatScreen> {
   /// The chat whose draft the input holds.
   String? draftChat;
 
+  /// The clipboard holds a picture: the field's menu offers "Paste image". Checked when the field gains focus and when
+  /// the app comes back (the user copied it in another app).
+  bool _clipboardImage = false;
+  late final AppLifecycleListener _lifecycle = AppLifecycleListener(onResume: _checkClipboard);
+
   AgentController get agent => widget.agent;
 
   /// "/par" while typing a command name; null otherwise.
@@ -80,6 +86,10 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _lifecycle;
+    focus.addListener(() {
+      if (focus.hasFocus) _checkClipboard();
+    });
     agent.addListener(_onAgentChanged);
     draftChat = agent.sessionId;
     final prompt = widget.initialPrompt ?? Drafts.instance.get(draftChat);
@@ -112,6 +122,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     agent.removeListener(_onAgentChanged);
+    _lifecycle.dispose();
     Drafts.instance.flush();
     scroll.dispose();
     input.dispose();
@@ -191,13 +202,27 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
+  /// A message is on its way to the host: Send shows a spinner and a second tap does nothing, so the same text is
+  /// never sent twice.
+  bool _sending = false;
+
   Future<void> _send() async {
+    if (_sending) return;
     final text = input.text;
     if (text.trim().isEmpty && attachments.isEmpty) return;
     if (!agent.hasModel) {
       await _connectProvider();
       return;
     }
+    setState(() => _sending = true);
+    try {
+      await _sendNow(text);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _sendNow(String text) async {
     final files = List<Attachment>.of(attachments);
     // Clear only on success: a refused message (budget, host error) never
     // reaches the transcript, so clearing first would lose it.
@@ -296,6 +321,38 @@ class _ChatScreenState extends State<ChatScreen> {
     _saveFiles();
   }
 
+  Future<void> _checkClipboard() async {
+    final has = await agent.client.clipboardHasImage();
+    if (mounted && has != _clipboardImage) setState(() => _clipboardImage = has);
+  }
+
+  /// "Paste image" from the field's menu: the clipboard's picture becomes an attachment.
+  Future<void> _pasteImage() async {
+    final image = await agent.client.clipboardImage();
+    if (!mounted) return;
+    if (image == null) {
+      setState(() => _clipboardImage = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('The clipboard has no picture to paste'))));
+      return;
+    }
+    setState(() => attachments.add(Attachment(image['path']!, image['name']!, mime: image['mime'])));
+    _saveFiles();
+  }
+
+  /// A picture the keyboard pasted (Gboard's clipboard, a screenshot, a sticker): attached, never typed as text.
+  void _insertedContent(KeyboardInsertedContent content) {
+    final bytes = content.data;
+    if (bytes == null || bytes.isEmpty || !content.mimeType.startsWith('image/')) return;
+    final Attachment a;
+    try {
+      a = pastedImageAttachment(bytes, content.mimeType);
+    } catch (_) {
+      return;
+    }
+    setState(() => attachments.add(a));
+    _saveFiles();
+  }
+
   Future<void> _openPasted(Attachment a) async {
     final String text;
     try {
@@ -321,7 +378,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _attach() async {
-    final picked = await pickAttachments(context);
+    final picked = await pickAttachments(context, client: agent.client);
     if (picked.isNotEmpty) {
       setState(() => attachments.addAll(picked));
       _saveFiles();
@@ -381,6 +438,8 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Wait for the agent to finish first'))));
       return;
     }
+    if (_rewinding != null) return;
+    setState(() => _rewinding = (entry: entry, label: tr(action == 'edit' ? 'Rewinding…' : 'Forking…')));
     try {
       final points = await agent.features.forkPoints();
       if (userIndex >= points.length) throw tr('This message cannot be edited');
@@ -388,9 +447,14 @@ class _ChatScreenState extends State<ChatScreen> {
       final text = action == 'edit' ? await agent.editMessage(entryId) : await agent.forkAt(entryId);
       _prefill(text.isEmpty ? entry.text : text);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('$e'))));
+    } finally {
+      if (mounted) setState(() => _rewinding = null);
     }
   }
+
+  /// The message an edit or fork is working on, from the tap until the chat has reloaded.
+  ({UserEntry entry, String label})? _rewinding;
 
   Future<void> _connectProvider() async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
@@ -420,10 +484,13 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: () =>
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
             ),
-            IconButton(
-              tooltip: tr('Deploy'),
-              icon: const Icon(LucideIcons.rocket, size: 20),
-              onPressed: agent.busy ? null : () => showDeploySheet(context, agent),
+            ValueListenableBuilder<bool>(
+              valueListenable: deployPreparing,
+              builder: (context, preparing, _) => IconButton(
+                tooltip: tr('Deploy'),
+                icon: preparing ? const BusySpinner(size: 18) : const Icon(LucideIcons.rocket, size: 20),
+                onPressed: agent.busy || preparing ? null : () => showDeploySheet(context, agent),
+              ),
             ),
             IconButton(
               tooltip: tr('Project tools'),
@@ -511,9 +578,13 @@ class _ChatScreenState extends State<ChatScreen> {
               focus: focus,
               agent: agent,
               onSend: _send,
+              sending: _sending,
               onQueue: _queue,
               onAttach: _attach,
               onPaste: _pasted,
+              canPasteImage: _clipboardImage,
+              onPasteImage: _pasteImage,
+              onInsertedContent: _insertedContent,
               onVoice: _voice,
               attachments: attachments,
               onOpenAttachment: (a) => a.isPasted ? _openPasted(a) : null,
@@ -561,19 +632,24 @@ class _ChatScreenState extends State<ChatScreen> {
     final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
+    // While the agent works: what it does, and how long the turn has taken (item under the transcript).
+    final status = agent.busy && (activity != null || agent.turnStartedAt != null);
     final queued = agent.queuedPrompts;
     return ListView.builder(
       controller: scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: entries.length + subs.length + (activity != null ? 1 : 0) + queued.length + (retry ? 1 : 0),
+      itemCount: entries.length + subs.length + (status ? 1 : 0) + queued.length + (retry ? 1 : 0),
       itemBuilder: (context, i) {
         if (i < entries.length) {
           final e = entries[i];
           final child = switch (e) {
             UserEntry() => UserMessageView(
               e,
-              onLongPress: (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
+              onLongPress: _rewinding != null
+                  ? null
+                  : (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
               fs: agent.fs,
+              working: identical(_rewinding?.entry, e) ? _rewinding!.label : null,
             ),
             AssistantEntry() => AssistantMessageView(
               e,
@@ -590,6 +666,7 @@ class _ChatScreenState extends State<ChatScreen> {
               footer: footers[i],
             ),
             NoticeEntry() => NoticeView(e),
+            JobEntry() => JobNoticeView(e),
           };
           final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
           return Padding(
@@ -604,11 +681,26 @@ class _ChatScreenState extends State<ChatScreen> {
             child: SubagentCard(key: ValueKey(subs[si].id), state: subs[si], agent: agent),
           );
         }
-        if (activity != null && si == subs.length) {
-          return Padding(padding: const EdgeInsets.only(top: 14), child: AgentActivity(label: activity));
+        if (status && si == subs.length) {
+          final tokens = turnTokensSoFar(entries);
+          return Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (activity != null) ...[AgentActivity(label: activity), const SizedBox(height: 8)],
+                // The turn's live clock, with the tokens it has used so far.
+                LiveClock(
+                  label: tr('Working'),
+                  startedAt: agent.turnStartedAt,
+                  detail: tokens > 0 ? tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(tokens))) : null,
+                ),
+              ],
+            ),
+          );
         }
         // Follow-ups waiting for the current turn to end, oldest first.
-        final qi = si - subs.length - (activity != null ? 1 : 0);
+        final qi = si - subs.length - (status ? 1 : 0);
         if (qi < queued.length) {
           return Padding(
             padding: EdgeInsets.only(top: qi == 0 ? 28 : 10),
@@ -821,9 +913,13 @@ class _Composer extends StatelessWidget {
     required this.focus,
     required this.agent,
     required this.onSend,
+    this.sending = false,
     required this.onQueue,
     required this.onAttach,
     required this.onPaste,
+    this.canPasteImage = false,
+    this.onPasteImage,
+    this.onInsertedContent,
     required this.onVoice,
     required this.attachments,
     required this.onOpenAttachment,
@@ -835,11 +931,21 @@ class _Composer extends StatelessWidget {
   final FocusNode focus;
   final AgentController agent;
   final VoidCallback onSend;
+
+  /// The last message is still on its way: Send spins and is off.
+  final bool sending;
   final VoidCallback onQueue;
   final VoidCallback onAttach;
 
   /// Called instead of inserting a long paste (see LongPasteFormatter).
   final void Function(String text) onPaste;
+
+  /// The clipboard holds a picture: the field's menu offers [onPasteImage].
+  final bool canPasteImage;
+  final VoidCallback? onPasteImage;
+
+  /// A picture the keyboard pasted.
+  final void Function(KeyboardInsertedContent content)? onInsertedContent;
   final VoidCallback onVoice;
   final List<Attachment> attachments;
   final void Function(Attachment) onOpenAttachment;
@@ -883,6 +989,26 @@ class _Composer extends StatelessWidget {
                 controller: controller,
                 focusNode: focus,
                 inputFormatters: [LongPasteFormatter(onPaste)],
+                contentInsertionConfiguration: onInsertedContent == null
+                    ? null
+                    : ContentInsertionConfiguration(
+                        allowedMimeTypes: pasteImageTypes,
+                        onContentInserted: onInsertedContent!,
+                      ),
+                contextMenuBuilder: (context, editable) => AdaptiveTextSelectionToolbar.buttonItems(
+                  anchors: editable.contextMenuAnchors,
+                  buttonItems: [
+                    ...editable.contextMenuButtonItems,
+                    if (canPasteImage && onPasteImage != null)
+                      ContextMenuButtonItem(
+                        label: tr('Paste image'),
+                        onPressed: () {
+                          editable.hideToolbar();
+                          onPasteImage!();
+                        },
+                      ),
+                  ],
+                ),
                 minLines: 1,
                 maxLines: 8,
                 textCapitalization: TextCapitalization.sentences,
@@ -934,13 +1060,14 @@ class _Composer extends StatelessWidget {
                     if (busy)
                       _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: agent.abort),
                     if (busy && hasText) const SizedBox(width: 6),
-                    if (hasText)
+                    if (hasText || sending)
                       _RoundButton(
-                        onLongPress: onQueue,
+                        onLongPress: sending ? null : onQueue,
                         icon: LucideIcons.arrowUp,
-                        label: tr('Send'),
+                        label: tr(sending ? 'Sending…' : 'Send'),
                         filled: true,
-                        onTap: onSend,
+                        busy: sending,
+                        onTap: sending ? null : onSend,
                       )
                     else if (!busy)
                       _RoundButton(icon: LucideIcons.mic, label: tr('Voice'), filled: false, onTap: onVoice),
@@ -1076,12 +1203,16 @@ class _RoundButton extends StatelessWidget {
     required this.label,
     this.filled = false,
     this.onLongPress,
+    this.busy = false,
   });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool filled;
+
+  /// A spinner in place of the icon (the button's work is on its way).
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -1117,7 +1248,9 @@ class _RoundButton extends StatelessWidget {
             customBorder: const CircleBorder(),
             onTap: onTap,
             onLongPress: onLongPress,
-            child: Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
+            child: busy
+                ? Center(child: BusySpinner(color: p.muted))
+                : Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
           ),
         ),
       ),

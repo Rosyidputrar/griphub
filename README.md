@@ -53,10 +53,11 @@ them on, go through ntfy with a generic title only.
 - **Agent controls.**
   - Approval modes: ask for everything, ask for risky actions only, or bypass all approvals.
   - Plan mode, message queue, and fork or edit-and-resend on any message.
-  - Background tasks and schedules.
+  - Background tasks and schedules, and background jobs: a long command runs while the agent goes on, and its
+    result calls the chat back.
   - MCP servers, skills (with a searchable skills catalogue), prompt templates and slash commands.
 - **Everyday use.**
-  - Image and file attachments, and voice input.
+  - Image and file attachments (paste a copied picture too), and voice input.
   - Share to GripHub from other apps; home screen widget and Quick Settings tile.
   - Notifications.
   - Usage and cost estimates in GripHub credits and rupiah, and automatic fallback to another model.

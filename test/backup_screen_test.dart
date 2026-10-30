@@ -92,7 +92,7 @@ void main() {
     File('${r.workspace}/proj/a.txt').writeAsStringSync('alpha' * 1000);
     await open(tester, r.agent);
 
-    await tester.tap(find.byType(Switch));
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Include workspace files'));
     await tester.pump();
     await tester.tap(find.text('Create backup'));
     await until(tester, () => find.text('Download to this phone').evaluate().isNotEmpty, 'the backup');

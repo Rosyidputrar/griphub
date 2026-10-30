@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import '../agent/features.dart';
@@ -103,6 +104,27 @@ Attachment pastedAttachment(String text) {
   return Attachment(file.path, pastedName, mime: 'text/plain');
 }
 
+/// What a pasted picture is called; the type decides the extension.
+const pastedImageStem = 'pasted-image';
+
+/// Writes a picture pasted from the keyboard (its bytes and type) to a file and returns it as an attachment, like
+/// [pastedAttachment] does for long text.
+Attachment pastedImageAttachment(Uint8List bytes, String mime) {
+  final ext = switch (mime) {
+    'image/jpeg' => 'jpg',
+    'image/webp' => 'webp',
+    'image/gif' => 'gif',
+    _ => 'png',
+  };
+  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+    ..createSync(recursive: true);
+  final file = File('${dir.path}/$pastedImageStem.$ext')..writeAsBytesSync(bytes);
+  return Attachment(file.path, '$pastedImageStem.$ext', mime: mime);
+}
+
+/// The picture types a keyboard may paste into the composer.
+const pasteImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
 /// Pictures go to the model as images; other files are copied into the
 /// project's `.attachments/` folder and referenced by path in the message.
 /// Every attachment is ALSO copied there (with a unique name, so two
@@ -164,7 +186,10 @@ int _fileSize(File file) {
   }
 }
 
-Future<List<Attachment>> pickAttachments(BuildContext context) async {
+/// Asks where to attach from. With [client], a picture on the clipboard is offered too ("Paste image").
+Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
+  final clipboardImage = await client?.clipboardHasImage() ?? false;
+  if (!context.mounted) return const [];
   final choice = await showModalBottomSheet<String>(
     context: context,
     builder: (context) => SafeArea(
@@ -193,6 +218,14 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
               subtitle: tr('PDFs, code, data, anything'),
               onTap: () => Navigator.pop(context, 'files'),
             ),
+            if (clipboardImage)
+              SettingsRow(
+                icon: LucideIcons.clipboardPaste,
+                color: const Color(0xFF8E4EC6),
+                title: tr('Paste image'),
+                subtitle: tr('The picture you copied'),
+                onTap: () => Navigator.pop(context, 'clipboard'),
+              ),
           ],
         ),
       ),
@@ -206,6 +239,9 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
     case 'camera':
       final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 2048);
       return x == null ? [] : [Attachment(x.path, x.name, mime: x.mimeType)];
+    case 'clipboard':
+      final image = await client?.clipboardImage();
+      return image == null ? const [] : [Attachment(image['path']!, image['name']!, mime: image['mime'])];
     case 'files':
       final files = await FilePicker.pickFiles();
       return [
@@ -427,6 +463,77 @@ Future<bool> confirmStopToSwitch(BuildContext context) async {
     ),
   );
   return ok == true;
+}
+
+/// The app-wide messenger, for what is said outside any one screen (a chat switch that could not go ahead).
+final rootMessenger = GlobalKey<ScaffoldMessengerState>();
+
+/// Covers every screen while Stop and switch waits for the agent to stop, so the wait is visible and nothing else can
+/// be tapped meanwhile; and says it when the agent did not stop in time (the switch then does not happen).
+class StopToSwitchOverlay extends StatefulWidget {
+  const StopToSwitchOverlay({super.key, required this.agent, required this.child});
+  final AgentController agent;
+  final Widget child;
+
+  @override
+  State<StopToSwitchOverlay> createState() => _StopToSwitchOverlayState();
+}
+
+class _StopToSwitchOverlayState extends State<StopToSwitchOverlay> {
+  late final StreamSubscription<String> _problems;
+
+  @override
+  void initState() {
+    super.initState();
+    _problems = widget.agent.switchProblems.stream.listen((m) {
+      rootMessenger.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(tr(m))));
+    });
+  }
+
+  @override
+  void dispose() {
+    _problems.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return ListenableBuilder(
+      listenable: widget.agent,
+      builder: (context, child) => Stack(
+        children: [
+          child!,
+          if (widget.agent.stoppingToSwitch)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.35),
+                child: Center(
+                  child: Material(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(Radii.lg),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const BusySpinner(size: 18),
+                          const SizedBox(width: 12),
+                          Text(tr('Stopping the agent…'), style: Theme.of(context).textTheme.bodyMedium),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      child: widget.child,
+    );
+  }
 }
 
 Future<bool> confirmBypass(BuildContext context) async =>
