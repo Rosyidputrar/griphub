@@ -105,6 +105,7 @@ class RemoteProfile {
     required this.user,
     required this.hostKey,
     this.active = false,
+    this.backupKey,
   });
 
   factory RemoteProfile.fromSetupCode(SetupCode c) =>
@@ -116,6 +117,7 @@ class RemoteProfile {
     user: j['user'] as String,
     hostKey: j['hostKey'] as String,
     active: j['active'] == true,
+    backupKey: j['backupKey'] as String?,
   );
 
   final String host;
@@ -126,13 +128,30 @@ class RemoteProfile {
   /// Whether the app uses the server agent (true) or the agent on this phone (false).
   final bool active;
 
+  /// The key the server encrypts its automatic backups with (64 hex characters), made on this phone when they were
+  /// turned on; null while they never were. Kept here, beside the key that opens the server itself.
+  final String? backupKey;
+
   /// The name ssh knows this server by.
   static const alias = 'griphub-vps';
 
-  RemoteProfile copyWith({bool? active}) =>
-      RemoteProfile(host: host, port: port, user: user, hostKey: hostKey, active: active ?? this.active);
+  RemoteProfile copyWith({bool? active, String? backupKey}) => RemoteProfile(
+    host: host,
+    port: port,
+    user: user,
+    hostKey: hostKey,
+    active: active ?? this.active,
+    backupKey: backupKey ?? this.backupKey,
+  );
 
-  Map<String, dynamic> toJson() => {'host': host, 'port': port, 'user': user, 'hostKey': hostKey, 'active': active};
+  Map<String, dynamic> toJson() => {
+    'host': host,
+    'port': port,
+    'user': user,
+    'hostKey': hostKey,
+    'active': active,
+    'backupKey': ?backupKey,
+  };
 
   String get address => port == 22 ? host : '$host:$port';
 }

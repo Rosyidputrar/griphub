@@ -336,6 +336,8 @@ class AgentController extends ChangeNotifier {
               .catchError((_) {}),
         );
       }
+      // The server's newest automatic backup comes to this phone while the app is open (when they are on).
+      if (client.isRemote) remote.startBackupPulls();
       status = BootStatus.ready;
       bootFailures = 0;
     } catch (e) {

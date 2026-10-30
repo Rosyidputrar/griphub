@@ -9,6 +9,7 @@ import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'i18n.dart';
 import 'kit.dart';
+import 'server_guide.dart';
 import 'task_log.dart';
 import 'terminal_screen.dart';
 import 'theme.dart';
@@ -256,6 +257,12 @@ class _BoxScreenState extends State<BoxScreen> {
           appBar: AppBar(
             title: Text(tr('The agent\'s box')),
             actions: [
+              IconButton(
+                tooltip: tr('What the box is'),
+                icon: const Icon(LucideIcons.bookOpen, size: 20),
+                onPressed: () =>
+                    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ServerGuideScreen(section: 'box'))),
+              ),
               IconButton(
                 tooltip: tr('Refresh'),
                 icon: const Icon(LucideIcons.refreshCw, size: 20),

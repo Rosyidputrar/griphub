@@ -103,10 +103,8 @@ class _LiveClockState extends State<LiveClock> with SingleTickerProviderStateMix
       ClockState.failed => p.danger,
       ClockState.stopped => p.muted,
     };
-    final style = Theme.of(context).textTheme.labelMedium?.copyWith(
-      color: color,
-      fontFeatures: const [FontFeature.tabularFigures()],
-    );
+    final style = Theme.of(context).textTheme.labelMedium
+        ?.copyWith(color: color, fontFeatures: const [FontFeature.tabularFigures()]);
     final icon = switch (widget.state) {
       ClockState.running => LucideIcons.timer,
       ClockState.done => LucideIcons.circleCheck,
@@ -117,7 +115,9 @@ class _LiveClockState extends State<LiveClock> with SingleTickerProviderStateMix
     final label = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Flexible(child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style)),
+        Flexible(
+          child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+        ),
         Text(' · ${[formatDurationShort(_elapsed), ?widget.detail].join(' · ')}', maxLines: 1, style: style),
       ],
     );

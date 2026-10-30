@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import 'auto_backup.dart';
 import 'code_view.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -182,6 +183,10 @@ class _BackupScreenState extends State<BackupScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
         children: [
+          if (agent.remote.configured) ...[
+            SectionLabel(tr('Server'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
+            ServerBackupCard(agent: agent),
+          ],
           SectionLabel(tr('Back up'), padding: EdgeInsets.fromLTRB(4, 8, 4, 10)),
           SurfaceCard(
             child: Column(

@@ -9,12 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/clock.dart';
 import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/models.dart';
+import 'package:griphub_agent/agent/remote_profile.dart';
 import 'package:griphub_agent/ui/attachment_viewer.dart';
+import 'package:griphub_agent/ui/auto_backup.dart';
 import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/git_screen.dart';
 import 'package:griphub_agent/ui/live_clock.dart';
 import 'package:griphub_agent/ui/message_views.dart';
+import 'package:griphub_agent/ui/server_guide.dart';
 
 import 'harness.dart';
 
@@ -431,6 +434,90 @@ void main() {
       await tester.tap(find.text('data.bin'));
       await settle(tester);
       expect(find.textContaining('Binary file (6 B), not shown as text.'), findsOneWidget);
+    });
+  });
+
+  group('automatic server backup', () {
+    late Directory home;
+    setUp(() => home = Directory.systemTemp.createTempSync('autobackup-'));
+    tearDown(() => home.deleteSync(recursive: true));
+
+    /// An agent with a server set up: in use or not, with a backup key and one fetched backup.
+    Future<dynamic> agentWith({required bool active}) async {
+      FakeHost();
+      final agent = newAgent();
+      final store = RemoteProfileStore(File('${home.path}/.griphub/remote.json'))
+        ..save(
+          RemoteProfile(host: 'vps.example.com', port: 22, user: 'griphub', hostKey: 'ssh-ed25519 AAAA', active: active, backupKey: 'ab' * 32),
+        );
+      agent.remote.configure(setup: RemoteSetup(home: home.path), store: store);
+      final at = goldenNow.subtract(const Duration(minutes: 40)).millisecondsSinceEpoch;
+      File('${agent.remote.backupsDir.path}/auto-$at.ghb')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync([71, 72, 66, 49]);
+      return (agent, at);
+    }
+
+    for (final look in _looks) {
+      testWidgets('golden: on, with the server\'s and the phone\'s newest ${look.name}', (tester) async {
+        final (agent, at) = await agentWith(active: true);
+        pinClock();
+        await pumpLook(tester, look, Scaffold(body: ListView(padding: const EdgeInsets.all(16), children: [ServerBackupCard(agent: agent)])), height: 520);
+        await frames(tester, 2);
+        agent.remote.autoBackup = {
+          'enabled': true,
+          'backups': [
+            {'name': 'auto-$at.ghb', 'path': '/srv/auto-$at.ghb', 'at': at, 'size': 48 * 1024 * 1024},
+          ],
+        };
+        agent.remote.notifyListeners();
+        // The switch slides from off (nothing known yet) to on.
+        await frames(tester, 10);
+        expect(find.byType(Switch), findsOneWidget);
+        expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('auto_backup_on_${look.name}')));
+      });
+    }
+
+    testWidgets('back on the phone: no switch, and "Restore on this phone" offers the newest copy', (tester) async {
+      final (agent, _) = await agentWith(active: false);
+      await pumpLook(tester, const Look(), Scaffold(body: ListView(padding: const EdgeInsets.all(16), children: [ServerBackupCard(agent: agent)])), height: 520);
+      await frames(tester, 2);
+      expect(find.byType(Switch), findsNothing);
+      await tester.tap(find.text('Restore on this phone'));
+      await frames(tester);
+      expect(find.text("Restore the server's data on this phone?"), findsOneWidget);
+      await tester.tap(find.text('Not now'));
+      await frames(tester);
+      // Switching back offers it once.
+      expect(agent.remote.takeRestoreOffer(), isFalse, reason: 'only right after a switch');
+    });
+  });
+
+  group('server guide', () {
+    for (final look in _looks) {
+      testWidgets('golden: the guide, and opened on the box ${look.name}', (tester) async {
+        FakeHost();
+        await pumpLook(tester, look, const ServerGuideScreen(), height: 1400);
+        await frames(tester, 2);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_guide_${look.name}')));
+        // Opened afresh, as the box screen opens it (its own key: not the state of the page above).
+        await pumpLook(tester, look, const ServerGuideScreen(key: ValueKey('box'), section: 'box'), height: 900);
+        await frames(tester, 3);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('server_guide_box_${look.name}')));
+      });
+    }
+
+    testWidgets('every trouble on the server screen\'s list is in the guide too', (tester) async {
+      FakeHost();
+      await pumpLook(tester, const Look(), const ServerGuideScreen(), height: 6000);
+      await frames(tester, 2);
+      for (final (title, _) in serverTroubleshooting()) {
+        expect(find.text(title), findsOneWidget, reason: title);
+      }
     });
   });
 }

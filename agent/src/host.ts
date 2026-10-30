@@ -28,6 +28,7 @@ import {
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { agentsFileText, isManaged } from "./agents-file.js";
+import { AutoBackup, decryptBackup, restoreBackup } from "./autobackup.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
 import { installDohLookup } from "./dns.js";
@@ -102,6 +103,8 @@ let jobs: Jobs;
 let router: Router;
 let fsService: Fs;
 let preview: Preview;
+/** Server only: hourly encrypted backups for the phone to keep (autobackup.ts). */
+let autoBackup: AutoBackup | undefined;
 const tunnels = new Tunnels();
 let unsubscribe: (() => void) | undefined;
 
@@ -1550,6 +1553,29 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 
 		// Backups.
+		// Automatic backups on a server (autobackup.ts): the app turns them on with its key, and fetches the newest.
+		case "auto_backup_status":
+			return autoBackup?.status() ?? { enabled: false, available: false, backups: [] };
+		case "auto_backup_configure":
+			if (!autoBackup) throw new Error("Automatic backups are made by a server agent");
+			return autoBackup.configure(cmd.key ?? null);
+		case "auto_backup_now": {
+			if (!autoBackup) throw new Error("Automatic backups are made by a server agent");
+			const made = await autoBackup.tick(cmd.force !== false);
+			return { made, ...autoBackup.status() };
+		}
+		// A server's backup, on this phone: decrypted with the phone's key, then put in place. The app restarts the host
+		// afterwards, so every part reads what was restored.
+		case "backup_restore_server": {
+			if (session?.isStreaming) throw new Error("Stop the agent before restoring");
+			const tmp = join(stateDir, `restore-${Date.now()}.zip`);
+			try {
+				decryptBackup(String(cmd.path), String(cmd.key ?? ""), tmp);
+				return restoreBackup(tmp, { agentDir, workspace, home: process.env.HOME ?? agentDir });
+			} finally {
+				rmSync(tmp, { force: true });
+			}
+		}
 		case "backup_create":
 			return createBackup(!!cmd.includeWorkspace);
 		case "backup_restore":
@@ -1766,6 +1792,7 @@ async function shutdown(code = 0) {
 	shuttingDown = true;
 	tunnels.stopAll();
 	jobs?.stopAll();
+	autoBackup?.stop();
 	health.stop();
 	preview?.stopAll();
 	// The phone's app force-kills the host 1.5 s after closing stdin (AgentRuntime.stop), so it only waits long enough for
@@ -1826,7 +1853,23 @@ async function main() {
 	);
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
 	// read its disk any other way; on the phone the same commands work too, inside the same folders.
-	fsService = new Fs([{ path: workspace }, { path: join(agentDir, "skills"), readOnly: true }]);
+	// On a server the app also fetches the automatic backups from here (read-only).
+	autoBackup = server
+		? new AutoBackup({
+				dir: join(griphubDir, "backups"),
+				configFile: join(stateDir, "auto-backup.json"),
+				agentDir,
+				workspace,
+				home: process.env.HOME ?? agentDir,
+				intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
+				log: (m) => log(m),
+			})
+		: undefined;
+	fsService = new Fs([
+		{ path: workspace },
+		{ path: join(agentDir, "skills"), readOnly: true },
+		...(server ? [{ path: join(griphubDir, "backups"), readOnly: true }] : []),
+	]);
 	preview = new Preview({ roots: [workspace], idleMs: Number(process.env.GRIPHUB_PREVIEW_IDLE_MS) || undefined });
 	customProviders = new CustomProviders(join(stateDir, "custom-providers.json"), join(agentDir, "models.json"));
 	customProviders.applyEnv();
@@ -1976,6 +2019,7 @@ async function main() {
 	// A server is watched for a filling disk; a phone's storage is the user's business (the `health` command still
 	// answers there).
 	if (server) health.start();
+	autoBackup?.start();
 }
 
 main().catch((e) => {

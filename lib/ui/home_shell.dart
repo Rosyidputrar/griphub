@@ -27,6 +27,7 @@ import 'settings_screen.dart';
 import 'skills_screen.dart';
 import 'tasks_screen.dart';
 import 'sync_screen.dart';
+import 'auto_backup.dart' show offerServerRestore;
 import 'theme.dart';
 import 'update_sheet.dart';
 
@@ -66,6 +67,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Just switched back to the phone's agent with a server backup here: offer it (auto_backup.dart).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && agent.remote.takeRestoreOffer()) offerServerRestore(context, agent);
+    });
     final f = agent.features;
     subs
       ..add(agent.client.records.where((r) => r['type'] == 'launch').listen((_) => _takeLaunch()))

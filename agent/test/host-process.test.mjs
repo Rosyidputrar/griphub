@@ -630,3 +630,71 @@ test("a background job can be stopped, and stops what it started; its chat is to
 	// Nothing of it is left running (the job's own sleeps; no other test starts "sleep 600").
 	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === "sleep 600"), 10_000);
 });
+
+// ---------------------------------------------------------------------------
+// Automatic backups: made on the server with the phone's key, fetched over fs_*, never readable as files there
+
+test("server mode: automatic backups are off until the phone gives its key, then made and readable over fs_*", async (t) => {
+	const dir = home(t);
+	const { c } = await connected(t, dir);
+	const ws = join(dir, "workspace");
+	mkdirSync(join(ws, "site", ".git"), { recursive: true });
+	writeFileSync(join(ws, "site", "index.html"), "<h1>Halo</h1>");
+	writeFileSync(join(ws, "site", ".git", "HEAD"), "ref: refs/heads/main\n");
+
+	const off = await c.call("auto_backup_status");
+	assert.equal(off.data.enabled, false);
+	const bad = await c.call("auto_backup_configure", { key: "nope" });
+	assert.equal(bad.ok, false);
+	const on = await c.call("auto_backup_configure", { key: "cd".repeat(32) });
+	assert.equal(on.ok, true, on.error);
+	assert.equal(on.data.enabled, true);
+	const now = await c.call("auto_backup_now");
+	assert.equal(now.ok, true, now.error);
+	const [latest] = now.data.backups;
+	assert.match(latest.name, /^auto-\d+\.ghb$/);
+	assert.ok(latest.size > 0);
+	// The app fetches it like any file; it cannot be changed from there.
+	const read = await c.call("fs_read", { path: latest.path });
+	assert.equal(read.ok, true, read.error);
+	assert.equal(Buffer.from(read.data.data, "base64").subarray(0, 4).toString(), "GHB1");
+	const write = await c.call("fs_write", { path: latest.path, data: "" });
+	assert.equal(write.ok, false, "the backups folder is read-only for the app");
+	// Turning it off removes what that key made.
+	const offAgain = await c.call("auto_backup_configure", { key: null });
+	assert.deepEqual(offAgain.data.backups, []);
+});
+
+test("phone mode: a server's backup is restored on the phone's own agent with the key, and refused with another", async (t) => {
+	// The server makes it.
+	const srvDir = home(t);
+	const { c } = await connected(t, srvDir);
+	mkdirSync(join(srvDir, "workspace", "site", ".git"), { recursive: true });
+	writeFileSync(join(srvDir, "workspace", "site", "index.html"), "<h1>Dari server</h1>");
+	writeFileSync(join(srvDir, "workspace", "site", ".git", "HEAD"), "ref: refs/heads/main\n");
+	const key = "cd".repeat(32);
+	await c.call("auto_backup_configure", { key });
+	const made = (await c.call("auto_backup_now")).data.backups[0];
+
+	// The phone restores it.
+	const dir = home(t);
+	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	const send = (cmd) => child.stdin.write(`${JSON.stringify(cmd)}\n`);
+	send({ id: 1, type: "backup_restore_server", path: made.path, key: "ef".repeat(32) });
+	const refused = await until((r) => r.type === "response" && r.id === 1);
+	assert.equal(refused.ok, false);
+	assert.match(refused.error, /another key/);
+	assert.equal(existsSync(join(dir, "workspace", "site")), false, "nothing restored with a wrong key");
+	send({ id: 2, type: "backup_restore_server", path: made.path, key });
+	const restored = await until((r) => r.type === "response" && r.id === 2);
+	assert.equal(restored.ok, true, restored.error);
+	assert.ok(restored.data.restored >= 2);
+	assert.equal(readFileSync(join(dir, "workspace", "site", "index.html"), "utf8"), "<h1>Dari server</h1>");
+	assert.equal(readFileSync(join(dir, "workspace", "site", ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+	// No decrypted copy is left behind.
+	const leftovers = execFileSync("find", [dir, "-name", "restore-*.zip"]).toString().trim();
+	assert.equal(leftovers, "");
+});
