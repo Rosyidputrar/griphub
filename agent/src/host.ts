@@ -67,6 +67,7 @@ import {
 	detectTests,
 	readZip,
 	search,
+	findFiles,
 	Templates,
 	Tunnels,
 	usageSummary,
@@ -1574,6 +1575,8 @@ async function handle(cmd: Command): Promise<unknown> {
 		// Project tools (workbench.ts).
 		case "search":
 			return search(cwd, String(cmd.query ?? ""), { regex: !!cmd.regex, caseSensitive: !!cmd.caseSensitive, glob: cmd.glob });
+		case "files_find":
+			return findFiles(cwd, String(cmd.query ?? ""), Number(cmd.limit ?? 30));
 		case "db_tables":
 			return dbTables(cmd.path);
 		case "db_query":

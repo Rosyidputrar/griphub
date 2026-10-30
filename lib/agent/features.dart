@@ -19,6 +19,12 @@ class Approval {
   String get summary => json['summary'] as String? ?? '';
   String get reason => json['reason'] as String? ?? '';
   String get key => json['key'] as String? ?? '';
+
+  /// For an edit or a write: the change as a unified patch, when the host could work it out.
+  String? get patch {
+    final p = json['patch'];
+    return p is String && p.trim().isNotEmpty ? p : null;
+  }
 }
 
 class CheckpointInfo {
@@ -452,6 +458,13 @@ class Features extends ChangeNotifier {
       }),
     );
     return (_l(r['matches']).map(SearchMatch.new).toList(), r['truncated'] == true);
+  }
+
+  /// The project's files best matching [query] by name, for the composer's @ list.
+  Future<List<String>> findFiles(String query, {int limit = 30}) async {
+    final r = _m(await client.call('files_find', {'query': query, 'limit': limit}));
+    final files = r['files'];
+    return files is List ? [for (final f in files) if (f is String) f] : const [];
   }
 
   Future<List<DbTable>> dbTables(String path) async =>

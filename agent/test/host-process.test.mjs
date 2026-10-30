@@ -125,6 +125,22 @@ test("phone mode: ready, then commands; no hello_server and no seq; closing stdi
 	assert.ok(Date.now() - t0 < 1500, `exited in ${Date.now() - t0} ms`);
 });
 
+test("phone mode: files_find gives the composer's @ list from the chat's folder, best match first", async (t) => {
+	const dir = home(t);
+	const ws = join(dir, "workspace");
+	mkdirSync(join(ws, "src", "ui"), { recursive: true });
+	mkdirSync(join(ws, "node_modules", "app"), { recursive: true });
+	for (const f of ["src/ui/app_bar.dart", "src/app.dart", "README.md", "node_modules/app/index.js"]) writeFileSync(join(ws, f), "");
+	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	child.stdin.write(`${JSON.stringify({ id: 1, type: "files_find", query: "app" })}\n`);
+	const r = await until((m) => m.type === "response" && m.id === 1);
+	assert.equal(r.ok, true, r.error);
+	assert.deepEqual(r.data.files, ["src/app.dart", "src/ui/app_bar.dart"], "dependencies left out");
+});
+
 // ---------------------------------------------------------------------------
 // Server: daemon on a unix socket
 

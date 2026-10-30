@@ -179,6 +179,20 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                         result.success(null)
                     }
+                    // Text to a chat app, an email or a note (an exported chat): plain text, as most of them take it.
+                    "shareText" -> {
+                        try {
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, call.argument<String>("text") ?: "")
+                                call.argument<String>("subject")?.let { putExtra(Intent.EXTRA_SUBJECT, it) }
+                            }
+                            startActivity(Intent.createChooser(send, call.argument<String>("subject")))
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("share_failed", e.message, null)
+                        }
+                    }
                     "shareFile" -> {
                         try {
                             val file = shareableFile(File(call.argument<String>("path")!!))

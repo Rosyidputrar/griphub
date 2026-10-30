@@ -13,6 +13,10 @@
 - Teks merah, hijau, dan oranye di mode terang lebih pekat sehingga mudah dibaca.
 - Bilah navigasi beranda tidak lagi terpotong di layar HP yang sempit (320 dp).
 - Teks yang belum diterjemahkan di Cari, Git, dan Sinkron GitHub kini berbahasa Indonesia.
+- Kartu persetujuan untuk mengedit atau menulis file kini menampilkan perubahannya (baris yang dihapus dan ditambah) sebelum kamu mengizinkan. Perubahan yang panjang bisa dibuka utuh di halaman sendiri. Berlaku juga untuk persetujuan subagent.
+- Ketik @ di kolom chat untuk memilih file proyek: daftar file muncul sesuai ketikan, dan path-nya langsung masuk ke pesan.
+- Bagikan chat: dari menu Project, chat bisa dibagikan sebagai teks atau file Markdown, disalin, atau disimpan ke Download. Isinya pesan, jawaban agent, dan tool yang dipakai.
+- Tombol Tolak/Selalu/Izinkan tidak lagi terpotong di layar sempit dengan teks besar.
 
 ## English
 
@@ -27,3 +31,7 @@
 - Red, green and orange text in light mode is deeper and easier to read.
 - The home navigation bar no longer overflows on narrow (320 dp) phones.
 - Text left in English in Search, Git and GitHub sync is now translated.
+- The approval card for editing or writing a file now shows the change (lines removed and added) before you allow it. A long change opens whole on its own page. Subagent approvals show it too.
+- Type @ in the chat box to pick a project file: matching files show as you type, and the path goes into your message.
+- Share a chat: from the Project menu, share it as text or a Markdown file, copy it, or save it to Downloads. It holds the messages, the agent's answers and the tools it used.
+- Deny/Always/Allow no longer break apart on a narrow screen with large text.

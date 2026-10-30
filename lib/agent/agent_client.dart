@@ -234,6 +234,10 @@ class AgentClient {
   /// Opens the Android share sheet for a file.
   Future<void> shareFile(String path) => _method.invokeMethod('shareFile', {'path': path});
 
+  /// Opens Android's share sheet with [text] (an exported chat), [subject] for an email.
+  Future<void> shareText(String text, {String? subject}) =>
+      _method.invokeMethod('shareText', {'text': text, 'subject': ?subject});
+
   /// Rotates the Keystore-wrapped store key after an unwrap failure. Saved tokens become unreadable and must be entered again.
   Future<void> resetStoreKey() => _method.invokeMethod('resetStoreKey');
 

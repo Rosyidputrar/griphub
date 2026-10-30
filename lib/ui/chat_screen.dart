@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -67,6 +68,12 @@ class _ChatScreenState extends State<ChatScreen> {
   final attachments = <Attachment>[];
   List<SlashCommand>? slash;
 
+  /// The @ list: files matching what is typed after the @ at the cursor, and the query they answer.
+  List<String> mentionFiles = const [];
+  String? mentionQuery;
+  Timer? _mentionTimer;
+  int _mentionAsk = 0;
+
   /// The chat whose draft the input holds.
   String? draftChat;
 
@@ -106,6 +113,7 @@ class _ChatScreenState extends State<ChatScreen> {
     input.addListener(() {
       Drafts.instance.set(draftChat, input.text);
       if (_slashQuery != null && slash == null) _loadSlash();
+      _findMention();
       setState(() {});
     });
     if (widget.initialAttachments.isNotEmpty) {
@@ -123,6 +131,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     agent.removeListener(_onAgentChanged);
+    _mentionTimer?.cancel();
     _lifecycle.dispose();
     Drafts.instance.flush();
     scroll.dispose();
@@ -193,6 +202,42 @@ class _ChatScreenState extends State<ChatScreen> {
         }
       });
     });
+  }
+
+  ({int start, String query})? get _mention =>
+      input.selection.isCollapsed ? mentionAt(input.text, input.selection.baseOffset) : null;
+
+  /// Asks the host for files matching the @ being typed, a moment after the typing stops; an answer for an older query
+  /// is dropped. No @ at the cursor (or no project): no list.
+  void _findMention() {
+    final m = _mention;
+    if (m == null) {
+      _mentionTimer?.cancel();
+      mentionQuery = null;
+      mentionFiles = const [];
+      return;
+    }
+    if (m.query == mentionQuery) return;
+    mentionQuery = m.query;
+    _mentionTimer?.cancel();
+    _mentionTimer = Timer(const Duration(milliseconds: 120), () async {
+      final ask = ++_mentionAsk;
+      List<String> files;
+      try {
+        files = await agent.features.findFiles(m.query);
+      } catch (_) {
+        files = const [];
+      }
+      if (mounted && ask == _mentionAsk && mentionQuery == m.query) setState(() => mentionFiles = files);
+    });
+  }
+
+  void _pickMention(String path) {
+    final m = _mention;
+    if (m == null) return;
+    final r = insertMention(input.text, m.start, input.selection.baseOffset, path);
+    input.value = TextEditingValue(text: r.text, selection: TextSelection.collapsed(offset: r.cursor));
+    focus.requestFocus();
   }
 
   Future<void> _loadSlash() async {
@@ -564,7 +609,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: TodoProgressBar(agent: agent),
               ),
             if (_slashQuery != null && slash != null)
-              SlashMenu(commands: slash!, query: _slashQuery!, onPick: (c) => _prefill('/${c.name} ')),
+              SlashMenu(commands: slash!, query: _slashQuery!, onPick: (c) => _prefill('/${c.name} '))
+            else if (mentionQuery != null && _mention != null && mentionFiles.isNotEmpty)
+              MentionMenu(files: mentionFiles, onPick: _pickMention),
             if (agent.billingNotice != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
