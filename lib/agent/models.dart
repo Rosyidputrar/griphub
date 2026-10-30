@@ -259,6 +259,29 @@ class NoticeEntry extends ChatEntry {
   final bool error;
 }
 
+/// The chat's older turns being summarized to keep its context in bounds (pi's compaction): running, done or failed.
+class CompactionEntry extends ChatEntry {
+  CompactionEntry({this.startedAt, this.limit, this.running = true, this.tokensBefore, this.tokensAfter});
+
+  /// When the summary began, by this phone's clock; null for one read back from the chat's history.
+  final DateTime? startedAt;
+
+  /// The context limit that set it off (Settings > Usage), when the host started it for that.
+  final int? limit;
+  bool running;
+  int? tokensBefore;
+  int? tokensAfter;
+
+  /// How long it took, once it ended.
+  Duration? took;
+
+  /// Why it failed, if it did.
+  String? error;
+
+  /// The user stopped it.
+  bool aborted = false;
+}
+
 /// A background job's result coming back to its chat: a notice, not a bubble (the user did not send it), and the start
 /// of the turn in which the agent carries on with it.
 class JobEntry extends ChatEntry {

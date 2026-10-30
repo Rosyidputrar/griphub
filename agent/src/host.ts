@@ -21,6 +21,7 @@ import {
 	type AgentSessionEvent,
 	createAgentSession,
 	DefaultResourceLoader,
+	estimateTokens,
 	getAgentDir,
 	ModelRuntime,
 	SessionManager,
@@ -36,7 +37,7 @@ import * as gitops from "./gitops.js";
 import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
-import { Integrations, type Log, run } from "./integrations.js";
+import { COMPACT_AT_DEFAULT, Integrations, type Log, run } from "./integrations.js";
 import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
@@ -290,6 +291,10 @@ function withCost(m: any) {
 /** Drop cumulative snapshots from streaming updates, like pi's JSON mode. */
 function wireEvent(event: AgentSessionEvent): object {
 	if (event.type === "message_end") return { ...event, message: withCost((event as any).message) };
+	// A summary the host started for the context limit (capContext) says so, with the limit, rather than "manual".
+	if ((event.type === "compaction_start" || event.type === "compaction_end") && capping) {
+		return { ...event, reason: "limit", limit: compactAt() };
+	}
 	if (event.type === "message_update") {
 		const { message: _message, assistantMessageEvent, ...rest } = event as any;
 		const { partial, ...delta } = assistantMessageEvent ?? {};
@@ -556,9 +561,55 @@ function onSessionEvent(event: AgentSessionEvent) {
 		});
 		// Sync a little after the turn, so a quick follow-up doesn't cause two pushes.
 		sync?.schedule(90_000);
-		// A job that ended while this turn ran calls the chat back now.
-		if (over) deliverJobs();
+		// Past the context limit the chat is summarized first; then a job that ended while this turn ran calls it back.
+		// Out of pi's agent_settled emission: compaction must not start inside it.
+		if (over) setTimeout(() => void capContext().finally(deliverJobs), 0);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Keeping the context in bounds
+
+/** The summary the host started itself, while it runs: prompts and job callbacks wait for it. */
+let capping: Promise<void> | null = null;
+
+/** The context limit in force: the user's, or the default; 0 when it is left to pi. */
+function compactAt(): number {
+	const v = integrations?.settings.compactAt;
+	return typeof v === "number" && v >= 0 ? v : COMPACT_AT_DEFAULT;
+}
+
+/**
+ * Summarizes the open chat when its context passed the limit and the model allows more than that (pi itself only
+ * compacts near the model's limit). Between turns only, never past the daily budget (a summary is a request too); a
+ * failure is said by the compaction_end the app gets, and pi's own compaction stays as the safety net.
+ */
+async function capContext() {
+	const s = session;
+	const limit = compactAt();
+	if (!s || !limit || s.isStreaming || s.isCompacting || fallbackPending || capping) return;
+	const usage = s.getContextUsage();
+	if (!usage?.tokens || usage.contextWindow <= limit || usage.tokens <= limit) return;
+	// pi keeps the newest turns as they are (keepRecentTokens); with no more than that in the chat (the rest is the
+	// system prompt) there is nothing to summarize, and trying would only report a failure.
+	const keep = settingsManager.getCompactionSettings(s.model).keepRecentTokens;
+	const said = (s.messages as any[]).filter((m) => m.role !== "system").reduce((n, m) => n + estimateTokens(m), 0);
+	if (said <= keep + 4_000) return;
+	if (budgetError()) return;
+	capping = s
+		.compact()
+		.then(() => {})
+		.catch((e) => log("compact:", (e as Error).message))
+		.finally(() => {
+			capping = null;
+		});
+	await capping;
+}
+
+/** Waits while the open chat is being summarized (pi refuses a prompt meanwhile), up to five minutes. */
+async function compactionDone(s: AgentSession) {
+	if (capping) await capping;
+	for (let waited = 0; s.isCompacting && waited < 300_000; waited += 200) await new Promise((r) => setTimeout(r, 200));
 }
 
 // ---------------------------------------------------------------------------
@@ -638,7 +689,8 @@ async function deliverJobs() {
 /** The body of [deliverJobs]; it loops until nothing of the open chat is left, so a job that ends meanwhile is sent too. */
 async function deliverFinishedJobs() {
 	const s = session;
-	if (!s || s.isStreaming || fallbackPending) return;
+	// While the chat is summarized: capContext delivers when it is done.
+	if (!s || s.isStreaming || s.isCompacting || capping || fallbackPending) return;
 	const key = s.sessionFile ?? s.sessionId;
 	if (!finishedJobs.some((j) => j.sessionFile === key)) return;
 	let held = budgetError();
@@ -1148,6 +1200,8 @@ async function handle(cmd: Command): Promise<unknown> {
 				: cmd.text;
 			// The agent may git push from its shell; don't hold the prompt for it.
 			void integrations.githubFresh();
+			// The chat is being summarized: pi refuses prompts until it is done, so this one waits for it.
+			if (!s.isStreaming) await compactionDone(s);
 			// While the agent works, a follow-up waits for the turn's boundary; the
 			// app shows it as a waiting bubble and can cancel it (prompt_queue_remove).
 			const behavior = s.isStreaming ? (cmd.behavior ?? "followUp") : undefined;

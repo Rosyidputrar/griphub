@@ -1290,6 +1290,68 @@ class _ToolCallViewState extends State<ToolCallView> {
   }
 }
 
+/// The chat's older turns being summarized (pi's compaction), with the live clock: running, then how much it saved, or
+/// why it failed. A tap explains what it means.
+class CompactionView extends StatelessWidget {
+  const CompactionView(this.entry, {super.key});
+  final CompactionEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    final failed = !e.running && (e.error != null || e.aborted);
+    final tokens = e.tokensBefore == null
+        ? null
+        : e.tokensAfter == null
+        ? tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(e.tokensBefore!)))
+        : '${localNumber(formatTokens(e.tokensBefore!))} → ${tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(e.tokensAfter!)))}';
+    final clock = LiveClock(
+      label: e.running
+          ? tr('Summarizing the context')
+          : failed
+          ? tr(e.aborted ? 'Summary stopped' : 'Could not summarize the context')
+          : tr('Context summarized'),
+      startedAt: e.startedAt,
+      took: e.took,
+      showTime: e.startedAt != null,
+      state: e.running
+          ? ClockState.running
+          : failed
+          ? (e.aborted ? ClockState.stopped : ClockState.failed)
+          : ClockState.done,
+      detail: failed ? null : tokens,
+      wrap: true,
+    );
+    return Semantics(
+      button: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Radii.sm),
+        onTap: () => showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(tr('Keeping the chat affordable')),
+            content: Text(
+              [
+                tr(
+                  'Every request sends the whole chat to the model. To keep that affordable, older turns are replaced by a summary; the newest ones stay as they were.',
+                ),
+                if (e.limit != null)
+                  tr('This chat passed {n} tokens, the limit set in Settings > Usage.').replaceAll(
+                    '{n}',
+                    localNumber(formatTokens(e.limit!)),
+                  ),
+                if (e.error != null) e.error!,
+              ].join('\n\n'),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('OK')))],
+          ),
+        ),
+        child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: clock),
+      ),
+    );
+  }
+}
+
 /// A background job's clock: running (blue, live), or how it ended. With Stop while it runs.
 class JobClock extends StatelessWidget {
   const JobClock({super.key, required this.job, this.onStop});

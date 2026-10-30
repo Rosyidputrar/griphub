@@ -128,6 +128,12 @@ export interface AppSettings {
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
 	/**
+	 * Summarize the chat once its context passes this many tokens (host.ts capContext), on models whose own limit is
+	 * larger: every request re-reads the whole context, so a 1M-token model would otherwise pay for ~850k tokens a
+	 * request before pi compacts it. Unset means COMPACT_AT_DEFAULT; 0 leaves it to pi (near the model's limit).
+	 */
+	compactAt?: number;
+	/**
 	 * GitHub OAuth App Client ID for the device flow, entered in
 	 * Settings (Accounts). Sets the Client ID without a rebuild:
 	 * create your own OAuth App (Device Flow enabled) and paste its
@@ -140,6 +146,9 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
 /** A server resolves names itself: no ISP block pages to get around, and DoH would only add a hop. */
 const SERVER_DEFAULT_SETTINGS: AppSettings = { dns: "system" };
+
+/** The context, in tokens, past which a chat is summarized when the user set no limit (host.ts capContext). */
+export const COMPACT_AT_DEFAULT = 300_000;
 
 /** Where pushes go when the user turned them on without naming a server. */
 export const NTFY_DEFAULT_URL = "https://ntfy.sh";
@@ -236,6 +245,7 @@ export class Integrations {
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
 			dailyBudget: dailyBudget ?? 0,
+			compactAt: this.settings.compactAt ?? COMPACT_AT_DEFAULT,
 			subagentCreditLimit: subagentCreditLimit ?? 50,
 			subagentMinutesLimit: subagentMinutesLimit ?? 30,
 			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",

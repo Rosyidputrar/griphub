@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/clock.dart';
 import '../agent/features.dart';
+import '../agent/integrations.dart' show AppSettings;
 import '../agent/pricing.dart';
 import '../agent/router_account.dart';
 import 'kit.dart';
@@ -142,6 +143,54 @@ class _UsageScreenState extends State<UsageScreen> {
 
   num get _budget => _num(agent.integrations.settings?.json['dailyBudget']);
 
+  /// The context limit's choices (tokens); 0 leaves it to the model's own limit.
+  static const compactChoices = [100000, 200000, 300000, 500000, 0];
+
+  /// The limit being saved: shown at once, with a spinner, until the host has it.
+  int? _compactSaving;
+
+  String _compactText(int v) => v == 0
+      ? tr('At the model\'s limit')
+      : tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(v)));
+
+  Future<void> _editCompactAt() async {
+    if (_compactSaving != null) return;
+    final current = agent.integrations.settings?.compactAt ?? AppSettings.compactAtDefault;
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(tr('Summarize the chat at')),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text(
+              tr(
+                'Every request sends the whole chat, so a long chat costs more with every message. Past this size the older turns become a summary. Large models would otherwise wait until close to their own limit.',
+              ),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          for (final v in compactChoices)
+            ListTile(
+              title: Text(_compactText(v)),
+              subtitle: v == AppSettings.compactAtDefault ? Text(tr('Recommended')) : null,
+              trailing: v == current ? const Icon(LucideIcons.check, size: 18) : null,
+              onTap: () => Navigator.pop(context, v),
+            ),
+        ],
+      ),
+    );
+    if (picked == null || picked == current || !mounted) return;
+    setState(() => _compactSaving = picked);
+    try {
+      await agent.integrations.updateSettings({'compactAt': picked});
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _compactSaving = null);
+    }
+  }
+
   Future<void> _editBudget() async {
     final value = await showDialog<double>(context: context, builder: (_) => _BudgetDialog(current: _budget));
     if (value == null) return;
@@ -239,6 +288,16 @@ class _UsageScreenState extends State<UsageScreen> {
                       ? tr('No limit')
                       : tr('{n} per day').replaceAll('{n}', _creditText(_budget, precise: true)),
                   onTap: _editBudget,
+                ),
+                SettingsRow(
+                  icon: LucideIcons.layers,
+                  color: p.accentAlt,
+                  title: tr('Summarize the chat at'),
+                  subtitle: _compactText(
+                    _compactSaving ?? agent.integrations.settings?.compactAt ?? AppSettings.compactAtDefault,
+                  ),
+                  trailing: _compactSaving != null ? const BusySpinner() : null,
+                  onTap: _compactSaving != null ? null : _editCompactAt,
                 ),
               ],
             ),

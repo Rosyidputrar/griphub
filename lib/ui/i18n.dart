@@ -1683,4 +1683,16 @@ const _id = <String, String>{
       'Apakah subagent sedang bekerja sekarang.',
   'You need an Ubuntu or Debian server (x86_64 or arm64) with at least 2 cores, 4 GB of memory and 20 GB of disk, and root access once. Use a server for the agent only: its box shares the server\'s network.':
       'Kamu butuh server Ubuntu atau Debian (x86_64 atau arm64) dengan minimal 2 core, memori 4 GB dan disk 20 GB, serta akses root sekali. Pakai server khusus untuk agent: box-nya berbagi jaringan dengan server.',
+  // Context limit
+  'At the model\'s limit': 'Di batas model',
+  'Context summarized': 'Konteks diringkas',
+  'Every request sends the whole chat to the model. To keep that affordable, older turns are replaced by a summary; the newest ones stay as they were.': 'Setiap permintaan mengirim seluruh chat ke model. Supaya tetap hemat, giliran lama diganti dengan ringkasan; giliran terbaru tetap utuh.',
+  'Every request sends the whole chat, so a long chat costs more with every message. Past this size the older turns become a summary. Large models would otherwise wait until close to their own limit.': 'Setiap permintaan mengirim seluruh chat, jadi chat panjang makin mahal di tiap pesan. Lewat ukuran ini, giliran lama dijadikan ringkasan. Tanpa batas ini, model besar baru meringkas saat hampir mencapai batasnya sendiri.',
+  'Keeping the chat affordable': 'Menjaga chat tetap hemat',
+  'OK': 'OK',
+  'Summarize the chat at': 'Ringkas chat pada',
+  'Summarizing the context': 'Meringkas konteks',
+  'This chat passed {n} tokens, the limit set in Settings > Usage.': 'Chat ini melewati {n} token, batas yang diatur di Pengaturan > Usage.',
+  'Could not summarize the context': 'Konteks gagal diringkas',
+  'Summary stopped': 'Ringkasan dihentikan',
 };
