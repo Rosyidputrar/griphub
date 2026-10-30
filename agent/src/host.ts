@@ -604,12 +604,39 @@ const JOB_CHAIN_LIMIT = 5;
 let jobChain = 0;
 
 /**
+ * Whether a deliverJobs is under way. It is called from a job ending, from a turn ending and from a timer, and it
+ * awaits in the middle; a job leaves the queue only once sent, so two overlapping runs would send it twice.
+ */
+let deliveringJobs = false;
+
+/** A call came in while one was under way: the running one goes round once more. */
+let deliverAgain = false;
+
+/**
  * Calls the open chat back with the jobs of it that ended, once it is idle: one turn for all of them, with no message
  * from the user. Waits while it works (its turn ends first) and while another chat is open (it is called back when it
  * is opened again). Never past the daily budget, onto a full disk, or past JOB_CHAIN_LIMIT turns with no word from the
  * user: the results are then added without a turn, and the user is told why the agent did not go on.
  */
 async function deliverJobs() {
+	if (deliveringJobs) {
+		// One is under way: it looks again before it ends, so a job that ended just now is not missed.
+		deliverAgain = true;
+		return;
+	}
+	deliveringJobs = true;
+	try {
+		do {
+			deliverAgain = false;
+			await deliverFinishedJobs();
+		} while (deliverAgain);
+	} finally {
+		deliveringJobs = false;
+	}
+}
+
+/** The body of [deliverJobs]; it loops until nothing of the open chat is left, so a job that ends meanwhile is sent too. */
+async function deliverFinishedJobs() {
 	const s = session;
 	if (!s || s.isStreaming || fallbackPending) return;
 	const key = s.sessionFile ?? s.sessionId;
@@ -914,7 +941,7 @@ async function deleteSessions(paths: string[], cwd?: string) {
 	// A deleted chat's jobs die with it: nothing to call back, no records that outlive their chat. Job records carry
 	// the session file as the chat gave it, so both sides are resolved before they are compared.
 	const gone = new Set(files);
-	for (const job of jobs.list()) if (gone.has(resolve(job.sessionFile))) jobs.forgetSession(job.sessionFile);
+	for (const file of new Set(jobs.list().map((j) => j.sessionFile))) if (gone.has(resolve(file))) jobs.forgetSession(file);
 	for (let i = finishedJobs.length - 1; i >= 0; i--) if (gone.has(resolve(finishedJobs[i].sessionFile))) finishedJobs.splice(i, 1);
 	return { deleted, ...state() };
 }
