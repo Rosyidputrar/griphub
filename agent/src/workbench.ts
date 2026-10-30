@@ -66,7 +66,43 @@ const LIST_CAP = 20_000;
 /** The project's files, briefly remembered: one list per few seconds of typing, not one per keystroke. */
 let listed: { cwd: string; at: number; files: string[]; truncated: boolean } | null = null;
 
+/**
+ * The project's top `.gitignore`, as a test of a path from the project's top: what ripgrep leaves out, for the walk
+ * that stands in for it where there is no ripgrep (some phones, some CI runners). Covers the common forms: a name
+ * (`secret`, matched in any folder), a path (`/dist`, `docs/build`), a folder only (`tmp/`), and `*`, `?`, `**`
+ * wildcards. A negation (`!keep.me`) isn't followed: a file it brings back stays out of the list, which costs an @
+ * suggestion, never offers an ignored file.
+ */
+export function gitignoreTest(cwd: string): (rel: string, dir: boolean) => boolean {
+	let text = "";
+	try {
+		text = readFileSync(join(cwd, ".gitignore"), "utf8");
+	} catch {
+		return () => false;
+	}
+	const rules: { re: RegExp; dirOnly: boolean; whole: boolean }[] = [];
+	for (const raw of text.split(/\r?\n/)) {
+		let line = raw.trim();
+		if (!line || line.startsWith("#") || line.startsWith("!")) continue;
+		const dirOnly = line.endsWith("/");
+		if (dirOnly) line = line.replace(/\/+$/, "");
+		const anchored = line.startsWith("/");
+		if (anchored) line = line.replace(/^\/+/, "");
+		if (!line) continue;
+		const esc = (part: string) => part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]");
+		// `**/` is any number of folders, none included; another `**` is anything.
+		const glob = line
+			.split("**/")
+			.map((p) => p.split("**").map(esc).join(".*"))
+			.join("(?:.*/)?");
+		rules.push({ re: new RegExp(`^${glob}$`), dirOnly, whole: anchored || line.includes("/") });
+	}
+	return (rel, dir) =>
+		rules.some((r) => (!r.dirOnly || dir) && (r.whole ? r.re.test(rel) : r.re.test(rel.slice(rel.lastIndexOf("/") + 1))));
+}
+
 function walk(cwd: string): { files: string[]; truncated: boolean } {
+	const ignored = gitignoreTest(cwd);
 	const files: string[] = [];
 	const stack = [""];
 	while (stack.length) {
@@ -80,8 +116,8 @@ function walk(cwd: string): { files: string[]; truncated: boolean } {
 		for (const d of names) {
 			const path = rel ? `${rel}/${d.name}` : d.name;
 			if (d.isDirectory()) {
-				if (!SKIP_DIRS.has(d.name)) stack.push(path);
-			} else if (d.isFile()) {
+				if (!SKIP_DIRS.has(d.name) && !ignored(path, true)) stack.push(path);
+			} else if (d.isFile() && !ignored(path, false)) {
 				files.push(path);
 				if (files.length >= LIST_CAP) return { files, truncated: true };
 			}

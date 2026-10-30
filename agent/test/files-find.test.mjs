@@ -13,7 +13,7 @@ mkdirSync(join(here, "..", "build"), { recursive: true });
 const out = mkdtempSync(join(here, "..", "build", "files-find-test-"));
 const outfile = join(out, "workbench.mjs");
 await build({ entryPoints: [join(here, "..", "src", "workbench.ts")], outfile, bundle: true, platform: "node", format: "esm", packages: "external", logLevel: "error" });
-const { findFiles, fileScore } = await import(pathToFileURL(outfile).href);
+const { findFiles, fileScore, gitignoreTest } = await import(pathToFileURL(outfile).href);
 
 function project() {
 	const dir = mkdtempSync(join(tmpdir(), "files-find-"));
@@ -53,14 +53,42 @@ test("best match first, with dependencies, build output and what .gitignore keep
 	assert.equal((await findFiles(cwd, "chat", 2)).files.length, 2);
 });
 
-test("without ripgrep, a plain walk still finds the files", async () => {
-	const cwd = project();
+/** Runs [fn] as on a machine without ripgrep (some phones, the CI runner). */
+async function withoutRipgrep(fn) {
 	const path = process.env.PATH;
 	process.env.PATH = "";
 	try {
-		const { files } = await findFiles(cwd, "screen");
-		assert.deepEqual(files, ["lib/ui/chat_screen.dart"]);
+		return await fn();
 	} finally {
 		process.env.PATH = path;
 	}
+}
+
+test("without ripgrep, a plain walk finds the same files and leaves out the same ones", async () => {
+	const cwd = project();
+	await withoutRipgrep(async () => {
+		assert.deepEqual((await findFiles(cwd, "screen")).files, ["lib/ui/chat_screen.dart"]);
+		const { files } = await findFiles(cwd, "chat");
+		assert.equal(files[0], "lib/agent/chat.dart");
+		assert.ok(!files.includes("secret/chat.txt"), ".gitignore, which ripgrep reads by itself");
+		assert.ok(!files.some((f) => f.startsWith("node_modules/") || f.startsWith("build/")));
+	});
+});
+
+test(".gitignore for the walk: names anywhere, paths from the top, folders only, wildcards", () => {
+	const dir = mkdtempSync(join(tmpdir(), "gitignore-"));
+	writeFileSync(join(dir, ".gitignore"), ["# a comment", "", "*.log", "/dist", "tmp/", "docs/private", "**/cache/**", "!keep.log", "secret.txt"].join("\n"));
+	const ignored = gitignoreTest(dir);
+	assert.equal(ignored("app.log", false), true);
+	assert.equal(ignored("src/deep/app.log", false), true, "a name matches in any folder");
+	assert.equal(ignored("dist", true), true);
+	assert.equal(ignored("src/dist", true), false, "/dist is the top's only");
+	assert.equal(ignored("tmp", true), true);
+	assert.equal(ignored("tmp", false), false, "tmp/ is a folder, not a file called tmp");
+	assert.equal(ignored("docs/private", true), true);
+	assert.equal(ignored("a/b/cache/x.bin", false), true);
+	assert.equal(ignored("secret.txt", false), true);
+	assert.equal(ignored("src/main.ts", false), false);
+	assert.equal(ignored("keep.log", false), true, "a negation is not followed: the walk shows less than git, never something ignored");
+	assert.equal(gitignoreTest(mkdtempSync(join(tmpdir(), "none-")))("anything", false), false, "no .gitignore");
 });
