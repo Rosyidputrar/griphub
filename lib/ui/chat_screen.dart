@@ -1250,7 +1250,8 @@ class _RoundButton extends StatelessWidget {
             onTap: onTap,
             onLongPress: onLongPress,
             child: busy
-                ? Center(child: BusySpinner(color: p.muted))
+                // The button's own label says what it is busy with ("Sending…").
+                ? Center(child: BusySpinner(color: p.muted, semanticsLabel: ''))
                 : Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
           ),
         ),

@@ -1118,7 +1118,8 @@ class _ServerScreenState extends State<ServerScreen> {
             title: step(3, tr('Test connection')),
             subtitle: testing ? tr('Connecting…') : tr('Checks the key, the host key and the agent'),
             trailing: testing
-                ? const BusySpinner()
+                // The subtitle already says "Connecting…".
+                ? const BusySpinner(semanticsLabel: '')
                 : null,
             onTap: testing ? null : _test,
           ),

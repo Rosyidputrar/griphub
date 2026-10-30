@@ -194,7 +194,8 @@ class _SyncScreenState extends State<SyncScreen> {
                         ].join(' · '),
                         onTap: s.running ? null : _syncNow,
                         trailing: s.running
-                            ? const BusySpinner(size: 18)
+                            // The title already says "Syncing…".
+                            ? const BusySpinner(size: 18, semanticsLabel: '')
                             : null,
                       ),
                       if (s.repo != null)

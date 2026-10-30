@@ -529,16 +529,19 @@ String formatTokens(int n) {
 /// A spinner for a button or a row that is waiting on the host, or ([BusySpinner.page]) for a screen or panel with
 /// nothing to show yet. [color] on a filled button, or where the colour means something; otherwise the theme's comets.
 class BusySpinner extends StatelessWidget {
-  const BusySpinner({super.key, this.size = 16, this.color});
+  const BusySpinner({super.key, this.size = 16, this.color, this.semanticsLabel});
 
   /// The big one, alone in the middle of a screen or panel.
-  const BusySpinner.page({super.key}) : size = 44, color = null;
+  const BusySpinner.page({super.key}) : size = 44, color = null, semanticsLabel = null;
 
   final double size;
   final Color? color;
 
+  /// See [EnergySpinner.semanticsLabel]: empty where the control around it already says it is busy.
+  final String? semanticsLabel;
+
   @override
-  Widget build(BuildContext context) => EnergySpinner(size: size, color: color);
+  Widget build(BuildContext context) => EnergySpinner(size: size, color: color, semanticsLabel: semanticsLabel);
 }
 
 /// A 2 px bar that runs while [busy]. It always takes its height, so the content under it never jumps when it shows.
@@ -608,7 +611,8 @@ Future<T?> runWithProgress<T>(
           children: [
             ValueListenableBuilder(
               valueListenable: outcome,
-              builder: (_, o, _) => EnergySpinner(size: 36, outcome: o),
+              // The label next to it says the same.
+              builder: (_, o, _) => EnergySpinner(size: 36, outcome: o, semanticsLabel: ''),
             ),
             const SizedBox(width: 14),
             // "Restoring…" next to a check would still read as running.

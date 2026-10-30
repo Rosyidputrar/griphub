@@ -957,6 +957,7 @@ const _id = <String, String>{
   'In progress': 'Berjalan',
   'Waiting': 'Antre',
   'Done': 'Selesai',
+  'Loading…': 'Memuat…',
   'Failed': 'Gagal',
   'Cancelled': 'Dibatalkan',
   'last run': 'terakhir jalan',
