@@ -137,7 +137,7 @@ class _ConnectionBannerState extends State<ConnectionBanner> {
                 if (c.state == LinkState.offline)
                   Icon(LucideIcons.cloudOff, size: 16, color: color)
                 else
-                  SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: color)),
+                  BusySpinner(size: 14, color: color),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -230,7 +230,7 @@ class _ServerUpdateBannerState extends State<ServerUpdateBanner> {
                 if (_updating)
                   const Padding(
                     padding: EdgeInsets.all(12),
-                    child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    child: BusySpinner(),
                   )
                 else if (!_waiting)
                   TextButton(onPressed: _update, child: Text(tr('Update'))),
@@ -313,7 +313,7 @@ class _ServerBootFailedState extends State<ServerBootFailed> {
             const SizedBox(height: 18),
             Row(
               children: [
-                SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2, color: p.warning)),
+                BusySpinner(size: 14, color: p.warning),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -978,7 +978,7 @@ class _ServerScreenState extends State<ServerScreen> {
       ),
       const SizedBox(height: 10),
       if (command == null && setupError == null)
-        const Center(child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+        const Center(child: BusySpinner(size: 18))
       else if (setupError != null)
         Text(setupError!, style: TextStyle(color: p.danger))
       else ...[
@@ -1118,7 +1118,7 @@ class _ServerScreenState extends State<ServerScreen> {
             title: step(3, tr('Test connection')),
             subtitle: testing ? tr('Connecting…') : tr('Checks the key, the host key and the agent'),
             trailing: testing
-                ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const BusySpinner()
                 : null,
             onTap: testing ? null : _test,
           ),
@@ -1132,7 +1132,7 @@ class _ServerScreenState extends State<ServerScreen> {
                 ? tr('A newer agent is in this app: install it on the server')
                 : tr('Copies the agent, then restarts it when idle'),
             trailing: installing
-                ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const BusySpinner()
                 : null,
             onTap: installing ? null : _install,
           ),
@@ -1354,7 +1354,7 @@ class _ServerScreenState extends State<ServerScreen> {
           children: [
             TextButton.icon(
               icon: _testingNotify
-                  ? const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const BusySpinner(size: 14)
                   : const Icon(LucideIcons.bellRing, size: 16),
               label: Text(tr('Send a test notification')),
               onPressed: _testingNotify || !s.notifyEnabled ? null : _testNotify,

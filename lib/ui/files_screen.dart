@@ -587,7 +587,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
   Widget _list(BuildContext context) {
     final p = context.palette;
     final t = Theme.of(context).textTheme;
-    if (_loading && _entries.isEmpty && _error == null) return const Center(child: CircularProgressIndicator());
+    if (_loading && _entries.isEmpty && _error == null) return const Center(child: BusySpinner.page());
     final visible = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
     final hiddenCount = _entries.length - visible.length;
     Widget child;
@@ -840,7 +840,7 @@ class _ImageViewerState extends State<_ImageViewer> {
             builder: (context, snap) {
               if (snap.hasError) return cantDisplay;
               final bytes = snap.data;
-              if (bytes == null) return const CircularProgressIndicator();
+              if (bytes == null) return const BusySpinner.page();
               return Image.memory(bytes, errorBuilder: (_, e, _) => cantDisplay);
             },
           ),

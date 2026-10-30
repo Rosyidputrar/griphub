@@ -221,7 +221,7 @@ class _UsageScreenState extends State<UsageScreen> {
                     _load();
                   },
             icon: _loadingAccount
-                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const BusySpinner(size: 18)
                 : const Icon(LucideIcons.refreshCw),
           ),
         ],
@@ -272,7 +272,7 @@ class _UsageScreenState extends State<UsageScreen> {
             if (_error != null)
               SurfaceCard(child: Text('$_error', style: text.bodySmall?.copyWith(color: p.danger)))
             else if (rows == null)
-              const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator()))
+              const Padding(padding: EdgeInsets.all(40), child: Center(child: BusySpinner.page()))
             else
               ..._summary(context, rows),
             SectionLabel(tr('This chat')),
@@ -541,7 +541,7 @@ class AccountCard extends StatelessWidget {
       return SurfaceCard(
         child: error != null
             ? Text(tr(error.toString()), style: text.bodySmall?.copyWith(color: p.danger))
-            : const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+            : const Center(child: BusySpinner(size: 20)),
       );
     }
     final low = a.lowBalance;

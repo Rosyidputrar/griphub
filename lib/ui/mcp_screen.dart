@@ -219,10 +219,7 @@ class _ServerCard extends StatelessWidget {
     final status = s.enabled ? s.status : 'disabled';
     final Widget indicator = switch (status) {
       'connected' => _Dot(color: p.success),
-      'connecting' => SizedBox.square(
-        dimension: 12,
-        child: CircularProgressIndicator(strokeWidth: 1.6, color: p.accent),
-      ),
+      'connecting' => BusySpinner(size: 12, color: p.accent),
       'error' => _Dot(color: p.danger),
       _ => _Dot(color: p.faint),
     };

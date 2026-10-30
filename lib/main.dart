@@ -79,9 +79,9 @@ class _Boot extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const LogoMark(size: 56),
-            const SizedBox(height: 20),
-            SizedBox(width: 120, child: LinearProgressIndicator(minHeight: 2, borderRadius: BorderRadius.circular(Radii.xs))),
-            const SizedBox(height: 14),
+            const SizedBox(height: 24),
+            const BusySpinner(size: 36),
+            const SizedBox(height: 16),
             Text(
               agent.client.isRemote ? tr('Connecting to your server') : tr('Starting agent'),
               style: Theme.of(context).textTheme.bodySmall,

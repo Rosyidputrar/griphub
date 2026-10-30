@@ -1058,7 +1058,7 @@ class _SendButton extends StatelessWidget {
               dimension: 46,
               child: Center(
                 child: busy
-                    ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.inverse))
+                    ? BusySpinner(color: p.inverse)
                     : Icon(LucideIcons.sendHorizontal, size: 20, color: p.inverse),
               ),
             ),
@@ -1123,7 +1123,7 @@ class _ToolRowState extends State<_ToolRow> {
       SubagentToolStatus.done => Icon(LucideIcons.check, size: 15, color: p.success),
       SubagentToolStatus.failed => Icon(LucideIcons.x, size: 15, color: p.danger),
       SubagentToolStatus.running =>
-        SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 1.6, color: p.muted)),
+        BusySpinner(size: 12),
     };
     final took = t.finishedAt?.difference(t.startedAt);
     final output = t.output.length > 2000 ? '${t.output.substring(0, 2000)}…' : t.output;

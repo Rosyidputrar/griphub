@@ -113,7 +113,7 @@ class _ReposScreenState extends State<ReposScreen> {
                       }
                       if (!snap.hasData) {
                         return const Center(
-                          child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                          child: BusySpinner(size: 18),
                         );
                       }
                       final list = snap.data!
@@ -311,7 +311,7 @@ class _RepoActionsSheetState extends State<RepoActionsSheet> {
                   title: tr('Pull latest changes'),
                   subtitle: pullSubtitle,
                   trailing: _fetching && s?.upstream != null
-                      ? SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.muted))
+                      ? BusySpinner()
                       : null,
                   onTap: s?.upstream == null ? null : _pull,
                 ),

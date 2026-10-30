@@ -134,7 +134,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 suffixIcon: busy
                     ? const Padding(
                         padding: EdgeInsets.all(14),
-                        child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                        child: BusySpinner(),
                       )
                     : query.text.isEmpty
                     ? null

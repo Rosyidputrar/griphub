@@ -173,7 +173,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> with BusyActions {
             else if (list == null)
               const Padding(
                 padding: EdgeInsets.all(40),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: BusySpinner.page()),
               )
             else if (list.isEmpty)
               SurfaceCard(

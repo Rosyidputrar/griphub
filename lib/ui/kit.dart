@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
+import 'energy.dart';
 import 'theme.dart';
 
 /// Shared building blocks for the GripHub AI Agent look.
@@ -49,7 +50,7 @@ class PrimaryButton extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (busy)
-                  SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2, color: p.inverse))
+                  BusySpinner(color: p.inverse)
                 else if (icon != null)
                   Icon(icon, size: 18, color: p.inverse),
                 if (busy || icon != null) const SizedBox(width: 8),
@@ -524,17 +525,19 @@ String formatTokens(int n) {
 // ---------------------------------------------------------------------------
 // Work in progress
 
-/// A small spinner for a button or a row that is waiting on the host.
+/// A spinner for a button or a row that is waiting on the host, or ([BusySpinner.page]) for a screen or panel with
+/// nothing to show yet. [color] on a filled button, or where the colour means something; otherwise the theme's comets.
 class BusySpinner extends StatelessWidget {
   const BusySpinner({super.key, this.size = 16, this.color});
+
+  /// The big one, alone in the middle of a screen or panel.
+  const BusySpinner.page({super.key}) : size = 44, color = null;
+
   final double size;
   final Color? color;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: size,
-    child: CircularProgressIndicator(strokeWidth: size <= 12 ? 1.6 : 2, color: color ?? context.palette.muted),
-  );
+  Widget build(BuildContext context) => EnergySpinner(size: size, color: color);
 }
 
 /// A 2 px bar that runs while [busy]. It always takes its height, so the content under it never jumps when it shows.
@@ -580,10 +583,13 @@ mixin BusyActions<T extends StatefulWidget> on State<T> {
 }
 
 /// Runs [task] behind a small dialog that says what it waits for and cannot be dismissed, for work that has no button
-/// of its own to show a spinner on. Errors are shown as a snackbar; the result is null then.
+/// of its own to show a spinner on. When the work ends the spinner turns into a check or a cross for a moment before
+/// the dialog goes. Errors are shown as a snackbar; the result is null then.
 Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Function() task) async {
   final nav = Navigator.of(context);
   final messenger = ScaffoldMessenger.maybeOf(context);
+  final hold = Motion.of(context, EnergySpinner.outcomeDuration);
+  final outcome = ValueNotifier<EnergyOutcome?>(null);
   // This dialog and no other is taken down when the work ends, whatever opened on top of it meanwhile.
   final route = DialogRoute<void>(
     context: context,
@@ -593,7 +599,10 @@ Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Func
       child: AlertDialog(
         content: Row(
           children: [
-            const BusySpinner(size: 18),
+            ValueListenableBuilder(
+              valueListenable: outcome,
+              builder: (_, o, _) => EnergySpinner(size: 36, outcome: o),
+            ),
             const SizedBox(width: 14),
             Expanded(child: Text(label)),
           ],
@@ -601,10 +610,21 @@ Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Func
       ),
     ),
   );
+
+  // Only while the dialog is the one on screen: under something else nobody would see it.
+  Future<void> show(EnergyOutcome o) async {
+    if (!route.isCurrent) return;
+    outcome.value = o;
+    if (hold > Duration.zero) await Future<void>.delayed(hold);
+  }
+
   unawaited(nav.push(route));
   try {
-    return await task();
+    final result = await task();
+    await show(EnergyOutcome.success);
+    return result;
   } catch (e) {
+    await show(EnergyOutcome.failure);
     messenger?.showSnackBar(SnackBar(content: Text('$e')));
     return null;
   } finally {

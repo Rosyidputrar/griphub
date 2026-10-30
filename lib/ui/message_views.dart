@@ -1129,7 +1129,7 @@ class _ToolCallViewState extends State<ToolCallView> {
     final Widget indicator = switch (status) {
       ToolStatus.done => Icon(LucideIcons.check, size: 15, color: p.success),
       ToolStatus.failed => Icon(LucideIcons.x, size: 15, color: p.danger),
-      _ => SizedBox.square(dimension: 12, child: CircularProgressIndicator(strokeWidth: 1.6, color: p.muted)),
+      _ => BusySpinner(size: 12),
     };
 
     return Container(

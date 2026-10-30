@@ -367,7 +367,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
         title: Text(tr('Generate image')),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: BusySpinner.page())
           : ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
               children: [

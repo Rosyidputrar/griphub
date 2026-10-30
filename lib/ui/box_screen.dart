@@ -273,7 +273,7 @@ class _BoxScreenState extends State<BoxScreen> {
           body: c == null
               ? Center(
                   child: _loadError == null
-                      ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const BusySpinner(size: 20)
                       : Padding(
                           padding: const EdgeInsets.all(24),
                           child: Text(
@@ -336,7 +336,7 @@ class _BoxScreenState extends State<BoxScreen> {
                                 ? tr('Running a command in it…')
                                 : tr('Runs a command inside it, the way the agent does'),
                             trailing: _checking
-                                ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                                ? const BusySpinner()
                                 : null,
                             onTap: _checking || !c.installed ? null : _check,
                           ),

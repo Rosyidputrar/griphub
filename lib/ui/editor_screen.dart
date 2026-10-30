@@ -42,6 +42,7 @@ import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import 'illustration.dart';
+import 'kit.dart';
 import 'preview_open.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -427,7 +428,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                 IconButton(
                   tooltip: tr('Save'),
                   icon: _saving
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      ? const BusySpinner(size: 18)
                       : Icon(LucideIcons.save, size: 20, color: _dirty ? p.accent : null),
                   onPressed: _dirty && !_saving ? _save : null,
                 ),
@@ -471,7 +472,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
   Widget _body(BuildContext context) {
     final p = context.palette;
     final t = Theme.of(context).textTheme;
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const Center(child: BusySpinner.page());
     if (_error != null) {
       return Center(
         child: Padding(

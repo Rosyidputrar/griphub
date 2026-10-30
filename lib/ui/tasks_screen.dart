@@ -391,7 +391,7 @@ class _RunCard extends StatelessWidget {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final Widget status = switch (run.status) {
-      'running' => SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.accent)),
+      'running' => BusySpinner(size: 18, color: p.accent),
       'queued' => Icon(LucideIcons.clock, size: 18, color: p.muted),
       'done' => Icon(LucideIcons.circleCheck, size: 18, color: p.success),
       'error' => Icon(LucideIcons.circleX, size: 18, color: p.danger),

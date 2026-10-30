@@ -81,12 +81,12 @@ class _NetworkScreenState extends State<NetworkScreen> {
               if (saving)
                 const Padding(
                   padding: EdgeInsets.only(right: 20),
-                  child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  child: BusySpinner(),
                 ),
             ],
           ),
           body: s == null
-              ? const Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+              ? const Center(child: BusySpinner(size: 20))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
                   children: [
@@ -632,7 +632,7 @@ class _KeyListState extends State<_KeyList> {
               if (busy)
                 const Padding(
                   padding: EdgeInsets.all(12),
-                  child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  child: BusySpinner(),
                 )
               else if (saved.isNotEmpty)
                 Pill(
