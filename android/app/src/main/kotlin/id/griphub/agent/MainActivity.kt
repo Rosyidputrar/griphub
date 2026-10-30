@@ -35,6 +35,9 @@ class MainActivity : FlutterFragmentActivity() {
         /** A notification tap; the launch map rides along (Notifications.kt). */
         const val ACTION_OPEN = "id.griphub.agent.OPEN"
         private const val VOICE_REQUEST = 4101
+
+        /** How old a pasted or shared copy in the cache is before it is swept. */
+        private const val OLD_COPY_MS = 24L * 60 * 60 * 1000
     }
 
     private var events: EventChannel.EventSink? = null
@@ -45,7 +48,10 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) handleIntent(intent)
+        if (savedInstanceState == null) {
+            sweepOldCopies()
+            handleIntent(intent)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -362,6 +368,25 @@ class MainActivity : FlutterFragmentActivity() {
         val type = clip.description.let { d -> (0 until d.mimeTypeCount).map { d.getMimeType(it) } }
             .firstOrNull { it.startsWith("image/") } ?: contentResolver.getType(uri)
         return if (type?.startsWith("image/") == true) uri else null
+    }
+
+    /**
+     * Removes copies the app made in its cache for pastes and shares once they are a day old: a chat that still needs
+     * one has long since copied it into its own project (.attachments/), and Android only empties the cache when it
+     * is short of space. Runs off the main thread; a failure is harmless and ignored.
+     */
+    private fun sweepOldCopies() {
+        val cache = cacheDir ?: return
+        val cutoff = System.currentTimeMillis() - OLD_COPY_MS
+        Thread {
+            for (name in listOf("paste", "shared", "griphub-paste")) {
+                try {
+                    File(cache, name).listFiles()?.filter { it.lastModified() < cutoff }?.forEach { it.deleteRecursively() }
+                } catch (e: Exception) {
+                    // Gone or unreadable: nothing to sweep.
+                }
+            }
+        }.start()
     }
 
     /** Copies the clipboard's picture into the cache; its path, name and type, or null when it cannot be read. */
