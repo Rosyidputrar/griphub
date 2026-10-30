@@ -10,6 +10,7 @@ import '../agent/agent_controller.dart';
 import '../agent/remote_profile.dart';
 import 'backup_screen.dart';
 import 'box_screen.dart';
+import 'errors.dart';
 import 'server_guide.dart';
 import 'i18n.dart';
 import 'kit.dart';
@@ -194,7 +195,7 @@ class _ServerUpdateBannerState extends State<ServerUpdateBanner> {
       setState(() => _waiting = r.ok);
       messenger.showSnackBar(SnackBar(content: Text(trMsgs(r.says))));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _updating = false);
     }
@@ -434,7 +435,7 @@ class _ServerScreenState extends State<ServerScreen> {
       final c = await agent.remote.bootstrapCommand(address: address.text.trim());
       if (mounted) setState(() => command = c);
     } catch (e) {
-      if (mounted) setState(() => setupError = '$e');
+      if (mounted) setState(() => setupError = friendlyError(e));
     }
   }
 
@@ -719,7 +720,7 @@ class _ServerScreenState extends State<ServerScreen> {
     try {
       await agent.client.shareFile(agent.remote.setupScript!.path);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -729,7 +730,7 @@ class _ServerScreenState extends State<ServerScreen> {
       final paste = await agent.remote.setupPaste(address: address.text.trim());
       if (paste != null) await _copy(paste, tr('setup command'));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -1167,7 +1168,7 @@ class _ServerScreenState extends State<ServerScreen> {
                 : ready
                 ? tr('Chats and files are on this phone')
                 : tr('Test the connection and install the agent first'),
-            trailing: Switch(value: mode.active, onChanged: ready ? _use : null),
+            trailing: LabeledSwitch(label: tr('Use the server agent'), value: mode.active, onChanged: ready ? _use : null),
             onTap: ready ? () => _use(!mode.active) : null,
           ),
           SettingsRow(

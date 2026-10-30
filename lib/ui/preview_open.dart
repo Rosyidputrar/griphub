@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'preview_screen.dart';
 
 // Adapted from CoderRa's server mode (seseegy/coderra lib/ui/preview_open.dart).
@@ -47,7 +48,7 @@ Future<void> openFilePreview(
     if (!context.mounted) return;
     await HtmlPreviewScreen.open(context, title: title, source: () => html, baseDir: parentPath(path));
   } catch (e) {
-    messenger?.showSnackBar(SnackBar(content: Text('${tr('Could not open the preview')}: $e')));
+    messenger?.showSnackBar(SnackBar(content: Text('${tr('Could not open the preview')}: ${friendlyError(e)}')));
   }
 }
 
@@ -98,7 +99,7 @@ Future<void> openDevServer(
       SnackBar(
         duration: const Duration(seconds: 8),
         content: Text(
-          '${tr('Could not reach port {port} on the server').replaceAll('{port}', '$port')}: $e\n'
+          '${tr('Could not reach port {port} on the server').replaceAll('{port}', '$port')}: ${friendlyError(e)}\n'
           '${tr('Make sure the dev server listens on 127.0.0.1 (for example --host 127.0.0.1).')}',
         ),
       ),

@@ -15,6 +15,7 @@ import 'accounts_screen.dart';
 import 'chat_extras.dart';
 import 'chat_screen.dart';
 import 'delete_flows.dart';
+import 'errors.dart';
 import 'folder_picker.dart';
 import 'image_gen_screen.dart';
 import 'kit.dart';
@@ -446,12 +447,19 @@ class _NavBar extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(
                   children: [
+                    // On a 320 dp screen two 52 dp tabs don't fit beside the create button: they give way to 48.
                     Expanded(
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [item(0), item(1)]),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [Flexible(child: item(0)), Flexible(child: item(1))],
+                      ),
                     ),
                     const SizedBox(width: 76), // room for the create button
                     Expanded(
-                      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [item(2), item(3)]),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [Flexible(child: item(2)), Flexible(child: item(3))],
+                      ),
                     ),
                   ],
                 ),
@@ -752,7 +760,7 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
       try {
         return await _prepareQuick(q);
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
         return null;
       }
     });
@@ -829,7 +837,7 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                             Navigator.of(context).push(MaterialPageRoute(builder: (_) => TasksScreen(agent: agent))),
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 6),
                     // Signed out: a person icon, not initials made from the app name ("GA").
                     if (gh == null)
                       _CircleButton(
@@ -842,7 +850,7 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                       Semantics(
                         button: true,
                         label: tr('Accounts & servers'),
-                        child: GestureDetector(
+                        child: TapTarget(
                           onTap: () =>
                               Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountsScreen(agent: agent))),
                           child: Avatar(name: gh.name ?? gh.login, url: gh.avatarUrl, size: 44),
@@ -1008,13 +1016,16 @@ class _CircleButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      child: Material(
-        color: p.surface,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: SizedBox.square(dimension: 44, child: Icon(icon, size: 20, color: p.text)),
+      child: TapTarget(
+        onTap: onTap,
+        child: Material(
+          color: p.surface,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: SizedBox.square(dimension: 44, child: Icon(icon, size: 20, color: p.text)),
+          ),
         ),
       ),
     );
@@ -1474,7 +1485,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
         if (!await agent.newSession(dir: project.path)) return;
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       return;
     } finally {
       if (mounted) setState(() => _opening = null);

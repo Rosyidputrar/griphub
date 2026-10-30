@@ -7,6 +7,7 @@ import '../agent/agent_controller.dart';
 import '../agent/remote_mode.dart';
 import '../agent/updater.dart' show formatBytes;
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -51,7 +52,7 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
     try {
       await runBusy(key, task);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -78,7 +79,8 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
                   Expanded(child: Text(tr('Automatic server backup'), style: text.titleSmall)),
                   if (remote.active) ...[
                     if (busy('switch')) ...[const BusySpinner(), const SizedBox(width: 8)],
-                    Switch(
+                    LabeledSwitch(
+                      label: tr('Automatic server backup'),
                       value: enabled,
                       onChanged: busy() || status == null
                           ? null

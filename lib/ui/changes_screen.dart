@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'diff_view.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -40,7 +41,7 @@ class _ChangesScreenState extends State<ChangesScreen> {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   CheckpointInfo? get _current => _checkpoints?.where((c) => c.id == _selected).firstOrNull;

@@ -8,6 +8,7 @@ import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'server_guide.dart';
 import 'task_log.dart';
@@ -71,7 +72,7 @@ class _BoxScreenState extends State<BoxScreen> {
       if (mounted && _loadError != null) setState(() => _loadError = null);
     } catch (e) {
       if (mounted) {
-        setState(() => _loadError = e is AgentError && e.code == 'offline' ? tr('Not connected to the server.') : '$e');
+        setState(() => _loadError = e is AgentError && e.code == 'offline' ? tr('Not connected to the server.') : friendlyError(e));
       }
     }
   }
@@ -103,7 +104,7 @@ class _BoxScreenState extends State<BoxScreen> {
         await job(true);
       }
     } catch (e) {
-      _say(e is AgentError ? e.message : '$e');
+      _say(friendlyError(e));
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -139,7 +140,7 @@ class _BoxScreenState extends State<BoxScreen> {
       if (mounted) setState(() => _checked = r);
       unawaited(_refresh());
     } catch (e) {
-      if (mounted) setState(() => _checked = (ok: false, message: e is AgentError ? e.message : '$e'));
+      if (mounted) setState(() => _checked = (ok: false, message: friendlyError(e)));
     } finally {
       if (mounted) setState(() => _checking = false);
     }
@@ -161,7 +162,7 @@ class _BoxScreenState extends State<BoxScreen> {
       await it.setContainerShell(on);
       await widget.agent.refreshState();
     } catch (e) {
-      _say(e is AgentError ? e.message : '$e');
+      _say(friendlyError(e));
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -276,11 +277,7 @@ class _BoxScreenState extends State<BoxScreen> {
                       ? const BusySpinner(size: 20)
                       : Padding(
                           padding: const EdgeInsets.all(24),
-                          child: Text(
-                            _loadError!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: p.danger),
-                          ),
+                          child: ErrorNotice(error: _loadError, onRetry: _refresh, center: true),
                         ),
                 )
               : !c.available
@@ -313,7 +310,7 @@ class _BoxScreenState extends State<BoxScreen> {
                                 ? tr('Every command happens inside the box, not on the server')
                                 : tr('Off: commands run directly on the server'),
                             // Nothing to switch to until the box is built.
-                            trailing: Switch(value: c.enabled, onChanged: _working || !c.installed ? null : _setShell),
+                            trailing: LabeledSwitch(label: tr('Run the agent\'s commands in the box'), value: c.enabled, onChanged: _working || !c.installed ? null : _setShell),
                           ),
                           SettingsRow(
                             icon: LucideIcons.terminal,

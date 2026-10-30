@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'folder_picker.dart';
 import 'kit.dart';
 import 'theme.dart';
@@ -73,7 +74,7 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
         // No chat came of it (the user kept the running turn): leave no empty folder behind.
         if (made) await fs.delete(dir).catchError((_) {});
       } catch (e) {
-        if (mounted) setState(() => error = '$e');
+        if (mounted) setState(() => error = friendlyError(e));
       }
     });
   }
@@ -91,7 +92,7 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
     try {
       await runBusy(key, () => _start(dir));
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) setState(() => error = friendlyError(e));
     }
   }
 

@@ -8,6 +8,7 @@ import '../agent/features.dart';
 import '../agent/integrations.dart' show AppSettings;
 import '../agent/pricing.dart';
 import '../agent/router_account.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'subagent_card.dart' show thinkingLabel;
 import 'i18n.dart';
@@ -185,7 +186,7 @@ class _UsageScreenState extends State<UsageScreen> {
     try {
       await agent.integrations.updateSettings({'compactAt': picked});
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _compactSaving = null);
     }
@@ -198,7 +199,7 @@ class _UsageScreenState extends State<UsageScreen> {
       await agent.integrations.updateSettings({'dailyBudget': value < 0 ? 0 : value});
       if (mounted) setState(() {});
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -234,7 +235,12 @@ class _UsageScreenState extends State<UsageScreen> {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
           children: [
             SectionLabel(tr('GripHub account'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
-            AccountCard(account: a, error: _accountError, budget: _budget.toDouble()),
+            AccountCard(
+              account: a,
+              error: _accountError,
+              budget: _budget.toDouble(),
+              onRetry: () => _loadAccount(force: true),
+            ),
             if (a != null && a.byModel.isNotEmpty) ...[
               SectionLabel(tr('Charged by model')),
               _byModelReal(context, a),
@@ -270,7 +276,7 @@ class _UsageScreenState extends State<UsageScreen> {
             ),
             const SizedBox(height: 10),
             if (_error != null)
-              SurfaceCard(child: Text('$_error', style: text.bodySmall?.copyWith(color: p.danger)))
+              SurfaceCard(child: ErrorNotice(error: _error, onRetry: _load))
             else if (rows == null)
               const Padding(padding: EdgeInsets.all(40), child: Center(child: BusySpinner.page()))
             else
@@ -527,9 +533,10 @@ class _UsageScreenState extends State<UsageScreen> {
 /// The account: balance, today's spend against the budget, credit expiring
 /// next, and a low-balance warning. Every figure is the router's own.
 class AccountCard extends StatelessWidget {
-  const AccountCard({super.key, required this.account, this.error, this.budget = 0});
+  const AccountCard({super.key, required this.account, this.error, this.budget = 0, this.onRetry});
   final RouterAccount? account;
   final Object? error;
+  final VoidCallback? onRetry;
   final double budget;
 
   @override
@@ -540,7 +547,7 @@ class AccountCard extends StatelessWidget {
     if (a == null) {
       return SurfaceCard(
         child: error != null
-            ? Text(tr(error.toString()), style: text.bodySmall?.copyWith(color: p.danger))
+            ? ErrorNotice(error: error, onRetry: onRetry)
             : const Center(child: BusySpinner(size: 20)),
       );
     }

@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -132,7 +133,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
         _dirs = [];
         _git = {};
         _loading = false;
-        _loadError = e is AgentError && e.code == 'offline' ? tr('Not connected to the server.') : tr('$e');
+        _loadError = e is AgentError && e.code == 'offline' ? tr('Not connected to the server.') : friendlyError(e);
       });
     }
   }
@@ -174,7 +175,7 @@ class _FolderPickerState extends State<FolderPicker> with WidgetsBindingObserver
       _go(dir);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: ${friendlyError(e)}')));
       }
     }
   }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../agent/agent_client.dart';
 import '../agent/agent_fs.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'theme.dart';
 
 // Adapted from CoderRa's server mode (seseegy/coderra lib/ui/transfer_dialog.dart).
@@ -77,7 +78,7 @@ Future<T?> runTransfer<T>(
   } catch (e) {
     messenger
       ?..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$e')));
+      ..showSnackBar(SnackBar(content: Text(friendlyError(e))));
     return null;
   } finally {
     if (dialogOpen && navigator.mounted) navigator.pop();
