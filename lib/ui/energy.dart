@@ -37,6 +37,7 @@ class EnergyColors {
     halo: Color(0x297C3AED),
     success: Color(0xFF4ADE80),
     failure: Color(0xFFFF6369),
+    tailFloor: .12,
   );
 
   /// On white a light head disappears and a glow turns into haze: the same hues, deeper, and only a faint halo.
@@ -45,7 +46,7 @@ class EnergyColors {
     halo: Color(0x146D28D9),
     success: Color(0xFF16A34A),
     failure: Color(0xFFDC2626),
-    tailFloor: .25,
+    tailFloor: .35,
   );
 
   static EnergyColors of(BuildContext context) => Theme.of(context).brightness == Brightness.dark ? dark : light;
@@ -276,7 +277,7 @@ class _Comets {
       final hero = size >= energyHeroSize;
       // Big: the ring a little inside the square, as the near side of a tilted orbit comes out by about a fifth.
       // Small: the ring just inside the square, as thick as the spinner it replaces.
-      final width = hero ? (size * .04).clamp(1.8, 4.0).toDouble() : (size <= 12 ? 1.6 : (size * .13).clamp(2.0, 3.2).toDouble());
+      final width = hero ? (size * .055).clamp(2.0, 4.0).toDouble() : (size <= 12 ? 1.6 : (size * .13).clamp(2.0, 3.2).toDouble());
       final radius = hero ? size * .40 : size / 2 - width / 2 - .5;
       return _Comets._(
         size,
