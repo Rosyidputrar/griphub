@@ -404,6 +404,33 @@ void main() {
         expect(host.sent('job_stop').single['jobId'], 'j1');
       });
     }
+
+    testWidgets('a job card the host no longer knows says so, but only once the host\'s list was read', (tester) async {
+      final host = FakeHost();
+      host.answers['job_list'] = (_) => const [];
+      final agent = newAgent();
+      await tester.pump();
+      final e = AssistantEntry()..streaming = false;
+      final b = e.block(0, BlockKind.toolCall)
+        ..toolCallId = 'call-old'
+        ..toolName = 'background_job'
+        ..args = {'command': 'npm run build'};
+      b.buffer.write(jsonEncode(b.args));
+      final run = ToolRun('call-old')..status = ToolStatus.done;
+      Widget card() => Scaffold(body: ListView(children: [AssistantMessageView(e, tools: {'call-old': run}, agent: agent)]));
+
+      // Before the list was read, an empty store means "not loaded", not "lost".
+      agent.jobsLoaded = false;
+      await pumpLook(tester, const Look(), card(), height: 220);
+      expect(find.text('The host no longer tracks this job'), findsNothing);
+
+      // After a read that does not have it (a restarted host), the card says so instead of showing nothing.
+      await agent.refreshJobs();
+      await pumpLook(tester, const Look(), card(), height: 220);
+      expect(agent.jobsLoaded, isTrue);
+      expect(find.text('The host no longer tracks this job'), findsOneWidget);
+      expect(find.byType(JobClock), findsNothing);
+    });
   });
 
   group('git: a changed file\'s contents', () {

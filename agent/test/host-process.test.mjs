@@ -682,8 +682,10 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 	await c.call("auto_backup_configure", { key });
 	const made = (await c.call("auto_backup_now")).data.backups[0];
 
-	// The phone restores it.
+	// The phone restores it. A plain-text zip a dead host left behind is swept at start.
 	const dir = home(t);
+	mkdirSync(join(dir, ".pi", "agent", "griphub"), { recursive: true });
+	writeFileSync(join(dir, ".pi", "agent", "griphub", "restore-123.zip"), "leftover");
 	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);

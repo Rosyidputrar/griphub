@@ -1193,6 +1193,16 @@ class _ToolCallViewState extends State<ToolCallView> {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 6, 8),
               child: JobClock(job: job, onStop: job.running ? () => _stopJob(job.id) : null),
+            )
+          // The host forgets its jobs when it restarts (and keeps only a chat's latest ones): an old card says so
+          // instead of showing nothing, which would look like a job that never ended.
+          else if (b.toolName == 'background_job' && status == ToolStatus.done && (widget.agent?.jobsLoaded ?? false))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Text(
+                tr('The host no longer tracks this job'),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint),
+              ),
             ),
           // A picture the tool returned (a `read` of an image) is shown, folded or not; a tap opens it full screen.
           if (run != null && run.images.isNotEmpty)

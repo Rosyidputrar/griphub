@@ -1572,6 +1572,7 @@ const _id = <String, String>{
   // Live clock and background jobs
   'running': 'berjalan',
   'Background job': 'Pekerjaan latar',
+  'The host no longer tracks this job': 'Host tidak lagi melacak pekerjaan ini',
   'exit code {n}': 'kode keluar {n}',
   'time limit reached': 'batas waktu tercapai',
   'stopped': 'dihentikan',

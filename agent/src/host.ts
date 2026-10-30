@@ -13,7 +13,7 @@
  * stdout is reserved for protocol records; logs go to stderr.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -1851,6 +1851,11 @@ async function main() {
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(workspace, { recursive: true });
 	mkdirSync(stateDir, { recursive: true });
+	// A decrypted server backup (backup_restore_server) is a plain-text zip for a moment; a host that died mid-restore
+	// would leave it behind, so it is swept here.
+	for (const f of readdirSync(stateDir)) {
+		if (/^restore-\d+\.zip$/.test(f)) rmSync(join(stateDir, f), { force: true });
+	}
 
 	// Route every lookup through DNS-over-HTTPS (configurable in settings; a server defaults to its own resolver).
 	installDohLookup();

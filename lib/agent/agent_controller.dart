@@ -72,6 +72,10 @@ class AgentController extends ChangeNotifier {
   /// as a [JobEntry].
   final jobStore = JobStore();
 
+  /// Whether the host's job list was read at least once: until then, a card without a job is just not loaded yet, not
+  /// a job the host lost (it forgets them when it restarts).
+  bool jobsLoaded = false;
+
   /// When the running turn began, by this phone's clock (from the host's count when the app joins a turn already
   /// under way); null between turns. The chat's live clock counts from here.
   DateTime? turnStartedAt;
@@ -157,6 +161,7 @@ class AgentController extends ChangeNotifier {
   Future<void> refreshJobs() async {
     final list = await client.call<List>('job_list');
     jobStore.replaceAll(list.whereType<Map>().map((m) => m.cast<String, dynamic>()));
+    jobsLoaded = true;
     features.setJobsRunning(jobStore.running);
     notifyListeners();
   }
