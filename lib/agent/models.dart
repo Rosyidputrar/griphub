@@ -520,8 +520,11 @@ class TurnCost {
   int get cached => cacheRead + cacheWrite;
 }
 
+/// How a turn ended: its clock in the footer says so, not just how long it ran.
+enum TurnOutcome { done, stopped, failed }
+
 /// What the copy-and-model footer under an assistant reply shows, with how long the turn took when known.
-typedef TurnFooter = ({String text, String? model, TurnCost? cost, Duration? took});
+typedef TurnFooter = ({String text, String? model, TurnCost? cost, Duration? took, TurnOutcome outcome});
 
 /// Footers for a transcript, keyed by entry index. One turn (from a user
 /// message to the next) is several assistant messages — text, tools, more
@@ -555,6 +558,12 @@ Map<int, TurnFooter> turnFooters(List<ChatEntry> entries, {required bool busy}) 
       text: _replyText(answer),
       model: lastEntry.model ?? answer.model,
       took: lastEntry.turnMs == null ? null : Duration(milliseconds: lastEntry.turnMs!),
+      // A turn that was stopped or died on an error must not get the green "Done": say what happened instead.
+      outcome: lastEntry.aborted
+          ? TurnOutcome.stopped
+          : lastEntry.error != null
+          ? TurnOutcome.failed
+          : TurnOutcome.done,
       cost: requests.isEmpty
           ? null
           : TurnCost(

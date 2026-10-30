@@ -416,6 +416,7 @@ class AssistantMessageView extends StatelessWidget {
           model: model == null ? null : (modelLabel?.call(model) ?? model),
           cost: f.cost,
           took: f.took,
+          outcome: f.outcome,
           subagents: subagents.isEmpty
               ? null
               : (count: subagents.length, credits: subagents.any((c) => c.credits == null) ? null : subagents.fold<double>(0, (a, c) => a + c.credits!)),
@@ -512,11 +513,14 @@ typedef SubagentsCost = ({int count, double? credits});
 String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
 
 class _MessageFooter extends StatelessWidget {
-  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took});
+  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done});
   final String text;
   final String? model;
   final TurnCost? cost;
   final SubagentsCost? subagents;
+
+  /// How the turn ended; a stopped or failed one must not show the green Done.
+  final TurnOutcome outcome;
 
   /// How long the turn took: the live clock stopped at its end, by the tokens.
   final Duration? took;
@@ -541,7 +545,11 @@ class _MessageFooter extends StatelessWidget {
         if (took != null)
           Padding(
             padding: const EdgeInsets.only(right: 8),
-            child: LiveClock(label: tr('Done'), took: took, state: ClockState.done),
+            child: switch (outcome) {
+              TurnOutcome.done => LiveClock(label: tr('Done'), took: took, state: ClockState.done),
+              TurnOutcome.stopped => LiveClock(label: tr('Stopped'), took: took, state: ClockState.stopped),
+              TurnOutcome.failed => LiveClock(label: tr('Failed'), took: took, state: ClockState.failed),
+            },
           ),
         if (model != null)
           Text(

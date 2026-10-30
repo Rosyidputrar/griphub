@@ -241,6 +241,55 @@ void main() {
       });
     }
 
+    for (final look in _looks) {
+      testWidgets('golden: a stopped or failed turn\'s footer says so, not Done ${look.name}', (tester) async {
+        FakeHost();
+        // A turn the user stopped: its reply carries stopReason aborted and still has its duration.
+        final stopped = AssistantEntry()
+          ..applyMessage({
+            'content': [
+              {'type': 'text', 'text': 'Setengah jalan membuat halaman.'},
+            ],
+            'stopReason': 'aborted',
+            'griphubTurnMs': 902,
+          });
+        // A turn that died on a model error.
+        final failed = AssistantEntry()
+          ..applyMessage({
+            'content': [
+              {'type': 'text', 'text': 'Mencoba memanggil model.'},
+            ],
+            'stopReason': 'error',
+            'errorMessage': 'HTTP 500',
+            'griphubTurnMs': 14174,
+          });
+        final entries = [UserEntry('Buat halaman'), stopped, UserEntry('Coba lagi'), failed];
+        final footers = turnFooters(entries, busy: false);
+        await pumpLook(
+          tester,
+          look,
+          Scaffold(
+            body: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                AssistantMessageView(stopped, tools: const {}, footer: footers[1]),
+                const SizedBox(height: 14),
+                AssistantMessageView(failed, tools: const {}, footer: footers[3]),
+              ],
+            ),
+          ),
+          height: 420,
+        );
+        expect(footers[1]!.outcome, TurnOutcome.stopped);
+        expect(footers[3]!.outcome, TurnOutcome.failed);
+        expect(find.text(look.language == 'id' ? 'Berhenti' : 'Stopped'), findsWidgets);
+        expect(find.text(look.language == 'id' ? 'Gagal' : 'Failed'), findsWidgets);
+        expect(find.text(look.language == 'id' ? 'Selesai' : 'Done'), findsNothing);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('turn_footer_outcome_${look.name}')));
+      });
+    }
+
     testWidgets('the chat\'s clock counts from the host\'s, and a finished turn keeps its time', (tester) async {
       final host = FakeHost();
       final agent = newAgent();
