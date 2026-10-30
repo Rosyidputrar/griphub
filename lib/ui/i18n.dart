@@ -1560,4 +1560,22 @@ const _id = <String, String>{
   'Could not change approvals': 'Persetujuan gagal diubah',
   'Could not switch the model': 'Model gagal diganti',
   'Wait for the chat to finish updating.': 'Tunggu sampai chat selesai diperbarui.',
+  // Paste image, tool pictures, git file contents
+  'Paste image': 'Tempel gambar',
+  'The picture you copied': 'Gambar yang kamu salin',
+  'The clipboard has no picture to paste': 'Tidak ada gambar di clipboard untuk ditempel',
+  'Open picture': 'Buka gambar',
+  'File': 'File',
+  'This file is not in the folder.': 'File ini tidak ada di folder.',
+  'Too large to show here ({size}).': 'Terlalu besar untuk ditampilkan di sini ({size}).',
+  'Binary file ({size}), not shown as text.': 'File biner ({size}), tidak ditampilkan sebagai teks.',
+  // Live clock and background jobs
+  'running': 'berjalan',
+  'Background job': 'Pekerjaan latar',
+  'exit code {n}': 'kode keluar {n}',
+  'time limit reached': 'batas waktu tercapai',
+  'stopped': 'dihentikan',
+  'It printed nothing.': 'Tidak ada output.',
+  'Staged changes': 'Perubahan yang di-stage',
+  'Unstaged changes': 'Perubahan yang belum di-stage',
 };

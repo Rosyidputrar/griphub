@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import '../agent/features.dart';
@@ -103,6 +104,27 @@ Attachment pastedAttachment(String text) {
   return Attachment(file.path, pastedName, mime: 'text/plain');
 }
 
+/// What a pasted picture is called; the type decides the extension.
+const pastedImageStem = 'pasted-image';
+
+/// Writes a picture pasted from the keyboard (its bytes and type) to a file and returns it as an attachment, like
+/// [pastedAttachment] does for long text.
+Attachment pastedImageAttachment(Uint8List bytes, String mime) {
+  final ext = switch (mime) {
+    'image/jpeg' => 'jpg',
+    'image/webp' => 'webp',
+    'image/gif' => 'gif',
+    _ => 'png',
+  };
+  final dir = Directory('${Directory.systemTemp.path}/griphub-paste/${DateTime.now().microsecondsSinceEpoch}')
+    ..createSync(recursive: true);
+  final file = File('${dir.path}/$pastedImageStem.$ext')..writeAsBytesSync(bytes);
+  return Attachment(file.path, '$pastedImageStem.$ext', mime: mime);
+}
+
+/// The picture types a keyboard may paste into the composer.
+const pasteImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
 /// Pictures go to the model as images; other files are copied into the
 /// project's `.attachments/` folder and referenced by path in the message.
 /// Every attachment is ALSO copied there (with a unique name, so two
@@ -164,7 +186,10 @@ int _fileSize(File file) {
   }
 }
 
-Future<List<Attachment>> pickAttachments(BuildContext context) async {
+/// Asks where to attach from. With [client], a picture on the clipboard is offered too ("Paste image").
+Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
+  final clipboardImage = await client?.clipboardHasImage() ?? false;
+  if (!context.mounted) return const [];
   final choice = await showModalBottomSheet<String>(
     context: context,
     builder: (context) => SafeArea(
@@ -193,6 +218,14 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
               subtitle: tr('PDFs, code, data, anything'),
               onTap: () => Navigator.pop(context, 'files'),
             ),
+            if (clipboardImage)
+              SettingsRow(
+                icon: LucideIcons.clipboardPaste,
+                color: const Color(0xFF8E4EC6),
+                title: tr('Paste image'),
+                subtitle: tr('The picture you copied'),
+                onTap: () => Navigator.pop(context, 'clipboard'),
+              ),
           ],
         ),
       ),
@@ -206,6 +239,9 @@ Future<List<Attachment>> pickAttachments(BuildContext context) async {
     case 'camera':
       final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 2048);
       return x == null ? [] : [Attachment(x.path, x.name, mime: x.mimeType)];
+    case 'clipboard':
+      final image = await client?.clipboardImage();
+      return image == null ? const [] : [Attachment(image['path']!, image['name']!, mime: image['mime'])];
     case 'files':
       final files = await FilePicker.pickFiles();
       return [

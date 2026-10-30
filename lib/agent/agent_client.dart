@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'agent_backend.dart';
 import 'drafts.dart';
@@ -243,6 +244,25 @@ class AgentClient {
   /// Copies a file into the phone's Download/GripHub folder; returns where it landed.
   Future<String> saveToDownloads(String path) async =>
       (await _method.invokeMethod<String>('saveToDownloads', {'path': path}))!;
+
+  /// Whether the clipboard holds a picture (for the composer's "Paste image"). False where there is no platform side.
+  Future<bool> clipboardHasImage() async {
+    try {
+      return await _method.invokeMethod<bool>('clipboardHasImage') ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// A copy of the clipboard's picture on the phone (`path`, `name`, `mime`), or null when there is none or it cannot
+  /// be read.
+  Future<Map<String, String>?> clipboardImage() async {
+    try {
+      return (await _method.invokeMethod<Map>('clipboardImage'))?.cast<String, String>();
+    } on MissingPluginException {
+      return null;
+    }
+  }
 
   /// Opens the system page where the user grants "All files access".
   Future<void> requestStorageAccess() => _method.invokeMethod('requestStorageAccess');

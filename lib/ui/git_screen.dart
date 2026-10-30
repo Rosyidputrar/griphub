@@ -1,9 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/agent_fs.dart';
 import '../agent/features.dart';
+import '../agent/updater.dart' show formatBytes;
+import 'attachment_viewer.dart';
+import 'code_view.dart';
 import 'diff_view.dart';
 import 'illustration.dart';
 import 'kit.dart';
@@ -199,7 +205,14 @@ class _GitScreenState extends State<GitScreen> {
         initialChildSize: 0.75,
         maxChildSize: 0.95,
         builder: (context, scroll) =>
-            _DiffSheet(features: _f, file: file, staged: section == _Section.staged, scroll: scroll),
+            _DiffSheet(
+              features: _f,
+              fs: widget.agent.fs,
+              root: _status?.root ?? widget.agent.cwd,
+              file: file,
+              staged: section == _Section.staged,
+              scroll: scroll,
+            ),
       ),
     );
   }
@@ -344,10 +357,19 @@ class _GitScreenState extends State<GitScreen> {
               Pill('${s.ahead}', icon: LucideIcons.arrowUp, color: s.ahead > 0 ? p.accentAlt : null),
               const SizedBox(width: 6),
               Pill('${s.behind}', icon: LucideIcons.arrowDown, color: s.behind > 0 ? p.warning : null),
-              const Spacer(),
-              _SmallButton(icon: LucideIcons.download, label: tr('Pull'), onTap: () => _pullPush(push: false)),
               const SizedBox(width: 8),
-              _SmallButton(icon: LucideIcons.upload, label: tr('Push'), onTap: () => _pullPush(push: true)),
+              // On a narrow phone or with large text the buttons go under each other instead of running off.
+              Expanded(
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _SmallButton(icon: LucideIcons.download, label: tr('Pull'), onTap: () => _pullPush(push: false)),
+                    _SmallButton(icon: LucideIcons.upload, label: tr('Push'), onTap: () => _pullPush(push: true)),
+                  ],
+                ),
+              ),
             ],
           ),
         ],
@@ -969,8 +991,21 @@ class _BranchSheetState extends State<BranchSheet> {
 }
 
 class _DiffSheet extends StatefulWidget {
-  const _DiffSheet({required this.features, required this.file, required this.staged, required this.scroll});
+  const _DiffSheet({
+    required this.features,
+    required this.fs,
+    required this.root,
+    required this.file,
+    required this.staged,
+    required this.scroll,
+  });
   final Features features;
+
+  /// The agent's files, where the changed file is read from (this phone, or the server).
+  final AgentFs fs;
+
+  /// The repository's top folder: [file]'s path starts there.
+  final String root;
   final GitFile file;
   final bool staged;
   final ScrollController scroll;
@@ -979,37 +1014,145 @@ class _DiffSheet extends StatefulWidget {
   State<_DiffSheet> createState() => _DiffSheetState();
 }
 
+enum _DiffMode { changes, file }
+
 class _DiffSheetState extends State<_DiffSheet> {
   late final Future<String> _patch = widget.features.gitDiff(file: widget.file.path, staged: widget.staged);
+
+  /// Pictures and other binary files say nothing as a diff, and an untracked file has none: those open on the file.
+  late _DiffMode _mode = _isImage(widget.file.path) || widget.file.untracked ? _DiffMode.file : _DiffMode.changes;
+
+  String get _fullPath => joinPath(widget.root, widget.file.path);
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final deleted = widget.file.code.contains('D');
     return ListView(
       controller: widget.scroll,
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
       children: [
         Text(widget.file.path, style: text.titleMedium?.copyWith(fontFamily: mono)),
         const SizedBox(height: 4),
-        Text(widget.staged ? 'Staged changes' : 'Unstaged changes', style: text.bodySmall),
-        const SizedBox(height: 14),
-        FutureBuilder<String>(
-          future: _patch,
-          builder: (context, snap) {
-            if (snap.hasError) return Text('${snap.error}', style: text.bodySmall);
-            if (!snap.hasData) {
-              return const Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              );
-            }
-            if (snap.data!.trim().isEmpty && widget.file.untracked) {
-              return Text(tr('New untracked file. Stage it to see its contents as a diff.'), style: text.bodySmall);
-            }
-            return DiffView(patch: snap.data!);
-          },
-        ),
+        Text(tr(widget.staged ? 'Staged changes' : 'Unstaged changes'), style: text.bodySmall),
+        const SizedBox(height: 12),
+        if (!deleted) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: PillSegments<_DiffMode>(
+              value: _mode,
+              options: {_DiffMode.changes: tr('Changes'), _DiffMode.file: tr('File')},
+              icons: const {_DiffMode.changes: LucideIcons.gitCompare, _DiffMode.file: LucideIcons.fileText},
+              onChanged: (m) => setState(() => _mode = m),
+              expand: false,
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+        if (_mode == _DiffMode.file && !deleted)
+          _ChangedFileContent(fs: widget.fs, path: _fullPath)
+        else
+          FutureBuilder<String>(
+            future: _patch,
+            builder: (context, snap) {
+              if (snap.hasError) return Text('${snap.error}', style: text.bodySmall);
+              if (!snap.hasData) {
+                return const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snap.data!.trim().isEmpty && widget.file.untracked) {
+                return Text(tr('New untracked file. Stage it to see its contents as a diff.'), style: text.bodySmall);
+              }
+              return DiffView(patch: snap.data!);
+            },
+          ),
       ],
+    );
+  }
+}
+
+const _imageExts = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'};
+
+bool _isImage(String path) {
+  final dot = path.lastIndexOf('.');
+  return dot > 0 && _imageExts.contains(path.substring(dot + 1).toLowerCase());
+}
+
+/// A changed file as it is in the folder now: a picture as a picture (a tap opens it full screen), text in full, and
+/// for anything else what it is and how big.
+class _ChangedFileContent extends StatefulWidget {
+  const _ChangedFileContent({required this.fs, required this.path});
+  final AgentFs fs;
+  final String path;
+
+  /// Text larger than this is not laid out here (it would stall the sheet); the editor opens it.
+  static const maxTextBytes = 256 * 1024;
+
+  @override
+  State<_ChangedFileContent> createState() => _ChangedFileContentState();
+}
+
+class _ChangedFileContentState extends State<_ChangedFileContent> {
+  /// The file's text, or why it is not shown as text (the message, and the size when known).
+  late final Future<({String? text, String? message, int size})> _loaded = _load();
+
+  Future<({String? text, String? message, int size})> _load() async {
+    final st = await widget.fs.stat(widget.path);
+    if (!st.exists || st.isDir) return (text: null, message: tr('This file is not in the folder.'), size: 0);
+    if (_isImage(widget.path)) return (text: null, message: null, size: st.size);
+    if (st.size > _ChangedFileContent.maxTextBytes) {
+      return (text: null, message: tr('Too large to show here ({size}).').replaceAll('{size}', formatBytes(st.size)), size: st.size);
+    }
+    final bytes = await widget.fs.read(widget.path);
+    // A NUL byte: not text. Shown as what it is rather than as garbage.
+    if (bytes.contains(0)) {
+      return (text: null, message: tr('Binary file ({size}), not shown as text.').replaceAll('{size}', formatBytes(st.size)), size: st.size);
+    }
+    return (text: utf8.decode(bytes, allowMalformed: true), message: null, size: st.size);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    final name = widget.path.split('/').last;
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : '';
+    return FutureBuilder(
+      future: _loaded,
+      builder: (context, snap) {
+        if (snap.hasError) return Text('${snap.error}', style: text.bodySmall?.copyWith(color: p.danger));
+        final loaded = snap.data;
+        if (loaded == null) {
+          return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
+        }
+        if (loaded.message != null) return Text(loaded.message!, style: text.bodySmall);
+        if (loaded.text == null) {
+          return Semantics(
+            button: true,
+            label: '${tr('Open picture')} $name',
+            child: GestureDetector(
+              onTap: () => openAttachmentViewer(
+                context,
+                (path: widget.path, name: name, mime: null, size: loaded.size),
+                fs: widget.fs,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(Radii.md),
+                child: AgentImage(
+                  fs: widget.fs,
+                  path: widget.path,
+                  maxBytes: AttachmentViewerScreen.maxImageBytes,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => Text(tr('Preview is not available for this file'), style: text.bodySmall),
+                ),
+              ),
+            ),
+          );
+        }
+        return CodeBox(text: loaded.text!, label: name, language: ext.isEmpty ? null : ext);
+      },
     );
   }
 }

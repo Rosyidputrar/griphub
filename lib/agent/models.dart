@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'sent_attachments.dart';
 
@@ -198,6 +199,10 @@ class AssistantEntry extends ChatEntry {
   /// This model request's usage, once the message is final (null while streaming, or for a message without it).
   RequestUsage? usage;
 
+  /// How long the whole turn took, on a turn's last reply once it is over (from the host: live at the turn's end, and
+  /// kept with the chat).
+  int? turnMs;
+
   List<Block> get orderedBlocks {
     final keys = blocks.keys.toList()..sort();
     return [for (final k in keys) blocks[k]!];
@@ -226,6 +231,7 @@ class AssistantEntry extends ChatEntry {
     streaming = false;
     model = message['model'] as String?;
     usage = RequestUsage.fromMessage(message);
+    turnMs = (message['griphubTurnMs'] as num?)?.toInt() ?? turnMs;
     final stop = message['stopReason'];
     aborted = stop == 'aborted';
     if (stop == 'error') error = readableError(message['errorMessage'] as String? ?? 'The model returned an error.');
@@ -253,6 +259,23 @@ class NoticeEntry extends ChatEntry {
   final bool error;
 }
 
+/// A background job's result coming back to its chat: a notice, not a bubble (the user did not send it), and the start
+/// of the turn in which the agent carries on with it.
+class JobEntry extends ChatEntry {
+  JobEntry(this.job);
+
+  /// The job as it was when it ended (agent/src/jobs.ts `jobWire`).
+  final Map<String, dynamic> job;
+
+  String get id => job['id'] as String? ?? '';
+  String get label => job['label'] as String? ?? job['command'] as String? ?? '';
+  String get status => job['status'] as String? ?? 'done';
+  int? get exitCode => (job['exitCode'] as num?)?.toInt();
+  Duration get took => Duration(milliseconds: (job['elapsedMs'] as num?)?.toInt() ?? 0);
+  String get tail => job['tail'] as String? ?? '';
+  String get command => job['command'] as String? ?? '';
+}
+
 enum ToolStatus { running, done, failed }
 
 class ToolRun {
@@ -260,6 +283,32 @@ class ToolRun {
   final String id;
   ToolStatus status = ToolStatus.running;
   String output = '';
+
+  /// Pictures in the result (a `read` of an image): shown as thumbnails on the tool's card.
+  List<ToolImage> images = const [];
+}
+
+/// A picture a tool returned, decoded once.
+typedef ToolImage = ({Uint8List bytes, String mimeType});
+
+/// Pictures a card shows at most; a result with more says how many there were.
+const maxToolImages = 4;
+
+/// The pictures in a tool result's [content] (`{type: image, data: <base64>, mimeType}` blocks). Blocks that do not
+/// decode are skipped.
+List<ToolImage> contentImageData(dynamic content) {
+  if (content is! List) return const [];
+  final out = <ToolImage>[];
+  for (final c in content.whereType<Map>()) {
+    if (c['type'] != 'image' || c['data'] is! String) continue;
+    try {
+      out.add((bytes: base64Decode(c['data'] as String), mimeType: c['mimeType'] as String? ?? 'image/png'));
+    } on FormatException {
+      continue;
+    }
+    if (out.length == maxToolImages) break;
+  }
+  return out;
 }
 
 String contentText(dynamic content) {
@@ -292,6 +341,7 @@ String toolSummary(String? name, Map<String, dynamic>? args) {
     'read' || 'write' || 'edit' || 'ls' => _shortPath(pick(['path', 'file_path'])),
     'grep' => pick(['pattern']),
     'find' => pick(['pattern', 'path']),
+    'background_job' => pick(['label', 'command']),
     _ => null,
   };
   return (value ?? jsonEncode(args)).split('\n').first;
@@ -470,8 +520,8 @@ class TurnCost {
   int get cached => cacheRead + cacheWrite;
 }
 
-/// What the copy-and-model footer under an assistant reply shows.
-typedef TurnFooter = ({String text, String? model, TurnCost? cost});
+/// What the copy-and-model footer under an assistant reply shows, with how long the turn took when known.
+typedef TurnFooter = ({String text, String? model, TurnCost? cost, Duration? took});
 
 /// Footers for a transcript, keyed by entry index. One turn (from a user
 /// message to the next) is several assistant messages — text, tools, more
@@ -504,6 +554,7 @@ Map<int, TurnFooter> turnFooters(List<ChatEntry> entries, {required bool busy}) 
     out[tail] = (
       text: _replyText(answer),
       model: lastEntry.model ?? answer.model,
+      took: lastEntry.turnMs == null ? null : Duration(milliseconds: lastEntry.turnMs!),
       cost: requests.isEmpty
           ? null
           : TurnCost(
@@ -518,13 +569,25 @@ Map<int, TurnFooter> turnFooters(List<ChatEntry> entries, {required bool busy}) 
   }
 
   for (var i = 0; i < entries.length; i++) {
-    if (entries[i] is UserEntry) {
+    // A background job's result starts a turn too: the agent goes on with it without a message from the user.
+    if (entries[i] is UserEntry || entries[i] is JobEntry) {
       close(i, last: false);
       start = i + 1;
     }
   }
   close(entries.length, last: true);
   return out;
+}
+
+/// Tokens the running turn has used so far: its finished model requests since the last user message (or job result).
+int turnTokensSoFar(List<ChatEntry> entries) {
+  var tokens = 0;
+  for (final e in entries.reversed) {
+    if (e is UserEntry || e is JobEntry) break;
+    final u = e is AssistantEntry ? e.usage : null;
+    if (u != null) tokens += u.input + u.output + u.cacheRead + u.cacheWrite;
+  }
+  return tokens;
 }
 
 String _replyText(AssistantEntry e) => [

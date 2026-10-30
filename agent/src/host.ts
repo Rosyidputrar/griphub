@@ -36,6 +36,7 @@ import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
 import { Integrations, type Log, run } from "./integrations.js";
+import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
 import { Mcp } from "./mcp.js";
@@ -97,6 +98,7 @@ let mcp: Mcp;
 let customProviders: CustomProviders;
 let sync: GitHubSync;
 let subagents: SubagentManager;
+let jobs: Jobs;
 let router: Router;
 let fsService: Fs;
 let preview: Preview;
@@ -256,6 +258,12 @@ function notifyFor(record: Record<string, any>) {
 			}
 			return;
 		}
+		case "job":
+			if (record.job?.status === "done") void notifier.send("job_done", "Background job finished", { tags: ["white_check_mark"] });
+			else if (record.job?.status === "failed" || record.job?.status === "timeout") {
+				void notifier.send("job_failed", "Background job failed", { priority: 4, tags: ["x"] });
+			}
+			return;
 		case "subagent_approval_request":
 			if (integrations?.settings.subagentNotifyApproval !== false) {
 				void notifier.send("subagent_approval", "Subagent needs approval", { priority: 4, tags: ["raised_hand"] });
@@ -338,6 +346,8 @@ function state() {
 		billingNotice: billingNotice(),
 		planMode: guard.planMode,
 		approvalMode: guard.mode,
+		// How long the running turn has taken so far, by this host's clock (the app counts on from there).
+		turnElapsedMs: turnStartedAt === null ? null : Date.now() - turnStartedAt,
 	};
 }
 
@@ -371,7 +381,7 @@ async function buildSession(
 		resourceLoader,
 		// "subagent" must be named here: the SDK drops custom tools whose
 		// name is not in this allow-list (that is why 1.0.42 never showed it).
-		tools: [...TOOLS, ...(opts.interactive ? ["subagent"] : []), ...mcpTools.map((t) => t.name)],
+		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...mcpTools.map((t) => t.name)],
 		customTools: [
 			...webTools(
 				() => ({
@@ -391,6 +401,8 @@ async function buildSession(
 			// only: background runs and subagent sessions never get this tool,
 			// so a subagent can never spawn another one.
 			...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
+			// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
+			...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
 		] as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
@@ -489,6 +501,7 @@ async function openSession(sessionManager: SessionManager) {
 	unsubscribe?.();
 	guard.cancelAll();
 	session?.dispose();
+	turnStartedAt = null;
 	// Queued follow-ups belong to the chat being left (pi drops them with it).
 	promptQueue.clear();
 	const result = await buildSession(sessionManager, {
@@ -501,6 +514,8 @@ async function openSession(sessionManager: SessionManager) {
 		onSessionEvent(event);
 	});
 	if (result.modelFallbackMessage) send({ type: "notice", message: result.modelFallbackMessage });
+	// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
+	setTimeout(deliverJobs, 0);
 	return state();
 }
 
@@ -519,18 +534,100 @@ function onSessionEvent(event: AgentSessionEvent) {
 		const m = (event as any).message;
 		if (m?.role === "assistant" && m.stopReason === "error") void tryFallback(String(m.errorMessage ?? ""));
 	}
+	if (event.type === "agent_start" && turnStartedAt === null) turnStartedAt = Date.now();
 	if (event.type === "agent_end" || (event as any).type === "agent_settled") {
 		const text = session?.getLastAssistantText?.() ?? "";
+		const over = (event as any).type === "agent_settled" && !session?.isStreaming && !fallbackPending;
+		const turnMs = over && turnStartedAt !== null ? Date.now() - turnStartedAt : undefined;
+		if (over) {
+			if (turnMs !== undefined) recordTurnTime(turnMs);
+			turnStartedAt = null;
+		}
 		send({
 			type: "agent_done",
 			sessionFile: session?.sessionFile ?? null,
 			preview: text.slice(0, 200),
 			// A fallback model is taking over (or already running): not finished, and not failed.
 			retrying: fallbackPending || !!session?.isStreaming,
+			...(turnMs !== undefined && { turnMs }),
 		});
 		// Sync a little after the turn, so a quick follow-up doesn't cause two pushes.
 		sync?.schedule(90_000);
+		// A job that ended while this turn ran calls the chat back now.
+		if (over) deliverJobs();
 	}
+}
+
+// ---------------------------------------------------------------------------
+// How long turns take, and background jobs calling their chat back
+
+/** When the open chat's running turn began (its first agent_start), or null between turns. */
+let turnStartedAt: number | null = null;
+
+/** Session entry type that keeps a turn's duration with the chat. It is not a message: the model never sees it. */
+const TURN_TIME = "griphub_turn";
+
+/** Keeps how long the turn took next to its last reply, so the chat shows it again when reopened. */
+function recordTurnTime(ms: number) {
+	const s = session;
+	const last = (s?.messages as any[] | undefined)?.findLast((m) => m.role === "assistant");
+	if (!s || !last?.timestamp) return;
+	try {
+		s.sessionManager.appendCustomEntry(TURN_TIME, { at: last.timestamp, ms });
+	} catch (e) {
+		log("turn time:", (e as Error).message);
+	}
+}
+
+/** Turn durations of the open chat, by the timestamp of each turn's last reply. */
+function turnTimes(s: AgentSession): Map<number, number> {
+	const out = new Map<number, number>();
+	for (const e of s.sessionManager.getBranch() as any[]) {
+		if (e.type === "custom" && e.customType === TURN_TIME && typeof e.data?.at === "number") out.set(e.data.at, e.data.ms);
+	}
+	return out;
+}
+
+/** Message type of a job's result in the chat: shown by the app as a notice, read by the model as a message. */
+const JOB_MESSAGE = "griphub_job";
+
+/** Jobs that ended and have not called their chat back yet (it was busy, or another chat was open). */
+const finishedJobs: JobRecord[] = [];
+
+/**
+ * Calls the open chat back with the jobs of it that ended, once it is idle: one turn for all of them, with no message
+ * from the user. Waits while it works (its turn ends first) and while another chat is open (it is called back when it
+ * is opened again). Never past the daily budget or onto a full disk: the results are then added without a turn, and
+ * the user is told why the agent did not go on.
+ */
+async function deliverJobs() {
+	const s = session;
+	if (!s || s.isStreaming || fallbackPending) return;
+	const key = s.sessionFile ?? s.sessionId;
+	const mine = finishedJobs.filter((j) => j.sessionFile === key);
+	if (!mine.length) return;
+	for (const j of mine) finishedJobs.splice(finishedJobs.indexOf(j), 1);
+	let held = budgetError();
+	if (!held) {
+		try {
+			await health.assertRoom();
+		} catch (e) {
+			held = (e as Error).message;
+		}
+	}
+	try {
+		for (const [i, job] of mine.entries()) {
+			const lastOne = i === mine.length - 1;
+			await s.sendCustomMessage(
+				{ customType: JOB_MESSAGE, content: jobReport(job), display: true, details: { job: jobWire(job) } },
+				{ triggerTurn: lastOne && !held },
+			);
+		}
+	} catch (e) {
+		send({ type: "error", message: `Could not continue after the background job: ${(e as Error).message}` });
+		return;
+	}
+	if (held) send({ type: "notice", message: `The background job ended, but the agent did not continue: ${held}` });
 }
 
 function messageText(m: any): string {
@@ -1055,6 +1152,12 @@ async function handle(cmd: Command): Promise<unknown> {
 		// What is still waiting for an answer, chat and subagents alike: an app that reconnects shows these again.
 		case "approvals_pending":
 			return [...guard.pendingApprovals(), ...subagents.pendingApprovals()];
+
+		// Background jobs (jobs.ts): the agent starts them with its `background_job` tool; the app lists and stops them.
+		case "job_list":
+			return jobs.list(cmd.sessionFile).map((j) => jobWire(j));
+		case "job_stop":
+			return jobWire(jobs.stop(String(cmd.jobId)));
 		case "host_restart":
 			if (!listenPath) throw new Error("Restarting is only available when the host runs as a daemon on a server");
 			return restartGate.request(cmd.whenIdle !== false);
@@ -1227,8 +1330,15 @@ async function handle(cmd: Command): Promise<unknown> {
 			return projectDeleteCheck(cmd.path);
 		case "delete_project":
 			return deleteProject(cmd.path, !!cmd.deleteChats);
-		case "messages":
-			return s.messages.map(withCost);
+		case "messages": {
+			// Each turn's last reply carries how long the turn took, when the chat kept it.
+			const times = turnTimes(s);
+			return s.messages.map((m: any) => {
+				const out = withCost(m);
+				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
+				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
+			});
+		}
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":
@@ -1629,6 +1739,7 @@ function isIdle(): boolean {
 		!session?.isStreaming &&
 		guard.pendingApprovals().length === 0 &&
 		!subagents?.busy() &&
+		!jobs?.busy() &&
 		!runs?.running &&
 		!runs?.runs.some((r) => r.status === "queued")
 	);
@@ -1654,6 +1765,7 @@ async function shutdown(code = 0) {
 	if (shuttingDown) return;
 	shuttingDown = true;
 	tunnels.stopAll();
+	jobs?.stopAll();
 	health.stop();
 	preview?.stopAll();
 	// The phone's app force-kills the host 1.5 s after closing stdin (AgentRuntime.stop), so it only waits long enough for
@@ -1752,6 +1864,14 @@ async function main() {
 				minutesLimit: st.subagentMinutesLimit ?? 30,
 				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
 			};
+		},
+	});
+	jobs = new Jobs({
+		send: (r) => send(r),
+		shellPath: () => settingsManager.getShellPath(),
+		finished: (job) => {
+			finishedJobs.push(job);
+			void deliverJobs();
 		},
 	});
 	// On a server, bash runs inside the rootless container once it has been set up (server/box/box), unless the user

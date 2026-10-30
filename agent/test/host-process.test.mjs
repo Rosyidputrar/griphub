@@ -3,7 +3,7 @@
 // shuts down cleanly). server_agent.md, phase 1.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -275,9 +275,9 @@ test("server mode: a second daemon on the same socket is refused", async (t) => 
 const mockRouter = pathToFileURL(join(here, "fixtures", "mock-router.mjs")).href;
 
 /** A daemon on the mock router with a GripHub key and model, connected and resumed. */
-async function withModel(t) {
+async function withModel(t, extra = {}) {
 	const dir = home(t);
-	const mock = { MOCK_LOG: join(dir, "mock.log"), MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Separuh laporan: 3 dari 5 berkas diperiksa." };
+	const mock = { MOCK_LOG: join(dir, "mock.log"), MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Separuh laporan: 3 dari 5 berkas diperiksa.", ...extra };
 	const d = daemon(t, dir, mock, ["--import", mockRouter]);
 	await started(d);
 	const c = await dial(d.sock);
@@ -568,4 +568,65 @@ test("server mode: schedules run on the phone's clock: the app gives its offset,
 
 	const again = await connected(t, dir, { TZ: "UTC" });
 	assert.equal((await again.c.call("health")).data.clock.offsetMinutes, 420);
+});
+
+// ---------------------------------------------------------------------------
+// Background jobs call their chat back, as a turn of its own with no message from the user
+
+test("a background job's result calls its chat back with no user message, and turns keep how long they took", async (t) => {
+	const tool = { name: "background_job", arguments: { command: "sleep 1; echo build-ok", label: "Build" } };
+	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool) });
+	const sent = await m.c.call("prompt", { text: "Bangun aplikasinya di latar" });
+	assert.equal(sent.ok, true, sent.error);
+
+	// The tool returns at once: the turn ends while the job still runs.
+	const started = await m.c.until((r) => r.type === "job" && r.job.status === "running", 30_000, "for the job to start");
+	assert.equal(started.job.label, "Build");
+	assert.equal(started.job.command, "sleep 1; echo build-ok");
+	assert.ok(started.job.toolCallId, "the job knows its tool call, for the card");
+	const firstDone = await m.c.until((r) => r.type === "agent_done" && typeof r.turnMs === "number", 30_000, "for the first turn");
+	assert.ok(firstDone.turnMs >= 0);
+
+	// The job ends; its chat goes on by itself.
+	const ended = await m.c.until((r) => r.type === "job" && r.job.status === "done", 30_000, "for the job to end");
+	assert.equal(ended.job.exitCode, 0);
+	assert.match(ended.job.tail, /build-ok/);
+	assert.ok(ended.job.elapsedMs >= 900, "how long it ran, by the host's clock");
+	const notice = await m.c.until(
+		(r) => r.type === "event" && r.event.type === "message_start" && r.event.message.role === "custom",
+		30_000,
+		"for the job's message",
+	);
+	assert.equal(notice.event.message.customType, "griphub_job");
+	assert.equal(notice.event.message.details.job.id, ended.job.id);
+	const reply = await m.c.until(
+		(r) => r.type === "event" && r.event.type === "message_end" && r.event.message.role === "assistant" && /Job said/.test(JSON.stringify(r.event.message.content)),
+		30_000,
+		"for the agent to answer the job",
+	);
+	assert.match(JSON.stringify(reply.event.message.content), /build-ok/, "the agent got the output");
+	await m.c.until((r) => r.type === "agent_done" && typeof r.turnMs === "number" && r.seq > firstDone.seq, 30_000, "for the second turn");
+
+	// In the chat: one user message (the user's), the job's own message, and each turn's time on its last reply.
+	const history = (await m.c.call("messages")).data;
+	assert.equal(history.filter((x) => x.role === "user").length, 1, "the callback is not a user message");
+	assert.equal(history.filter((x) => x.role === "custom" && x.customType === "griphub_job").length, 1);
+	assert.equal(history.filter((x) => x.role === "assistant" && typeof x.griphubTurnMs === "number").length, 2, "both turns kept their time");
+	assert.deepEqual((await m.c.call("job_list")).data.map((j) => j.status), ["done"]);
+});
+
+test("a background job can be stopped, and stops what it started; its chat is told it was stopped", async (t) => {
+	const tool = { name: "background_job", arguments: { command: "sleep 600 & sleep 600; wait" } };
+	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool) });
+	await m.c.call("prompt", { text: "Jalankan" });
+	const started = await m.c.until((r) => r.type === "job" && r.job.status === "running", 30_000, "for the job");
+	await m.c.until((r) => r.type === "agent_done" && typeof r.turnMs === "number", 30_000, "for the turn");
+	const stopped = await m.c.call("job_stop", { jobId: started.job.id });
+	assert.equal(stopped.ok, true, stopped.error);
+	const ended = await m.c.until((r) => r.type === "job" && r.job.status === "stopped", 10_000, "for the job to stop");
+	assert.equal(ended.job.id, started.job.id);
+	const notice = await m.c.until((r) => r.type === "event" && r.event.type === "message_start" && r.event.message.role === "custom", 30_000, "for the message");
+	assert.match(JSON.stringify(notice.event.message.content), /stopped by the user/);
+	// Nothing of it is left running (the job's own sleeps; no other test starts "sleep 600").
+	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === "sleep 600"), 10_000);
 });

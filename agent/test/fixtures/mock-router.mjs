@@ -8,6 +8,8 @@
 //
 // With MOCK_TOOL set (JSON: {"name":"bash","arguments":{...}}) the first reply calls that tool instead, and the reply
 // after the tool's result repeats the result ("Tool said: ..."), so a test can see what the host did with the call.
+// A background job's result coming back to the chat (a message of its own, not a tool result) is answered with
+// "Job said: ..." instead of calling the tool again.
 import { appendFileSync, existsSync } from "node:fs";
 
 const ROUTER = "https://griphubrouter.web.id/v1";
@@ -27,9 +29,12 @@ globalThis.fetch = async (input, init) => {
 	const request = JSON.parse(typeof init?.body === "string" ? init.body : await new Response(init?.body ?? (input instanceof Request ? input.body : null)).text());
 	const last = request.messages?.at(-1);
 	if (process.env.MOCK_TOOL) {
+		const said = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
 		const lines =
 			last?.role === "tool"
-				? [chunk({ role: "assistant", content: `Tool said: ${typeof last.content === "string" ? last.content : JSON.stringify(last.content)}` }, "stop")]
+				? [chunk({ role: "assistant", content: `Tool said: ${said}` }, "stop")]
+				: said.includes("[Background job")
+				? [chunk({ role: "assistant", content: `Job said: ${said}` }, "stop")]
 				: (() => {
 						const { name, arguments: args } = JSON.parse(process.env.MOCK_TOOL);
 						const call = { index: 0, id: "call_1", type: "function", function: { name, arguments: JSON.stringify(args) } };

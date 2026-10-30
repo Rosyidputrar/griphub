@@ -69,7 +69,7 @@ class FakeHost {
           notifications.add((call.arguments as Map).cast<String, dynamic>());
           return null;
         default:
-          return null;
+          return methods[call.method]?.call(call);
       }
     });
     m.setMockStreamHandler(
@@ -107,6 +107,9 @@ class FakeHost {
     'subagentNotifyRunning': stored['subagentNotifyRunning'] ?? true,
     'subagentApprovalOverride': stored.containsKey('subagentApprovalMode'),
   };
+
+  /// Answers for the app's other calls to the platform side ('clipboardImage', ...), by method name.
+  final methods = <String, Object? Function(MethodCall call)>{};
 
   /// Answers for commands a test needs beyond the defaults below, by command type. A [HostError] fails the command; a
   /// [Future] answers when it completes (an error then fails it), for work the host is still doing.

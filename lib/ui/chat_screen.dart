@@ -18,6 +18,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
+import 'live_clock.dart';
 import 'illustration.dart';
 import 'mesh.dart';
 import 'model_sheet.dart';
@@ -68,6 +69,11 @@ class _ChatScreenState extends State<ChatScreen> {
   /// The chat whose draft the input holds.
   String? draftChat;
 
+  /// The clipboard holds a picture: the field's menu offers "Paste image". Checked when the field gains focus and when
+  /// the app comes back (the user copied it in another app).
+  bool _clipboardImage = false;
+  late final AppLifecycleListener _lifecycle = AppLifecycleListener(onResume: _checkClipboard);
+
   AgentController get agent => widget.agent;
 
   /// "/par" while typing a command name; null otherwise.
@@ -80,6 +86,10 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _lifecycle;
+    focus.addListener(() {
+      if (focus.hasFocus) _checkClipboard();
+    });
     agent.addListener(_onAgentChanged);
     draftChat = agent.sessionId;
     final prompt = widget.initialPrompt ?? Drafts.instance.get(draftChat);
@@ -112,6 +122,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     agent.removeListener(_onAgentChanged);
+    _lifecycle.dispose();
     Drafts.instance.flush();
     scroll.dispose();
     input.dispose();
@@ -310,6 +321,38 @@ class _ChatScreenState extends State<ChatScreen> {
     _saveFiles();
   }
 
+  Future<void> _checkClipboard() async {
+    final has = await agent.client.clipboardHasImage();
+    if (mounted && has != _clipboardImage) setState(() => _clipboardImage = has);
+  }
+
+  /// "Paste image" from the field's menu: the clipboard's picture becomes an attachment.
+  Future<void> _pasteImage() async {
+    final image = await agent.client.clipboardImage();
+    if (!mounted) return;
+    if (image == null) {
+      setState(() => _clipboardImage = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('The clipboard has no picture to paste'))));
+      return;
+    }
+    setState(() => attachments.add(Attachment(image['path']!, image['name']!, mime: image['mime'])));
+    _saveFiles();
+  }
+
+  /// A picture the keyboard pasted (Gboard's clipboard, a screenshot, a sticker): attached, never typed as text.
+  void _insertedContent(KeyboardInsertedContent content) {
+    final bytes = content.data;
+    if (bytes == null || bytes.isEmpty || !content.mimeType.startsWith('image/')) return;
+    final Attachment a;
+    try {
+      a = pastedImageAttachment(bytes, content.mimeType);
+    } catch (_) {
+      return;
+    }
+    setState(() => attachments.add(a));
+    _saveFiles();
+  }
+
   Future<void> _openPasted(Attachment a) async {
     final String text;
     try {
@@ -335,7 +378,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _attach() async {
-    final picked = await pickAttachments(context);
+    final picked = await pickAttachments(context, client: agent.client);
     if (picked.isNotEmpty) {
       setState(() => attachments.addAll(picked));
       _saveFiles();
@@ -539,6 +582,9 @@ class _ChatScreenState extends State<ChatScreen> {
               onQueue: _queue,
               onAttach: _attach,
               onPaste: _pasted,
+              canPasteImage: _clipboardImage,
+              onPasteImage: _pasteImage,
+              onInsertedContent: _insertedContent,
               onVoice: _voice,
               attachments: attachments,
               onOpenAttachment: (a) => a.isPasted ? _openPasted(a) : null,
@@ -586,11 +632,13 @@ class _ChatScreenState extends State<ChatScreen> {
     final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
+    // While the agent works: what it does, and how long the turn has taken (item under the transcript).
+    final status = agent.busy && (activity != null || agent.turnStartedAt != null);
     final queued = agent.queuedPrompts;
     return ListView.builder(
       controller: scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: entries.length + subs.length + (activity != null ? 1 : 0) + queued.length + (retry ? 1 : 0),
+      itemCount: entries.length + subs.length + (status ? 1 : 0) + queued.length + (retry ? 1 : 0),
       itemBuilder: (context, i) {
         if (i < entries.length) {
           final e = entries[i];
@@ -618,6 +666,7 @@ class _ChatScreenState extends State<ChatScreen> {
               footer: footers[i],
             ),
             NoticeEntry() => NoticeView(e),
+            JobEntry() => JobNoticeView(e),
           };
           final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
           return Padding(
@@ -632,11 +681,26 @@ class _ChatScreenState extends State<ChatScreen> {
             child: SubagentCard(key: ValueKey(subs[si].id), state: subs[si], agent: agent),
           );
         }
-        if (activity != null && si == subs.length) {
-          return Padding(padding: const EdgeInsets.only(top: 14), child: AgentActivity(label: activity));
+        if (status && si == subs.length) {
+          final tokens = turnTokensSoFar(entries);
+          return Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (activity != null) ...[AgentActivity(label: activity), const SizedBox(height: 8)],
+                // The turn's live clock, with the tokens it has used so far.
+                LiveClock(
+                  label: tr('Working'),
+                  startedAt: agent.turnStartedAt,
+                  detail: tokens > 0 ? tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(tokens))) : null,
+                ),
+              ],
+            ),
+          );
         }
         // Follow-ups waiting for the current turn to end, oldest first.
-        final qi = si - subs.length - (activity != null ? 1 : 0);
+        final qi = si - subs.length - (status ? 1 : 0);
         if (qi < queued.length) {
           return Padding(
             padding: EdgeInsets.only(top: qi == 0 ? 28 : 10),
@@ -853,6 +917,9 @@ class _Composer extends StatelessWidget {
     required this.onQueue,
     required this.onAttach,
     required this.onPaste,
+    this.canPasteImage = false,
+    this.onPasteImage,
+    this.onInsertedContent,
     required this.onVoice,
     required this.attachments,
     required this.onOpenAttachment,
@@ -872,6 +939,13 @@ class _Composer extends StatelessWidget {
 
   /// Called instead of inserting a long paste (see LongPasteFormatter).
   final void Function(String text) onPaste;
+
+  /// The clipboard holds a picture: the field's menu offers [onPasteImage].
+  final bool canPasteImage;
+  final VoidCallback? onPasteImage;
+
+  /// A picture the keyboard pasted.
+  final void Function(KeyboardInsertedContent content)? onInsertedContent;
   final VoidCallback onVoice;
   final List<Attachment> attachments;
   final void Function(Attachment) onOpenAttachment;
@@ -915,6 +989,26 @@ class _Composer extends StatelessWidget {
                 controller: controller,
                 focusNode: focus,
                 inputFormatters: [LongPasteFormatter(onPaste)],
+                contentInsertionConfiguration: onInsertedContent == null
+                    ? null
+                    : ContentInsertionConfiguration(
+                        allowedMimeTypes: pasteImageTypes,
+                        onContentInserted: onInsertedContent!,
+                      ),
+                contextMenuBuilder: (context, editable) => AdaptiveTextSelectionToolbar.buttonItems(
+                  anchors: editable.contextMenuAnchors,
+                  buttonItems: [
+                    ...editable.contextMenuButtonItems,
+                    if (canPasteImage && onPasteImage != null)
+                      ContextMenuButtonItem(
+                        label: tr('Paste image'),
+                        onPressed: () {
+                          editable.hideToolbar();
+                          onPasteImage!();
+                        },
+                      ),
+                  ],
+                ),
                 minLines: 1,
                 maxLines: 8,
                 textCapitalization: TextCapitalization.sentences,
