@@ -219,6 +219,28 @@ void main() {
       expect(find.text('thirty-model'), findsWidgets);
       expect(find.text('seven-model'), findsNothing);
     });
+
+    testWidgets('the same period read twice: the older read finishing last does not overwrite the newer', (tester) async {
+      final host = FakeHost();
+      final day = DateTime(2026, 10, 27).toIso8601String().substring(0, 10);
+      Map<String, Object> row(String model) => {'day': day, 'provider': 'griphub', 'model': model, 'input': 1000, 'output': 10, 'requests': 1};
+      final slowFirst = Completer<Object?>();
+      var reads = 0;
+      // The first read is slow and carries the old numbers; the refresh behind it is fast and carries the new ones.
+      host.answers['usage'] = (_) => ++reads == 1 ? slowFirst.future : [row('fresh-model')];
+      final agent = newAgent();
+      await pumpLook(tester, const Look(), UsageScreen(agent: agent), height: 2400);
+      await frames(tester);
+
+      await tester.tap(find.byTooltip('Refresh'));
+      await frames(tester);
+      expect(find.text('fresh-model'), findsWidgets);
+
+      slowFirst.complete([row('stale-model')]);
+      await frames(tester);
+      expect(find.text('stale-model'), findsNothing, reason: 'the older read must not replace the newer one');
+      expect(find.text('fresh-model'), findsWidgets);
+    });
   });
 
   group('tasks', () {

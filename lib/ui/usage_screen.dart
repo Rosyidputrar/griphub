@@ -83,6 +83,10 @@ class _UsageScreenState extends State<UsageScreen> {
   bool _loadingAccount = false;
   bool _allRequests = false;
 
+  /// Counts reads of the rows, so one that comes back after a newer one (the same period asked twice: a pull to refresh
+  /// over a slow first read) cannot overwrite it. The period check alone only guards against another period's tab.
+  int _reading = 0;
+
   AgentController get agent => widget.agent;
 
   @override
@@ -101,13 +105,14 @@ class _UsageScreenState extends State<UsageScreen> {
 
   Future<void> _load() async {
     final days = _days;
+    final reading = ++_reading;
     setState(() => _error = null);
     try {
       final rows = await agent.features.usage(days: days);
-      // The user picked another period meanwhile: its own read is on the way.
-      if (mounted && days == _days) setState(() => _rows = rows);
+      // A newer read (another period, or the same one asked again) is on its way or done: this one is stale.
+      if (mounted && reading == _reading) setState(() => _rows = rows);
     } catch (e) {
-      if (mounted && days == _days) setState(() => _error = e);
+      if (mounted && reading == _reading) setState(() => _error = e);
     }
   }
 
