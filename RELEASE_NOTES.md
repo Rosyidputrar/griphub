@@ -19,6 +19,7 @@
 - Tombol Tolak/Selalu/Izinkan tidak lagi terpotong di layar sempit dengan teks besar.
 - Review & commit: setelah agent selesai dan ada file yang berubah, chat menawarkan "Review & commit". Satu layar menampilkan semua file yang berubah beserta diff-nya, pesan commit yang ditulis agent (bisa diubah), serta tombol Commit atau Commit dan push. Membatalkan perubahan agent juga bisa dari layar yang sama. Tersedia juga di menu Project.
 - Mode server: pesan yang dikirim saat koneksi ke server putus kini disimpan dan dikirim otomatis begitu tersambung lagi, berurutan, alih-alih gagal. Pesan ini tetap tersimpan walau aplikasi ditutup. Bila server menolaknya (misalnya budget habis), alasannya ditampilkan dengan tombol Kirim lagi, dan pesan sesudahnya menunggu. Membatalkannya mengembalikan teksnya ke kolom chat.
+- Files bisa diurutkan menurut nama, terakhir diedit, terbesar, atau jenis, dengan pilihan folder tetap di atas. Chip di bawah judul menyaring satu jenis file: folder, kode, gambar, dokumen, data, arsip, atau media. Hanya jenis yang ada di folder itu yang muncul.
 
 ## English
 
@@ -39,3 +40,4 @@
 - Deny/Always/Allow no longer break apart on a narrow screen with large text.
 - Review & commit: when the agent finishes and files changed, the chat offers "Review & commit". One screen shows every changed file with its diff, a commit message the agent writes (yours to edit), and Commit or Commit and push. Undoing the agent's changes is on the same screen. Also in the Project menu.
 - Server mode: a message sent while the connection to the server is down is now kept and sent by itself, in order, once it is back, instead of failing. It is kept even if the app is closed. If the server refuses it (no budget left, for example), it says why with Send again, and the messages after it wait. Cancelling it puts its text back in the chat box.
+- Files can be sorted by name, recently edited, largest or type, with folders kept on top or not. Chips under the title show one kind of file: folders, code, images, documents, data, archives or media. Only the kinds the folder has appear.
