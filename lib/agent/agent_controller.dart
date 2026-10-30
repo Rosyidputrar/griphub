@@ -363,38 +363,78 @@ class AgentController extends ChangeNotifier {
   /// the home shell (it owns a navigator). Null or false keeps the turn.
   Future<bool> Function()? confirmStopToSwitch;
 
+  /// How long Stop and switch waits for the running turn to end (a stuck tool gets this long).
+  @visibleForTesting
+  static Duration stopToSwitchTimeout = const Duration(seconds: 10);
+
   /// Whether a chat switch may go ahead: always when idle; while the agent
   /// works only if the user agrees to stop it, then once it has stopped.
   Future<bool> readyToSwitch() async {
     if (!busy) return true;
     final ask = confirmStopToSwitch;
     if (ask == null || !await ask()) return false;
-    await abort();
-    // The turn ends on the host's agent_end; wait for it (a stuck tool gets 10 s).
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
-    while (busy && DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+    stoppingToSwitch = true;
+    notifyListeners();
+    try {
+      await abort();
+      // The turn ends on the host's agent_settled; wait for it, in steps, up to the timeout.
+      const step = Duration(milliseconds: 100);
+      for (var waited = Duration.zero; busy && waited < stopToSwitchTimeout; waited += step) {
+        await Future<void>.delayed(step);
+      }
+    } catch (_) {
+      // The abort itself failed (the link dropped): the turn is still running, which is said below.
+    } finally {
+      stoppingToSwitch = false;
+      notifyListeners();
     }
+    if (busy) switchProblems.add('The agent did not stop in time. Try again in a moment.');
     return !busy;
   }
 
-  /// Starts a session, in [dir] when given (a project folder), else the
-  /// workspace. False when the user kept the running turn instead.
-  Future<bool> newSession({String? dir}) async {
-    if (!await readyToSwitch()) return false;
-    _applyState(await client.call<Map<String, dynamic>>('new_session', {'cwd': ?dir}));
-    _resetTranscript();
+  /// Where a chat switch is going while one runs: the chat's path, or `new:<folder>` for a new chat. One at a time: a
+  /// second tap while the first still waits on the host does nothing, so chats are never opened twice or on top of
+  /// each other. Rows show a spinner for the one being opened.
+  String? switchingTo;
+
+  /// The switch waits for the running turn to stop (the user chose Stop and switch).
+  bool stoppingToSwitch = false;
+
+  /// Why a switch did not happen, for the user (English; the app translates it).
+  final switchProblems = StreamController<String>.broadcast();
+
+  /// The [switchingTo] key of a new chat in [dir].
+  static String newChatKey(String? dir) => 'new:${dir ?? ''}';
+
+  /// Runs one switch to [target]; false when another is already running or the user kept the running turn.
+  Future<bool> _switch(String target, Future<void> Function() go) async {
+    if (switchingTo != null) return false;
+    switchingTo = target;
     notifyListeners();
-    return true;
+    try {
+      if (!await readyToSwitch()) return false;
+      await go();
+      return true;
+    } finally {
+      switchingTo = null;
+      notifyListeners();
+    }
   }
 
-  /// Opens another chat. False when the user kept the running turn instead.
+  /// Starts a session, in [dir] when given (a project folder), else the
+  /// workspace. False when the user kept the running turn instead, or another switch is still under way.
+  Future<bool> newSession({String? dir}) => _switch(newChatKey(dir), () async {
+    _applyState(await client.call<Map<String, dynamic>>('new_session', {'cwd': ?dir}));
+    _resetTranscript();
+  });
+
+  /// Opens another chat. False when the user kept the running turn instead, or another switch is still under way.
   Future<bool> openSession(String path) async {
-    if (path == sessionFile) return true;
-    if (!await readyToSwitch()) return false;
-    _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
-    await loadHistory();
-    return true;
+    if (path == sessionFile && switchingTo == null) return true;
+    return _switch(path, () async {
+      _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
+      await loadHistory();
+    });
   }
 
   Future<void> renameSession(String path, String name) async {
@@ -582,21 +622,42 @@ class AgentController extends ChangeNotifier {
     return first.length > 48 ? '${first.substring(0, 47)}…' : (first.isEmpty ? 'GripHub AI Agent' : first);
   }
 
+  /// The message an edit or fork is working on (its entry id, or `''` for a fork of the whole chat), while one runs.
+  /// The chat dims that message and shows a spinner on it; another edit or fork waits for this one.
+  String? rewinding;
+
+  /// Runs one edit or fork at a time. Throws [AgentError] when one is already running.
+  Future<String> _rewind(String? entryId, Future<String> Function() go) async {
+    if (rewinding != null || switchingTo != null) throw AgentError('Wait for the chat to finish updating.');
+    rewinding = entryId ?? '';
+    notifyListeners();
+    try {
+      return await go();
+    } finally {
+      rewinding = null;
+      notifyListeners();
+    }
+  }
+
   /// Rewinds to just before a user message; returns its text for editing.
-  Future<String> editMessage(String entryId) async {
+  Future<String> editMessage(String entryId) => _rewind(entryId, () async {
     final r = await client.call<Map>('edit_message', {'entryId': entryId});
     await loadHistory();
     return r['text'] as String? ?? '';
-  }
+  });
 
   /// Copies this chat into a new one, rewound to just before [entryId].
-  Future<String> forkAt(String? entryId) async {
-    if (!await readyToSwitch()) throw AgentError(busySwitchError);
-    final r = (await client.call<Map>('fork_session', {'entryId': ?entryId})).cast<String, dynamic>();
-    _applyState(r);
-    await loadHistory();
-    return r['text'] as String? ?? '';
-  }
+  Future<String> forkAt(String? entryId) => _rewind(entryId, () async {
+    String text = '';
+    final switched = await _switch('fork:${entryId ?? ''}', () async {
+      final r = (await client.call<Map>('fork_session', {'entryId': ?entryId})).cast<String, dynamic>();
+      _applyState(r);
+      await loadHistory();
+      text = r['text'] as String? ?? '';
+    });
+    if (!switched) throw AgentError(busySwitchError);
+    return text;
+  });
 
   Future<void> setThinking(String level) async {
     _applyState(await client.call<Map<String, dynamic>>('set_thinking', {'level': level}));
@@ -928,6 +989,7 @@ class AgentController extends ChangeNotifier {
   void dispose() {
     _notifyTimer?.cancel();
     authRecords.close();
+    switchProblems.close();
     super.dispose();
   }
 }

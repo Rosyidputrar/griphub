@@ -24,8 +24,12 @@ import 'theme.dart';
 import 'todo_views.dart';
 
 class UserMessageView extends StatelessWidget {
-  const UserMessageView(this.entry, {super.key, this.onLongPress, this.fs = const LocalFs()});
+  const UserMessageView(this.entry, {super.key, this.onLongPress, this.fs = const LocalFs(), this.working});
   final UserEntry entry;
+
+  /// What is being done to this message right now ("Rewinding…", "Forking…"), or null. The bubble dims, shows it with
+  /// a spinner, and takes no long-press until it is done.
+  final String? working;
 
   /// Where the attachment copies are (the agent's machine).
   final AgentFs fs;
@@ -45,16 +49,38 @@ class UserMessageView extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
         child: Builder(
           builder: (bubbleContext) => GestureDetector(
-            onLongPress: onLongPress == null ? null : () => onLongPress!(bubbleContext),
+            onLongPress: onLongPress == null || working != null ? null : () => onLongPress!(bubbleContext),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (attachments.isNotEmpty) ...[
-                  MessageAttachments(attachments: attachments, fs: fs),
-                  const SizedBox(height: 8),
-                ],
-                if (text.isNotEmpty) UserBubble(text),
+                AnimatedOpacity(
+                  duration: const Duration(milliseconds: 150),
+                  opacity: working != null ? 0.5 : 1,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (attachments.isNotEmpty) ...[
+                        MessageAttachments(attachments: attachments, fs: fs),
+                        const SizedBox(height: 8),
+                      ],
+                      if (text.isNotEmpty) UserBubble(text),
+                    ],
+                  ),
+                ),
+                if (working != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, right: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const BusySpinner(size: 12),
+                        const SizedBox(width: 6),
+                        Text(working!, style: TextStyle(fontSize: 12, color: context.palette.muted)),
+                      ],
+                    ),
+                  ),
               ],
             ),
           ),

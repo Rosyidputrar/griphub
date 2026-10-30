@@ -72,6 +72,9 @@ class UsageScreen extends StatefulWidget {
 
 class _UsageScreenState extends State<UsageScreen> {
   int _days = 7;
+
+  /// The rows of the period [_days] names; null while that period is being read. Rows of another period are never
+  /// shown under its tab.
   List<UsageRow>? _rows;
   Map<String, dynamic>? _session;
   Object? _error;
@@ -97,13 +100,24 @@ class _UsageScreenState extends State<UsageScreen> {
   }
 
   Future<void> _load() async {
+    final days = _days;
     setState(() => _error = null);
     try {
-      final rows = await agent.features.usage(days: _days);
-      if (mounted) setState(() => _rows = rows);
+      final rows = await agent.features.usage(days: days);
+      // The user picked another period meanwhile: its own read is on the way.
+      if (mounted && days == _days) setState(() => _rows = rows);
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && days == _days) setState(() => _error = e);
     }
+  }
+
+  void _setDays(int days) {
+    if (days == _days) return;
+    setState(() {
+      _days = days;
+      _rows = null;
+    });
+    _load();
   }
 
   Future<void> _loadAccount({bool force = false}) async {
@@ -196,10 +210,7 @@ class _UsageScreenState extends State<UsageScreen> {
               child: PillSegments<int>(
                 value: _days,
                 options: {for (final d in const [7, 30]) d: '$d ${tr('days')}'},
-                onChanged: (d) {
-                  setState(() => _days = d);
-                  _load();
-                },
+                onChanged: _setDays,
                 expand: false,
               ),
             ),

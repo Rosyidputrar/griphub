@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -516,4 +518,95 @@ String formatTokens(int n) {
   }
   if (n >= 1000) return '${(n / 1000).round()}k';
   return '$n';
+}
+
+// ---------------------------------------------------------------------------
+// Work in progress
+
+/// A small spinner for a button or a row that is waiting on the host.
+class BusySpinner extends StatelessWidget {
+  const BusySpinner({super.key, this.size = 16, this.color});
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child: CircularProgressIndicator(strokeWidth: size <= 12 ? 1.6 : 2, color: color ?? context.palette.muted),
+  );
+}
+
+/// A 2 px bar that runs while [busy]. It always takes its height, so the content under it never jumps when it shows.
+class BusyBar extends StatelessWidget {
+  const BusyBar({super.key, required this.busy});
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return SizedBox(
+      height: 2,
+      child: busy
+          ? LinearProgressIndicator(minHeight: 2, color: p.muted, backgroundColor: p.border)
+          : const SizedBox.shrink(),
+    );
+  }
+}
+
+/// One action at a time per key: a second tap while the first is still waiting on the host does nothing, instead of
+/// running it twice (two sheets, the same message sent twice, two screens pushed). [busy] says what is running, for the
+/// spinner, and the state rebuilds when it starts and ends.
+mixin BusyActions<T extends StatefulWidget> on State<T> {
+  final Set<Object> _running = {};
+
+  /// Whether the action [key] is running, or any action when [key] is null.
+  bool busy([Object? key]) => key == null ? _running.isNotEmpty : _running.contains(key);
+
+  /// Runs [action] under [key] unless it is already running (then returns null at once). Errors are rethrown.
+  Future<R?> runBusy<R>(Object key, Future<R> Function() action) async {
+    if (_running.contains(key)) return null;
+    setState(() => _running.add(key));
+    try {
+      return await action();
+    } finally {
+      if (mounted) {
+        setState(() => _running.remove(key));
+      } else {
+        _running.remove(key);
+      }
+    }
+  }
+}
+
+/// Runs [task] behind a small dialog that says what it waits for and cannot be dismissed, for work that has no button
+/// of its own to show a spinner on. Errors are shown as a snackbar; the result is null then.
+Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Function() task) async {
+  final nav = Navigator.of(context);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  // This dialog and no other is taken down when the work ends, whatever opened on top of it meanwhile.
+  final route = DialogRoute<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(
+          children: [
+            const BusySpinner(size: 18),
+            const SizedBox(width: 14),
+            Expanded(child: Text(label)),
+          ],
+        ),
+      ),
+    ),
+  );
+  unawaited(nav.push(route));
+  try {
+    return await task();
+  } catch (e) {
+    messenger?.showSnackBar(SnackBar(content: Text('$e')));
+    return null;
+  } finally {
+    if (route.isActive) nav.removeRoute(route);
+  }
 }

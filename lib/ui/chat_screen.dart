@@ -191,13 +191,27 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
+  /// A message is on its way to the host: Send shows a spinner and a second tap does nothing, so the same text is
+  /// never sent twice.
+  bool _sending = false;
+
   Future<void> _send() async {
+    if (_sending) return;
     final text = input.text;
     if (text.trim().isEmpty && attachments.isEmpty) return;
     if (!agent.hasModel) {
       await _connectProvider();
       return;
     }
+    setState(() => _sending = true);
+    try {
+      await _sendNow(text);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _sendNow(String text) async {
     final files = List<Attachment>.of(attachments);
     // Clear only on success: a refused message (budget, host error) never
     // reaches the transcript, so clearing first would lose it.
@@ -381,6 +395,8 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Wait for the agent to finish first'))));
       return;
     }
+    if (_rewinding != null) return;
+    setState(() => _rewinding = (entry: entry, label: tr(action == 'edit' ? 'Rewinding…' : 'Forking…')));
     try {
       final points = await agent.features.forkPoints();
       if (userIndex >= points.length) throw tr('This message cannot be edited');
@@ -388,9 +404,14 @@ class _ChatScreenState extends State<ChatScreen> {
       final text = action == 'edit' ? await agent.editMessage(entryId) : await agent.forkAt(entryId);
       _prefill(text.isEmpty ? entry.text : text);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('$e'))));
+    } finally {
+      if (mounted) setState(() => _rewinding = null);
     }
   }
+
+  /// The message an edit or fork is working on, from the tap until the chat has reloaded.
+  ({UserEntry entry, String label})? _rewinding;
 
   Future<void> _connectProvider() async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
@@ -420,10 +441,13 @@ class _ChatScreenState extends State<ChatScreen> {
               onPressed: () =>
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
             ),
-            IconButton(
-              tooltip: tr('Deploy'),
-              icon: const Icon(LucideIcons.rocket, size: 20),
-              onPressed: agent.busy ? null : () => showDeploySheet(context, agent),
+            ValueListenableBuilder<bool>(
+              valueListenable: deployPreparing,
+              builder: (context, preparing, _) => IconButton(
+                tooltip: tr('Deploy'),
+                icon: preparing ? const BusySpinner(size: 18) : const Icon(LucideIcons.rocket, size: 20),
+                onPressed: agent.busy || preparing ? null : () => showDeploySheet(context, agent),
+              ),
             ),
             IconButton(
               tooltip: tr('Project tools'),
@@ -511,6 +535,7 @@ class _ChatScreenState extends State<ChatScreen> {
               focus: focus,
               agent: agent,
               onSend: _send,
+              sending: _sending,
               onQueue: _queue,
               onAttach: _attach,
               onPaste: _pasted,
@@ -572,8 +597,11 @@ class _ChatScreenState extends State<ChatScreen> {
           final child = switch (e) {
             UserEntry() => UserMessageView(
               e,
-              onLongPress: (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
+              onLongPress: _rewinding != null
+                  ? null
+                  : (bubble) => _userMenu(bubble, e, entries.take(i).whereType<UserEntry>().length),
               fs: agent.fs,
+              working: identical(_rewinding?.entry, e) ? _rewinding!.label : null,
             ),
             AssistantEntry() => AssistantMessageView(
               e,
@@ -821,6 +849,7 @@ class _Composer extends StatelessWidget {
     required this.focus,
     required this.agent,
     required this.onSend,
+    this.sending = false,
     required this.onQueue,
     required this.onAttach,
     required this.onPaste,
@@ -835,6 +864,9 @@ class _Composer extends StatelessWidget {
   final FocusNode focus;
   final AgentController agent;
   final VoidCallback onSend;
+
+  /// The last message is still on its way: Send spins and is off.
+  final bool sending;
   final VoidCallback onQueue;
   final VoidCallback onAttach;
 
@@ -934,13 +966,14 @@ class _Composer extends StatelessWidget {
                     if (busy)
                       _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: agent.abort),
                     if (busy && hasText) const SizedBox(width: 6),
-                    if (hasText)
+                    if (hasText || sending)
                       _RoundButton(
-                        onLongPress: onQueue,
+                        onLongPress: sending ? null : onQueue,
                         icon: LucideIcons.arrowUp,
-                        label: tr('Send'),
+                        label: tr(sending ? 'Sending…' : 'Send'),
                         filled: true,
-                        onTap: onSend,
+                        busy: sending,
+                        onTap: sending ? null : onSend,
                       )
                     else if (!busy)
                       _RoundButton(icon: LucideIcons.mic, label: tr('Voice'), filled: false, onTap: onVoice),
@@ -1076,12 +1109,16 @@ class _RoundButton extends StatelessWidget {
     required this.label,
     this.filled = false,
     this.onLongPress,
+    this.busy = false,
   });
   final IconData icon;
   final String label;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final bool filled;
+
+  /// A spinner in place of the icon (the button's work is on its way).
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -1117,7 +1154,9 @@ class _RoundButton extends StatelessWidget {
             customBorder: const CircleBorder(),
             onTap: onTap,
             onLongPress: onLongPress,
-            child: Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
+            child: busy
+                ? Center(child: BusySpinner(color: p.muted))
+                : Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
           ),
         ),
       ),

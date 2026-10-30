@@ -299,10 +299,19 @@ void main() {
     testWidgets('switching back to the chat leaves no gap', (tester) async {
       final before = await approvals(tester, const Look(), 'follow_before');
       host.stored['subagentApprovalMode'] = 'ask_all';
+      // Each switch waits for the host's answer (the row spins and takes no tap until then), which only arrives with
+      // real async: without it the second tap would land while the first is still being saved.
+      Future<void> answered() async {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await frames(tester, 20);
+      }
+
       await tester.tap(find.text('Same as the chat')); // off: own mode
-      await frames(tester, 20);
+      await answered();
+      expect(host.stored.containsKey('subagentApprovalMode'), isTrue, reason: 'own mode saved');
       await tester.tap(find.text('Same as the chat')); // on again
-      await frames(tester, 20);
+      await answered();
+      expect(host.stored.containsKey('subagentApprovalMode'), isFalse, reason: 'following the chat again');
       await expectClean(tester);
       final top = tester.getTopLeft(find.text('APPROVALS')).dy - 8;
       final after = tester.getTopLeft(find.text('NOTIFICATIONS')).dy - 8 - top;

@@ -17,7 +17,7 @@ class TemplatesScreen extends StatefulWidget {
   State<TemplatesScreen> createState() => _TemplatesScreenState();
 }
 
-class _TemplatesScreenState extends State<TemplatesScreen> {
+class _TemplatesScreenState extends State<TemplatesScreen> with BusyActions {
   List<PromptTemplate>? _templates;
   Object? _error;
 
@@ -49,24 +49,27 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
   }
 
   Future<void> _edit([PromptTemplate? existing]) async {
-    final result = await showModalBottomSheet<_TemplateDraft>(
+    if (existing != null && busy(existing.name)) return;
+    // The sheet saves itself and closes only once that worked: a failed save keeps what the user wrote, with the
+    // reason, instead of closing first and losing it behind a snackbar.
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _TemplateSheet(existing: existing, taken: {...?_templates?.map((t) => t.name)}),
+      builder: (_) => _TemplateSheet(
+        existing: existing,
+        taken: {...?_templates?.map((t) => t.name)},
+        onSave: (result) async {
+          await f.saveTemplate(
+            result.name,
+            result.description,
+            result.body,
+            argumentHint: result.hint.isEmpty ? null : result.hint,
+          );
+          if (existing != null && existing.name != result.name) await f.deleteTemplate(existing.name);
+          await _load();
+        },
+      ),
     );
-    if (result == null) return;
-    try {
-      await f.saveTemplate(
-        result.name,
-        result.description,
-        result.body,
-        argumentHint: result.hint.isEmpty ? null : result.hint,
-      );
-      if (existing != null && existing.name != result.name) await f.deleteTemplate(existing.name);
-      await _load();
-    } catch (e) {
-      _snack('$e');
-    }
   }
 
   Future<bool> _delete(PromptTemplate t) async {
@@ -87,9 +90,12 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
     );
     if (ok != true) return false;
     try {
-      await f.deleteTemplate(t.name);
-      await _load();
-      return true;
+      return await runBusy(t.name, () async {
+            await f.deleteTemplate(t.name);
+            await _load();
+            return true;
+          }) ??
+          false;
     } catch (e) {
       _snack('$e');
       return false;
@@ -185,7 +191,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                 Dismissible(
                   key: ValueKey(t.name),
                   direction: DismissDirection.endToStart,
-                  confirmDismiss: (_) => _delete(t),
+                  confirmDismiss: (_) async => !busy(t.name) && await _delete(t),
                   background: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 24),
@@ -194,7 +200,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                   ),
                   child: SurfaceCard(
                     padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
-                    onTap: () => _edit(t),
+                    onTap: busy(t.name) ? null : () => _edit(t),
                     child: Row(
                       children: [
                         Expanded(
@@ -219,17 +225,20 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
                             ],
                           ),
                         ),
-                        PopupMenuButton<String>(
-                          icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
-                          onSelected: (v) => v == 'edit' ? _edit(t) : _delete(t),
-                          itemBuilder: (_) => [
-                            PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Text(tr('Delete'), style: TextStyle(color: p.danger)),
-                            ),
-                          ],
-                        ),
+                        if (busy(t.name))
+                          const Padding(padding: EdgeInsets.all(14), child: BusySpinner())
+                        else
+                          PopupMenuButton<String>(
+                            icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
+                            onSelected: (v) => v == 'edit' ? _edit(t) : _delete(t),
+                            itemBuilder: (_) => [
+                              PopupMenuItem(value: 'edit', child: Text(tr('Edit'))),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text(tr('Delete'), style: TextStyle(color: p.danger)),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
                   ),
@@ -246,9 +255,12 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
 typedef _TemplateDraft = ({String name, String description, String hint, String body});
 
 class _TemplateSheet extends StatefulWidget {
-  const _TemplateSheet({this.existing, required this.taken});
+  const _TemplateSheet({this.existing, required this.taken, required this.onSave});
   final PromptTemplate? existing;
   final Set<String> taken;
+
+  /// Saves the template; the sheet stays open with the error when it throws.
+  final Future<void> Function(_TemplateDraft draft) onSave;
 
   @override
   State<_TemplateSheet> createState() => _TemplateSheetState();
@@ -260,6 +272,7 @@ class _TemplateSheetState extends State<_TemplateSheet> {
   late final _hint = TextEditingController(text: widget.existing?.argumentHint ?? '');
   late final _body = TextEditingController(text: widget.existing?.body ?? '');
   String? _problem;
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -269,7 +282,8 @@ class _TemplateSheetState extends State<_TemplateSheet> {
     super.dispose();
   }
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     final name = _name.text.trim().replaceFirst(RegExp(r'^/'), '');
     if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]*$').hasMatch(name)) {
       setState(() => _problem = 'Name: letters, digits, - and _ (no spaces).');
@@ -283,12 +297,23 @@ class _TemplateSheetState extends State<_TemplateSheet> {
       setState(() => _problem = 'The template needs a body.');
       return;
     }
-    Navigator.pop<_TemplateDraft>(context, (
-      name: name,
-      description: _description.text.trim(),
-      hint: _hint.text.trim(),
-      body: _body.text,
-    ));
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    try {
+      await widget.onSave((
+        name: name,
+        description: _description.text.trim(),
+        hint: _hint.text.trim(),
+        body: _body.text,
+      ));
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _problem = '$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -340,7 +365,7 @@ class _TemplateSheetState extends State<_TemplateSheet> {
               Text(_problem!, style: text.bodySmall?.copyWith(color: p.danger)),
             ],
             const SizedBox(height: 18),
-            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, onPressed: _save),
+            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, busy: _saving, onPressed: _save),
           ],
         ),
       ),

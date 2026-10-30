@@ -51,6 +51,14 @@ class FakeHost {
           final cmd = (jsonDecode(call.arguments as String) as Map).cast<String, dynamic>();
           commands.add(cmd);
           final data = _answer(cmd);
+          // A late answer: the host is still working on it (a test completes the future when it wants the reply).
+          if (data is Future) {
+            data.then(
+              (v) => emit({'type': 'response', 'id': cmd['id'], 'ok': true, 'data': v}),
+              onError: (Object e) => emit({'type': 'response', 'id': cmd['id'], 'ok': false, 'error': '$e'}),
+            );
+            return null;
+          }
           if (data is HostError) {
             Future<void>.microtask(() => emit({'type': 'response', 'id': cmd['id'], 'ok': false, 'error': data.message}));
           } else if (data != _noReply) {
@@ -100,7 +108,8 @@ class FakeHost {
     'subagentApprovalOverride': stored.containsKey('subagentApprovalMode'),
   };
 
-  /// Answers for commands a test needs beyond the defaults below, by command type.
+  /// Answers for commands a test needs beyond the defaults below, by command type. A [HostError] fails the command; a
+  /// [Future] answers when it completes (an error then fails it), for work the host is still doing.
   final answers = <String, Object? Function(Map<String, dynamic> cmd)>{};
 
   Object? _answer(Map<String, dynamic> cmd) {

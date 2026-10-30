@@ -39,7 +39,12 @@ class _SyncScreenState extends State<SyncScreen> {
     it.refreshSync().catchError((_) {});
   }
 
+  /// Where the switch is going while the host turns sync on or off (creating the repository takes a while): the switch
+  /// shows it at once, with a spinner, and takes no other tap until the host has answered.
+  bool? _turning;
+
   Future<void> _toggle(bool on) async {
+    if (_turning != null) return;
     if (on) {
       final ok = await showDialog<bool>(
         context: context,
@@ -63,10 +68,15 @@ class _SyncScreenState extends State<SyncScreen> {
       );
       if (ok != true) return;
     }
+    setState(() => _turning = on);
     try {
       await it.setSync(on);
-    } on AgentError catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(e.message))));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e is AgentError ? tr(e.message) : '$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _turning = null);
     }
   }
 
@@ -160,7 +170,16 @@ class _SyncScreenState extends State<SyncScreen> {
                       color: const Color(0xFF16A34A),
                       title: tr('Sync to GitHub'),
                       subtitle: '${tr('Signed in as')} ${it.github!.login}',
-                      trailing: Switch(value: s?.enabled ?? false, onChanged: s == null ? null : _toggle),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_turning != null) ...[const BusySpinner(), const SizedBox(width: 8)],
+                          Switch(
+                            value: _turning ?? s?.enabled ?? false,
+                            onChanged: s == null || _turning != null ? null : _toggle,
+                          ),
+                        ],
+                      ),
                     ),
                     if (s?.enabled ?? false) ...[
                       // The action is the row; when it last ran is its subtitle (a "Sync now" button

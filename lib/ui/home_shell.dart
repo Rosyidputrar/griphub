@@ -715,7 +715,7 @@ class _HomeTab extends StatefulWidget {
   State<_HomeTab> createState() => _HomeTabState();
 }
 
-class _HomeTabState extends State<_HomeTab> {
+class _HomeTabState extends State<_HomeTab> with BusyActions {
   String category = 'All';
   late Future<List<SessionSummary>> recent = widget.agent.listSessions();
 
@@ -726,6 +726,8 @@ class _HomeTabState extends State<_HomeTab> {
   });
 
   Future<void> _run(_Quick q) async {
+    if (busy()) return;
+    if (q.prompt != null) return _startQuick(q);
     if (q.openImages) {
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImageGenScreen(agent: agent)));
       _refresh();
@@ -736,10 +738,37 @@ class _HomeTabState extends State<_HomeTab> {
       _refresh();
       return;
     }
-    if (q.prompt == null) {
-      widget.onNewChat();
-      return;
+    widget.onNewChat();
+  }
+
+  /// A quick start: its own project folder and a chat in it, with a spinner on the card until the chat opens.
+  Future<void> _startQuick(_Quick q) async {
+    final opened = await runBusy(q.title, () async {
+      try {
+        return await _prepareQuick(q);
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        return null;
+      }
+    });
+    if (opened == null || !mounted) return;
+    final fs = agent.fs;
+    await openChat(context, agent, prompt: tr(q.prompt!));
+    // Backed out without sending anything: don't leave an empty project behind.
+    if (agent.cwd == opened &&
+        agent.entries.isEmpty &&
+        await fs.exists(opened).catchError((_) => false) &&
+        (await fs.list(opened).catchError((_) => <FsEntry>[])).isEmpty) {
+      await fs.delete(opened).catchError((_) {});
+      try {
+        await agent.newSession();
+      } catch (_) {}
     }
+    _refresh();
+  }
+
+  /// Makes the quick start's folder and its chat; the folder, or null when no chat came of it.
+  Future<String?> _prepareQuick(_Quick q) async {
     // Each quick start gets its own project folder.
     final ws = agent.info['workspace'] as String? ?? '';
     final slug = q.title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-|-$'), '');
@@ -750,20 +779,9 @@ class _HomeTabState extends State<_HomeTab> {
     await fs.mkdir(dir);
     if (!await agent.newSession(dir: dir)) {
       await fs.delete(dir).catchError((_) {});
-      return;
+      return null;
     }
-    if (mounted) await openChat(context, agent, prompt: tr(q.prompt!));
-    // Backed out without sending anything: don't leave an empty project behind.
-    if (agent.cwd == dir &&
-        agent.entries.isEmpty &&
-        await fs.exists(dir).catchError((_) => false) &&
-        (await fs.list(dir).catchError((_) => <FsEntry>[])).isEmpty) {
-      await fs.delete(dir).catchError((_) {});
-      try {
-        await agent.newSession();
-      } catch (_) {}
-    }
-    _refresh();
+    return dir;
   }
 
   @override
@@ -862,7 +880,8 @@ class _HomeTabState extends State<_HomeTab> {
                     clipBehavior: Clip.none,
                     itemCount: quick.length,
                     separatorBuilder: (_, _) => const SizedBox(width: 12),
-                    itemBuilder: (context, i) => _QuickCard(q: quick[i], onTap: () => _run(quick[i])),
+                    itemBuilder: (context, i) =>
+                        _QuickCard(q: quick[i], busy: busy(quick[i].title), onTap: () => _run(quick[i])),
                   ),
                 ),
                 const SizedBox(height: 30),
@@ -897,6 +916,7 @@ class _HomeTabState extends State<_HomeTab> {
                           _SessionRow(
                             session: s,
                             workspace: agent.info['workspace'] as String? ?? '',
+                            busy: agent.switchingTo == s.path,
                             onTap: () async {
                               if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
                               if (context.mounted) await openChat(context, agent);
@@ -1024,9 +1044,12 @@ class _PillChip extends StatelessWidget {
 }
 
 class _QuickCard extends StatelessWidget {
-  const _QuickCard({required this.q, required this.onTap});
+  const _QuickCard({required this.q, required this.onTap, this.busy = false});
   final _Quick q;
   final VoidCallback onTap;
+
+  /// Its folder and chat are being made.
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -1064,6 +1087,8 @@ class _QuickCard extends StatelessWidget {
                         bottom: -18,
                         child: RingBadge(icon: q.icon, color: q.color),
                       ),
+                      if (busy)
+                        const Positioned(top: 10, right: 10, child: BusySpinner()),
                     ],
                   ),
                 ),
@@ -1110,11 +1135,15 @@ class _SessionRow extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.selected,
+    this.busy = false,
   });
   final SessionSummary session;
   final String workspace;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+
+  /// This chat is being opened (the app waits on the host): a spinner instead of its time.
+  final bool busy;
 
   /// Non-null in selection mode: whether this chat is picked.
   final bool? selected;
@@ -1163,7 +1192,9 @@ class _SessionRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            if (selected != null)
+            if (busy)
+              const BusySpinner()
+            else if (selected != null)
               Icon(
                 selected! ? LucideIcons.circleCheck : LucideIcons.circle,
                 size: 22,
@@ -1363,17 +1394,21 @@ class _ChatsTabState extends State<_ChatsTab> {
                   for (final e in groups.entries) ...[
                     SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
                     for (final s in e.value)
-                      _SessionRow(
-                        session: s,
-                        workspace: ws,
-                        selected: selecting ? _selected.contains(s.path) : null,
-                        onLongPress: () => selecting ? _toggle(s) : _menu(s),
-                        onTap: () async {
-                          if (selecting) return _toggle(s);
-                          if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
-                          if (context.mounted) await openChat(context, agent);
-                          _reload();
-                        },
+                      ListenableBuilder(
+                        listenable: agent,
+                        builder: (context, _) => _SessionRow(
+                          session: s,
+                          workspace: ws,
+                          selected: selecting ? _selected.contains(s.path) : null,
+                          busy: agent.switchingTo == s.path,
+                          onLongPress: () => selecting ? _toggle(s) : _menu(s),
+                          onTap: () async {
+                            if (selecting) return _toggle(s);
+                            if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                            if (context.mounted) await openChat(context, agent);
+                            _reload();
+                          },
+                        ),
                       ),
                   ],
                 ],
@@ -1419,13 +1454,25 @@ class _ProjectsTabState extends State<_ProjectsTab> {
     it.refreshProjects().catchError((_) {});
   }
 
+  /// The project being opened, from the tap until its chat is on screen (finding its latest chat is a round trip too).
+  String? _opening;
+
   Future<void> _open(ProjectInfo project) async {
-    final sessions = await agent.listSessions();
-    final latest = sessions.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
-    if (latest != null) {
-      if (latest.id != agent.sessionId && !await agent.openSession(latest.path)) return;
-    } else {
-      if (!await agent.newSession(dir: project.path)) return;
+    if (_opening != null || agent.switchingTo != null) return;
+    setState(() => _opening = project.path);
+    try {
+      final sessions = await agent.listSessions();
+      final latest = sessions.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
+      if (latest != null) {
+        if (latest.id != agent.sessionId && !await agent.openSession(latest.path)) return;
+      } else {
+        if (!await agent.newSession(dir: project.path)) return;
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    } finally {
+      if (mounted) setState(() => _opening = null);
     }
     if (mounted) await openChat(context, agent);
   }
@@ -1477,7 +1524,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
-      listenable: it,
+      listenable: Listenable.merge([it, agent]),
       builder: (context, _) {
         final projects = it.projects.where((x) => query.isEmpty || x.name.toLowerCase().contains(query)).toList();
         return SafeArea(
@@ -1581,11 +1628,13 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                                   child: Stack(
                                     children: [
                                       Center(
-                                        child: Icon(
-                                          pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
-                                          size: 44,
-                                          color: MeshArt.inkFor(pr.name),
-                                        ),
+                                        child: _opening == pr.path
+                                            ? BusySpinner(size: 28, color: MeshArt.inkFor(pr.name))
+                                            : Icon(
+                                                pr.isGit ? LucideIcons.folderGit2 : LucideIcons.folder,
+                                                size: 44,
+                                                color: MeshArt.inkFor(pr.name),
+                                              ),
                                       ),
                                       Padding(
                                         padding: const EdgeInsets.all(12),

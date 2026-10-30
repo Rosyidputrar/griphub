@@ -1548,4 +1548,16 @@ const _id = <String, String>{
   'Message cancelled': 'Pesan dibatalkan',
   '1 image': '1 gambar',
   'That message was already sent': 'Pesan itu sudah terkirim',
+  // Work in progress (loading states)
+  'Sending…': 'Mengirim…',
+  'Rewinding…': 'Memundurkan…',
+  'Forking…': 'Membuat cabang…',
+  'Stopping the agent…': 'Menghentikan agent…',
+  'The agent did not stop in time. Try again in a moment.': 'Agent belum berhenti tepat waktu. Coba lagi sebentar lagi.',
+  'Starting the chat…': 'Memulai chat…',
+  'Could not prepare the deploy': 'Deploy gagal disiapkan',
+  'Checking what will be uploaded…': 'Memeriksa apa yang akan diunggah…',
+  'Could not change approvals': 'Persetujuan gagal diubah',
+  'Could not switch the model': 'Model gagal diganti',
+  'Wait for the chat to finish updating.': 'Tunggu sampai chat selesai diperbarui.',
 };

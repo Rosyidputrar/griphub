@@ -27,7 +27,7 @@ class McpScreen extends StatefulWidget {
   State<McpScreen> createState() => _McpScreenState();
 }
 
-class _McpScreenState extends State<McpScreen> {
+class _McpScreenState extends State<McpScreen> with BusyActions {
   final _expanded = <String>{};
 
   AgentController get agent => widget.agent;
@@ -55,14 +55,19 @@ class _McpScreenState extends State<McpScreen> {
   }
 
   Future<void> _edit({McpServer? existing, _Preset? preset}) async {
-    final result = await showModalBottomSheet<Map<String, dynamic>>(
+    if (existing != null && busy(existing.id)) return;
+    // The sheet saves itself and closes only once that worked, so a refused server keeps what the user typed.
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _McpSheet(existing: existing, preset: preset),
+      builder: (_) => _McpSheet(existing: existing, preset: preset, onSave: f.saveMcp),
     );
-    if (result == null) return;
+  }
+
+  /// One change to a server at a time (switch, remove), with a spinner on its card meanwhile.
+  Future<void> _change(McpServer s, Future<void> Function() task) async {
     try {
-      await f.saveMcp(result);
+      await runBusy(s.id, task);
     } catch (e) {
       _error(e);
     }
@@ -85,11 +90,7 @@ class _McpScreenState extends State<McpScreen> {
       ),
     );
     if (ok != true) return;
-    try {
-      await f.deleteMcp(s.id);
-    } catch (e) {
-      _error(e);
-    }
+    await _change(s, () => f.deleteMcp(s.id));
   }
 
   @override
@@ -169,13 +170,14 @@ class _McpScreenState extends State<McpScreen> {
                   for (final s in servers) ...[
                     _ServerCard(
                       server: s,
+                      busy: busy(s.id),
                       expanded: _expanded.contains(s.id),
                       onToggleTools: () => setState(() {
                         if (!_expanded.remove(s.id)) _expanded.add(s.id);
                       }),
                       onEdit: () => _edit(existing: s),
                       onDelete: () => _delete(s),
-                      onEnabled: (v) => f.saveMcp({...s.json, 'enabled': v}).catchError((Object e) => _error(e)),
+                      onEnabled: (v) => _change(s, () => f.saveMcp({...s.json, 'enabled': v})),
                     ),
                     const SizedBox(height: 10),
                   ],
@@ -196,8 +198,12 @@ class _ServerCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onEnabled,
+    this.busy = false,
   });
   final McpServer server;
+
+  /// A change to it is on its way: a spinner, and its switch and menu wait.
+  final bool busy;
   final bool expanded;
   final VoidCallback onToggleTools;
   final VoidCallback onEdit;
@@ -223,7 +229,7 @@ class _ServerCard extends StatelessWidget {
     final detail = s.type == 'http' ? (s.url ?? '') : (s.command ?? '');
     return SurfaceCard(
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
-      onTap: onEdit,
+      onTap: busy ? null : onEdit,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -254,8 +260,10 @@ class _ServerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Switch(value: s.enabled, onChanged: onEnabled),
+              if (busy) const BusySpinner(),
+              Switch(value: s.enabled, onChanged: busy ? null : onEnabled),
               PopupMenuButton<String>(
+                enabled: !busy,
                 icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
                 onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
                 itemBuilder: (_) => [
@@ -353,9 +361,12 @@ class _Pair {
 
 /// Add/edit form for a server; pops the json map to save.
 class _McpSheet extends StatefulWidget {
-  const _McpSheet({this.existing, this.preset});
+  const _McpSheet({this.existing, this.preset, required this.onSave});
   final McpServer? existing;
   final _Preset? preset;
+
+  /// Saves the server; the sheet stays open with the error when it throws.
+  final Future<void> Function(Map<String, dynamic> server) onSave;
 
   @override
   State<_McpSheet> createState() => _McpSheetState();
@@ -371,6 +382,7 @@ class _McpSheetState extends State<_McpSheet> {
   final _env = <_Pair>[];
   final _headers = <_Pair>[];
   String? _problem;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -408,7 +420,8 @@ class _McpSheetState extends State<_McpSheet> {
       if (pair.key.text.trim().isNotEmpty) pair.key.text.trim(): pair.value.text,
   };
 
-  void _save() {
+  Future<void> _save() async {
+    if (_saving) return;
     final name = _name.text.trim();
     if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(name)) {
       setState(() => _problem = 'Name: letters, digits, - and _ only.');
@@ -423,14 +436,25 @@ class _McpSheetState extends State<_McpSheet> {
       setState(() => _problem = 'Enter the command to start the server.');
       return;
     }
-    Navigator.pop(context, <String, dynamic>{
-      'id': ?widget.existing?.id,
-      'name': name,
-      'type': _type,
-      'enabled': _enabled,
-      if (http) ...{'url': _url.text.trim(), 'headers': _collect(_headers)},
-      if (!http) ...{'command': _command.text.trim(), 'inContainer': _inContainer, 'env': _collect(_env)},
+    setState(() {
+      _saving = true;
+      _problem = null;
     });
+    try {
+      await widget.onSave(<String, dynamic>{
+        'id': ?widget.existing?.id,
+        'name': name,
+        'type': _type,
+        'enabled': _enabled,
+        if (http) ...{'url': _url.text.trim(), 'headers': _collect(_headers)},
+        if (!http) ...{'command': _command.text.trim(), 'inContainer': _inContainer, 'env': _collect(_env)},
+      });
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) setState(() => _problem = '$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Widget _pairsEditor(List<_Pair> pairs, {required String title, required String keyHint, required String valueHint}) {
@@ -569,7 +593,7 @@ class _McpSheetState extends State<_McpSheet> {
               Text(_problem!, style: text.bodySmall?.copyWith(color: p.danger)),
             ],
             const SizedBox(height: 16),
-            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, onPressed: _save),
+            PrimaryButton(label: tr('Save'), icon: LucideIcons.check, busy: _saving, onPressed: _save),
           ],
         ),
       ),

@@ -429,6 +429,77 @@ Future<bool> confirmStopToSwitch(BuildContext context) async {
   return ok == true;
 }
 
+/// The app-wide messenger, for what is said outside any one screen (a chat switch that could not go ahead).
+final rootMessenger = GlobalKey<ScaffoldMessengerState>();
+
+/// Covers every screen while Stop and switch waits for the agent to stop, so the wait is visible and nothing else can
+/// be tapped meanwhile; and says it when the agent did not stop in time (the switch then does not happen).
+class StopToSwitchOverlay extends StatefulWidget {
+  const StopToSwitchOverlay({super.key, required this.agent, required this.child});
+  final AgentController agent;
+  final Widget child;
+
+  @override
+  State<StopToSwitchOverlay> createState() => _StopToSwitchOverlayState();
+}
+
+class _StopToSwitchOverlayState extends State<StopToSwitchOverlay> {
+  late final StreamSubscription<String> _problems;
+
+  @override
+  void initState() {
+    super.initState();
+    _problems = widget.agent.switchProblems.stream.listen((m) {
+      rootMessenger.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(tr(m))));
+    });
+  }
+
+  @override
+  void dispose() {
+    _problems.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return ListenableBuilder(
+      listenable: widget.agent,
+      builder: (context, child) => Stack(
+        children: [
+          child!,
+          if (widget.agent.stoppingToSwitch)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black.withValues(alpha: 0.35),
+                child: Center(
+                  child: Material(
+                    color: p.surface,
+                    borderRadius: BorderRadius.circular(Radii.lg),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const BusySpinner(size: 18),
+                          const SizedBox(width: 12),
+                          Text(tr('Stopping the agent…'), style: Theme.of(context).textTheme.bodyMedium),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      child: widget.child,
+    );
+  }
+}
+
 Future<bool> confirmBypass(BuildContext context) async =>
     await showDialog<bool>(
       context: context,

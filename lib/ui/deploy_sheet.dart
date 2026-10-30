@@ -33,15 +33,41 @@ extension on DeployTarget {
 /// Where on Cloudflare: Workers (static assets and code) or Pages.
 enum CloudflareMode { workers, pages }
 
+/// True while the deploy sheet is being prepared (accounts, projects and the container are read first); the Deploy
+/// button shows a spinner and takes no second tap meanwhile.
+final deployPreparing = ValueNotifier<bool>(false);
+
+/// One deploy flow at a time: a second tap on Deploy while one is open (or still being prepared) does nothing.
+bool _deployOpen = false;
+
 /// Deploys the current session's project folder (or a subfolder of it).
 Future<void> showDeploySheet(BuildContext context, AgentController agent) async {
-  await agent.integrations.refresh();
-  await agent.integrations.refreshProjects();
-  // Whether a build can run (Cloudflare's "Build first" needs the container).
+  if (_deployOpen) return;
+  _deployOpen = true;
   try {
-    await agent.integrations.refreshContainer();
-  } catch (_) {
-    // Unknown: Build first stays off.
+    await _deployFlow(context, agent);
+  } finally {
+    _deployOpen = false;
+    deployPreparing.value = false;
+  }
+}
+
+Future<void> _deployFlow(BuildContext context, AgentController agent) async {
+  deployPreparing.value = true;
+  try {
+    await Future.wait([
+      agent.integrations.refresh(),
+      agent.integrations.refreshProjects(),
+      // Whether a build can run (Cloudflare's "Build first" needs the container). Unknown: Build first stays off.
+      agent.integrations.refreshContainer().then((_) {}).catchError((_) {}),
+    ]);
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not prepare the deploy')}: $e')));
+    }
+    return;
+  } finally {
+    deployPreparing.value = false;
   }
   if (!context.mounted) return;
   final request = await showModalBottomSheet<_DeployRequest>(
@@ -55,12 +81,12 @@ Future<void> showDeploySheet(BuildContext context, AgentController agent) async 
   // often web-facing: show the resolved destination and what stays behind,
   // and require an explicit confirmation before uploading.
   if (request.target == 'github_pages' || request.target == 'vercel' || request.target == 'ssh') {
-    final plan = await agent.integrations.deployPlan(
-      target: request.target,
-      dir: request.dir,
-      options: request.options,
+    final plan = await runWithProgress(
+      context,
+      tr('Checking what will be uploaded…'),
+      () => agent.integrations.deployPlan(target: request.target, dir: request.dir, options: request.options),
     );
-    if (!context.mounted) return;
+    if (plan == null || !context.mounted) return;
     final folder = request.dir == agent.cwd ? '.' : request.dir.replaceFirst('${agent.cwd}/', '');
     final ok = await showDialog<bool>(
       context: context,

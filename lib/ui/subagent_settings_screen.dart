@@ -59,6 +59,20 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
     it.refreshSettings().catchError((_) => it.settings ?? AppSettings(const {}));
   }
 
+  /// The subagents' approval setting being saved (`follow` for the switch, or a mode), shown as chosen with a spinner
+  /// until the host has it; put back when saving failed.
+  String? _approvalSaving;
+
+  Future<void> _saveApproval(String pending, Map<String, dynamic> patch) async {
+    if (_approvalSaving != null) return;
+    setState(() => _approvalSaving = pending);
+    try {
+      await _save(patch);
+    } finally {
+      if (mounted) setState(() => _approvalSaving = null);
+    }
+  }
+
   Future<bool> _save(Map<String, dynamic> patch) async {
     try {
       await it.updateSettings(patch);
@@ -82,8 +96,13 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
         final cost = s?.subagentCreditLimit ?? subagentDefaultCredits;
         final time = s?.subagentMinutesLimit ?? subagentDefaultMinutes;
         final chatMode = s?.approvalMode ?? agent.approvalMode;
-        final override = s?.subagentApprovalOverride ?? false;
-        final mode = override ? (s?.subagentApprovalMode ?? chatMode) : chatMode;
+        final saving = _approvalSaving;
+        final override = saving == null ? s?.subagentApprovalOverride ?? false : saving != 'follow';
+        final mode = saving != null && saving != 'follow'
+            ? saving
+            : override
+            ? (s?.subagentApprovalMode ?? chatMode)
+            : chatMode;
         final compact = Appearance.instance.compact;
         final gap = compact ? 8.0 : 12.0;
         EdgeInsets label() => EdgeInsets.fromLTRB(4, compact ? 14 : 22, 4, compact ? 8 : 10);
@@ -166,8 +185,17 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                     color: p.accent,
                     title: tr('Same as the chat'),
                     subtitle: '${tr('Chat setting')}: ${_approvalModes()[chatMode] ?? chatMode}',
-                    onTap: () => _setFollow(override, chatMode),
-                    trailing: Switch(value: !override, onChanged: (v) => _setFollow(v, chatMode)),
+                    onTap: saving != null ? null : () => _setFollow(override, chatMode),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (saving != null) ...[const BusySpinner(), const SizedBox(width: 8)],
+                        Switch(
+                          value: !override,
+                          onChanged: saving != null ? null : (v) => _setFollow(v, chatMode),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -178,13 +206,16 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                 child: override
                     ? Padding(
                         padding: EdgeInsets.only(top: gap),
-                        child: PillSegments<String>(
-                          value: mode,
-                          options: _approvalModes(),
-                          onChanged: (v) async {
-                            if (v == 'auto' && !await confirmBypass(context)) return;
-                            await _save({'subagentApprovalMode': v});
-                          },
+                        child: IgnorePointer(
+                          ignoring: saving != null,
+                          child: PillSegments<String>(
+                            value: mode,
+                            options: _approvalModes(),
+                            onChanged: (v) async {
+                              if (v == 'auto' && !await confirmBypass(context)) return;
+                              await _saveApproval(v, {'subagentApprovalMode': v});
+                            },
+                          ),
                         ),
                       )
                     : const SizedBox(width: double.infinity),
@@ -269,7 +300,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
   /// from the chat's current mode, which the segments below then change.
   Future<void> _setFollow(bool follow, String chatMode) async {
     HapticFeedback.selectionClick();
-    await _save({'subagentApprovalMode': follow ? null : chatMode});
+    await _saveApproval(follow ? 'follow' : chatMode, {'subagentApprovalMode': follow ? null : chatMode});
   }
 }
 

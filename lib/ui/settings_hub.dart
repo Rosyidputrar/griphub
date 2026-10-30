@@ -41,6 +41,26 @@ class SettingsHub extends StatefulWidget {
 }
 
 class _SettingsHubState extends State<SettingsHub> {
+  /// The approval mode being saved: shown as chosen, with a spinner, until the host has it (or put back if it failed).
+  String? _approvalSaving;
+
+  Future<void> _setApprovalMode(String v) async {
+    if (_approvalSaving != null) return;
+    if (v == 'auto' && !await confirmBypass(context)) return;
+    if (!mounted) return;
+    setState(() => _approvalSaving = v);
+    try {
+      await widget.agent.integrations.updateSettings({'approvalMode': v});
+      widget.agent.approvalMode = v;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not change approvals')}: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _approvalSaving = null);
+    }
+  }
+
   int? skillCount;
 
   AgentController get agent => widget.agent;
@@ -303,13 +323,10 @@ class _SettingsHubState extends State<SettingsHub> {
               SectionLabel(tr('Agent behaviour')),
               _Segmented<String>(
                 label: tr('Approvals'),
-                value: it.settings?.approvalMode ?? agent.approvalMode,
+                value: _approvalSaving ?? it.settings?.approvalMode ?? agent.approvalMode,
                 options: {'ask_all': tr('Ask all'), 'ask_risky': tr('Risky only'), 'auto': tr('Bypass all')},
-                onChanged: (v) async {
-                  if (v == 'auto' && !await confirmBypass(context)) return;
-                  await it.updateSettings({'approvalMode': v});
-                  agent.approvalMode = v;
-                },
+                busy: _approvalSaving != null,
+                onChanged: _setApprovalMode,
               ),
               if ((it.settings?.approvalMode ?? agent.approvalMode) == 'auto')
                 Padding(
@@ -588,11 +605,20 @@ extension on String {
 
 /// A full-width segmented control with an optional caption above it.
 class _Segmented<T> extends StatelessWidget {
-  const _Segmented({required this.value, required this.options, required this.onChanged, this.label});
+  const _Segmented({
+    required this.value,
+    required this.options,
+    required this.onChanged,
+    this.label,
+    this.busy = false,
+  });
   final T value;
   final Map<T, String> options;
   final ValueChanged<T> onChanged;
   final String? label;
+
+  /// The choice is being saved: a spinner by the label, and no other choice until it is.
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -602,9 +628,17 @@ class _Segmented<T> extends StatelessWidget {
         if (label != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
-            child: Text(label!, style: Theme.of(context).textTheme.labelMedium),
+            child: Row(
+              children: [
+                Text(label!, style: Theme.of(context).textTheme.labelMedium),
+                if (busy) ...[const SizedBox(width: 8), const BusySpinner(size: 12)],
+              ],
+            ),
           ),
-        PillSegments<T>(value: value, options: options, onChanged: onChanged),
+        IgnorePointer(
+          ignoring: busy,
+          child: PillSegments<T>(value: value, options: options, onChanged: onChanged),
+        ),
       ],
     );
   }

@@ -30,6 +30,30 @@ class _ModelSheet extends StatefulWidget {
 class _ModelSheetState extends State<_ModelSheet> {
   String query = '';
 
+  /// The model being switched to. The sheet stays open, with a spinner on its row, until the host has it: then it
+  /// closes; if it fails, the sheet stays and says why.
+  String? _saving;
+
+  /// Why the last switch did not happen, shown at the top of the sheet (a snackbar would sit behind it).
+  String? _error;
+
+  Future<void> _pick(ModelInfo model) async {
+    if (_saving != null) return;
+    if (widget.agent.model?.key == model.key) return Navigator.of(context).pop();
+    setState(() {
+      _saving = model.key;
+      _error = null;
+    });
+    try {
+      await widget.agent.setModel(model);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = tr(e.toString()));
+    } finally {
+      if (mounted) setState(() => _saving = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -73,6 +97,17 @@ class _ModelSheetState extends State<_ModelSheet> {
                   ],
                 ),
               ),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: Text(
+                      '${tr('Could not switch the model')}: $_error',
+                      style: text.bodySmall?.copyWith(color: p.danger),
+                    ),
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                 child: TextField(
@@ -104,14 +139,15 @@ class _ModelSheetState extends State<_ModelSheet> {
                               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
                               child: Text(tr('Favorites').toUpperCase(), style: text.labelSmall),
                             ),
-                            for (final m in favorites) _ModelTile(model: m, agent: agent),
+                            for (final m in favorites) _ModelTile(model: m, agent: agent, saving: _saving, onPick: _pick),
                           ],
                           for (final entry in byProvider.entries) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
                               child: Text((names[entry.key] ?? entry.key).toUpperCase(), style: text.labelSmall),
                             ),
-                            for (final m in entry.value) _ModelTile(model: m, agent: agent),
+                            for (final m in entry.value)
+                              _ModelTile(model: m, agent: agent, saving: _saving, onPick: _pick),
                           ],
                         ],
                       ),
@@ -125,9 +161,13 @@ class _ModelSheetState extends State<_ModelSheet> {
 }
 
 class _ModelTile extends StatelessWidget {
-  const _ModelTile({required this.model, required this.agent});
+  const _ModelTile({required this.model, required this.agent, required this.saving, required this.onPick});
   final ModelInfo model;
   final AgentController agent;
+
+  /// The key of the model being switched to, if any: that row spins, the others wait.
+  final String? saving;
+  final Future<void> Function(ModelInfo) onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -146,14 +186,7 @@ class _ModelTile extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return ListTile(
       enabled: available,
-      onTap: () async {
-        Navigator.of(context).pop();
-        try {
-          await agent.setModel(model);
-        } catch (e) {
-          if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(e.toString()))));
-        }
-      },
+      onTap: saving != null ? null : () => onPick(model),
       title: Text(model.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,7 +234,14 @@ class _ModelTile extends StatelessWidget {
             icon: Icon(LucideIcons.star, size: 18, color: isFav ? p.warning : p.muted),
           ),
           // The check keeps its slot on every row, so the stars line up down the list.
-          SizedBox(width: 22, child: selected ? Icon(LucideIcons.check, size: 18, color: p.text) : null),
+          SizedBox(
+            width: 22,
+            child: saving == model.key
+                ? const Center(child: BusySpinner())
+                : selected
+                ? Icon(LucideIcons.check, size: 18, color: p.text)
+                : null,
+          ),
         ],
       ),
     );
