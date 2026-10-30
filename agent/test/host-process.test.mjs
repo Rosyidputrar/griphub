@@ -125,6 +125,22 @@ test("phone mode: ready, then commands; no hello_server and no seq; closing stdi
 	assert.ok(Date.now() - t0 < 1500, `exited in ${Date.now() - t0} ms`);
 });
 
+test("phone mode: files_find gives the composer's @ list from the chat's folder, best match first", async (t) => {
+	const dir = home(t);
+	const ws = join(dir, "workspace");
+	mkdirSync(join(ws, "src", "ui"), { recursive: true });
+	mkdirSync(join(ws, "node_modules", "app"), { recursive: true });
+	for (const f of ["src/ui/app_bar.dart", "src/app.dart", "README.md", "node_modules/app/index.js"]) writeFileSync(join(ws, f), "");
+	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	child.stdin.write(`${JSON.stringify({ id: 1, type: "files_find", query: "app" })}\n`);
+	const r = await until((m) => m.type === "response" && m.id === 1);
+	assert.equal(r.ok, true, r.error);
+	assert.deepEqual(r.data.files, ["src/app.dart", "src/ui/app_bar.dart"], "dependencies left out");
+});
+
 // ---------------------------------------------------------------------------
 // Server: daemon on a unix socket
 
@@ -749,6 +765,62 @@ async function phoneWithModel(t, contextWindow, compactAt) {
 	};
 	return { records, until, call, say };
 }
+
+test("review before a commit: lines per file against the last commit, and a message the chat's model writes", async (t) => {
+	const dir = home(t);
+	const ws = join(dir, "workspace");
+	const g = (...args) => execFileSync("git", ["-c", "user.name=T", "-c", "user.email=t@t", ...args], { cwd: ws });
+	g("init", "-q");
+	writeFileSync(join(ws, "login.js"), "const a = 1;\nconst b = 2;\n");
+	writeFileSync(join(ws, "logo.png"), Buffer.from([137, 80, 0, 1]));
+	g("add", "-A");
+	g("commit", "-qm", "start");
+	writeFileSync(join(ws, "login.js"), "const a = 1;\nconst b = 3;\nconst c = 4;\n");
+	writeFileSync(join(ws, "logo.png"), Buffer.from([137, 80, 0, 2]));
+	writeFileSync(join(ws, "notes.md"), "one\ntwo\nthree");
+	writeFileSync(join(dir, "release"), "");
+	const bodies = join(dir, "bodies.jsonl");
+	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
+		cwd: ws,
+		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Trim the email before signing in", MOCK_BODIES: bodies }),
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	let id = 0;
+	const call = async (type, args = {}) => {
+		const n = ++id;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	const review = await call("git_review");
+	assert.equal(review.ok, true, review.error);
+	assert.deepEqual(review.data.stats["login.js"], { additions: 2, deletions: 1 });
+	assert.deepEqual(review.data.stats["notes.md"], { additions: 3, deletions: 0 }, "an untracked file counts its lines");
+	assert.equal(review.data.stats["logo.png"].binary, true);
+	assert.deepEqual(review.data.files.map((f) => f.path).sort(), ["login.js", "logo.png", "notes.md"]);
+
+	const noModel = await call("git_commit_message");
+	assert.equal(noModel.ok, false, "no model chosen yet");
+	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: "mock-model", name: "Mock", contextWindow: 200000 }] } })).ok, true);
+	assert.equal((await call("set_model", { provider: "griphub", model: "mock-model" })).ok, true);
+	const msg = await call("git_commit_message");
+	assert.equal(msg.ok, true, msg.error);
+	assert.match(msg.data.message, /^Trim the email before signing in/);
+	const asked = readFileSync(bodies, "utf8").trim().split("\n").map((l) => JSON.stringify(JSON.parse(l))).join("\n");
+	assert.match(asked, /commit message/);
+	assert.match(asked, /login\.js/);
+	assert.match(asked, /notes\.md/, "new files are named");
+	assert.match(asked, /const c = 4/, "the diff itself");
+
+	// Committed: nothing left, and no message for nothing.
+	g("add", "-A");
+	g("commit", "-qm", msg.data.message);
+	const none = await call("git_commit_message");
+	assert.equal(none.ok, false);
+	assert.match(none.error, /nothing to commit/);
+});
 
 const compactions = (records) => records.filter((r) => r.type === "event" && r.event.type.startsWith("compaction")).map((r) => r.event);
 

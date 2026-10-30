@@ -95,6 +95,45 @@ IconData _iconFor(String name, bool isDir) {
 /// One listed directory entry with its stat, captured once per refresh so sorting and rendering stay cheap.
 typedef _Entry = FsEntry;
 
+/// How a folder's entries are ordered.
+enum FileSort { name, recent, largest, type }
+
+/// What kind of file an entry is, for the filter chips.
+enum FileKind { folder, code, image, document, data, archive, media, other }
+
+FileKind fileKind(FsEntry e) {
+  if (e.isDir) return FileKind.folder;
+  final ext = _extOf(e.name);
+  if (_imageExts.contains(ext) || const {'svg', 'ico', 'bmp', 'heic'}.contains(ext)) return FileKind.image;
+  if (_codeExts.contains(ext) || _configExts.contains(ext) || ext == 'json' || ext == 'jsonc') return FileKind.code;
+  if (const {'md', 'txt', 'rst', 'log', 'pdf', 'doc', 'docx', 'rtf', 'odt'}.contains(ext)) return FileKind.document;
+  if (_dbExts.contains(ext) || _sheetExts.contains(ext) || const {'parquet', 'ndjson', 'jsonl'}.contains(ext)) {
+    return FileKind.data;
+  }
+  if (_archiveExts.contains(ext)) return FileKind.archive;
+  if (_videoExts.contains(ext) || _audioExts.contains(ext)) return FileKind.media;
+  return FileKind.other;
+}
+
+/// [entries] in [sort]'s order: names A to Z, the most recently edited first, the largest first, or by type
+/// (extension) then name. [foldersFirst] keeps folders above files whatever the order; ties go by name.
+List<FsEntry> sortEntries(List<FsEntry> entries, FileSort sort, {bool foldersFirst = true}) {
+  int byName(FsEntry a, FsEntry b) => a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  final out = [...entries];
+  out.sort((a, b) {
+    if (foldersFirst && a.isDir != b.isDir) return a.isDir ? -1 : 1;
+    final c = switch (sort) {
+      FileSort.name => 0,
+      FileSort.recent => b.modified.compareTo(a.modified),
+      // A folder's own size says nothing about what is in it: folders go after files, by name.
+      FileSort.largest => a.isDir != b.isDir ? (a.isDir ? 1 : -1) : (a.isDir ? 0 : b.size.compareTo(a.size)),
+      FileSort.type => _extOf(a.name).compareTo(_extOf(b.name)),
+    };
+    return c != 0 ? c : byName(a, b);
+  });
+  return out;
+}
+
 /// Browses the project on disk so the user can look at, open and tidy files without asking the agent.
 class FilesScreen extends StatefulWidget {
   const FilesScreen({super.key, required this.agent, this.root});
@@ -114,6 +153,12 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
   bool _loading = true;
   bool _showHidden = false;
   String? _error;
+
+  /// The order and the kind shown, kept while the app runs: the order stays as chosen from folder to folder, the kind
+  /// goes back to everything in a new folder.
+  static FileSort _sort = FileSort.name;
+  static bool _foldersFirst = true;
+  FileKind? _kind;
 
   /// Counts listings, so one that comes back after the user moved on (a slow folder, a slow server) is dropped instead
   /// of showing the old folder's entries under the new folder's title.
@@ -138,10 +183,6 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
     if (!_loading) setState(() => _loading = true);
     try {
       final items = await fs.list(dir);
-      items.sort((a, b) {
-        if (a.isDir != b.isDir) return a.isDir ? -1 : 1;
-        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-      });
       if (!mounted || listing != _listing) return;
       setState(() {
         _entries = items;
@@ -166,6 +207,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
       _entries = [];
       _error = null;
       _loading = true;
+      _kind = null;
     });
     _load();
   }
@@ -576,6 +618,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         body: Column(
           children: [
             _Breadcrumbs(root: _root, dir: _dir, onTap: _go),
+            if (_entries.isNotEmpty) _sortBar(context),
             // A reload after a change, or a change on its way: the list stays, the bar says it is not final yet.
             BusyBar(busy: busy() || (_loading && _entries.isNotEmpty)),
             Expanded(child: _list(context)),
@@ -589,8 +632,14 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
     final p = context.palette;
     final t = Theme.of(context).textTheme;
     if (_loading && _entries.isEmpty && _error == null) return const Center(child: BusySpinner.page());
-    final visible = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
-    final hiddenCount = _entries.length - visible.length;
+    final shown = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
+    final hiddenCount = _entries.length - shown.length;
+    final kind = _kinds(shown).contains(_kind) ? _kind : null;
+    final visible = sortEntries(
+      kind == null ? shown : shown.where((e) => fileKind(e) == kind).toList(),
+      _sort,
+      foldersFirst: _foldersFirst,
+    );
     Widget child;
     if (_error != null) {
       child = ListView(
@@ -637,6 +686,99 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
       );
     }
     return RefreshIndicator(onRefresh: _load, child: child);
+  }
+
+  /// The kinds among [entries], in a fixed order: only those get a chip, so no filter ever shows an empty folder.
+  List<FileKind> _kinds(List<_Entry> entries) {
+    final present = {for (final e in entries) fileKind(e)};
+    return [for (final k in FileKind.values) if (present.contains(k)) k];
+  }
+
+  static String _sortLabel(FileSort s) => switch (s) {
+    FileSort.name => tr('Name'),
+    FileSort.recent => tr('Recently edited'),
+    FileSort.largest => tr('Largest'),
+    FileSort.type => tr('Type'),
+  };
+
+  static IconData _sortIcon(FileSort s) => switch (s) {
+    FileSort.name => LucideIcons.arrowDownAZ,
+    FileSort.recent => LucideIcons.clock,
+    FileSort.largest => LucideIcons.arrowDownWideNarrow,
+    FileSort.type => LucideIcons.shapes,
+  };
+
+  static String _kindLabel(FileKind k) => switch (k) {
+    FileKind.folder => tr('Folders'),
+    FileKind.code => tr('Code'),
+    FileKind.image => tr('Images'),
+    FileKind.document => tr('Documents'),
+    FileKind.data => tr('Data'),
+    FileKind.archive => tr('Archives'),
+    FileKind.media => tr('Media'),
+    FileKind.other => tr('Other'),
+  };
+
+  /// The order (a menu, with "Folders first") and the kinds in this folder as chips, on one row that scrolls sideways.
+  Widget _sortBar(BuildContext context) {
+    final p = context.palette;
+    final shown = _showHidden ? _entries : _entries.where((e) => !e.name.startsWith('.')).toList();
+    final kinds = _kinds(shown);
+    final kind = kinds.contains(_kind) ? _kind : null;
+    Widget chip(String label, bool on, VoidCallback onTap) => Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: on,
+        onSelected: (_) => onTap(),
+        labelStyle: TextStyle(color: on ? p.inverse : p.text, fontSize: 12.5, fontWeight: FontWeight.w500),
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          PopupMenuButton<Object>(
+            tooltip: tr('Sort by'),
+            onSelected: (v) => setState(() {
+              if (v is FileSort) _sort = v;
+              if (v == 'folders') _foldersFirst = !_foldersFirst;
+            }),
+            itemBuilder: (_) => [
+              for (final s in FileSort.values)
+                CheckedPopupMenuItem<Object>(value: s, checked: _sort == s, child: Text(_sortLabel(s))),
+              const PopupMenuDivider(),
+              CheckedPopupMenuItem<Object>(value: 'folders', checked: _foldersFirst, child: Text(tr('Folders first'))),
+            ],
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(_sortIcon(_sort), size: 15, color: p.text),
+                    const SizedBox(width: 6),
+                    Text(_sortLabel(_sort), style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text)),
+                    const SizedBox(width: 2),
+                    Icon(LucideIcons.chevronDown, size: 14, color: p.muted),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // One kind alone needs no filter.
+          if (kinds.length > 1) ...[
+            const SizedBox(width: 8),
+            chip(tr('All'), kind == null, () => setState(() => _kind = null)),
+            for (final k in kinds) chip(_kindLabel(k), kind == k, () => setState(() => _kind = kind == k ? null : k)),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _tile(BuildContext context, _Entry e) {

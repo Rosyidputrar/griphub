@@ -9,6 +9,7 @@ import '../agent/models.dart';
 import '../agent/pricing.dart';
 import '../agent/subagents.dart';
 import 'i18n.dart';
+import 'diff_view.dart';
 import 'errors.dart';
 import 'kit.dart';
 import 'message_views.dart' show MarkdownText;
@@ -525,7 +526,10 @@ class _SubagentApprovalPanelState extends State<SubagentApprovalPanel> {
               ),
             ],
           ),
-          if (ap.summary.isNotEmpty) ...[
+          if (ap.patch != null) ...[
+            const SizedBox(height: 8),
+            ApprovalPatch(patch: ap.patch!, maxHeight: widget.compact ? 120 : 260),
+          ] else if (ap.summary.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
               constraints: BoxConstraints(maxHeight: widget.compact ? 64 : 140),

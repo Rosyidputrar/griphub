@@ -67,6 +67,7 @@ import {
 	detectTests,
 	readZip,
 	search,
+	findFiles,
 	Templates,
 	Tunnels,
 	usageSummary,
@@ -841,6 +842,52 @@ function budgetError(): string | null {
 		: null;
 }
 
+/** What the user asked for lately in this chat, newest last, for a commit message to say why. */
+function recentAsks(s: AgentSession, n = 3): string[] {
+	const out: string[] = [];
+	for (const m of s.messages as any[]) {
+		if (m.role !== "user") continue;
+		const text = typeof m.content === "string" ? m.content : (m.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+		if (text.trim()) out.push(text.trim().slice(0, 600));
+	}
+	return out.slice(-n);
+}
+
+/**
+ * A commit message for the project's uncommitted changes, written by the chat's model in one short request (no tools,
+ * not part of the chat): a subject in the imperative under 72 characters, then a few lines on what and why, from the
+ * diff and what the user asked for. Counts against the daily budget like anything else the model does.
+ */
+async function commitMessage(s: AgentSession, cwd: string): Promise<string> {
+	checkBudget();
+	const model = s.model;
+	if (!model) throw new Error("Choose a model first.");
+	const change = await gitops.changeSummary(cwd);
+	if (!change) throw new Error("This folder is not a git repository.");
+	if (change.files === 0) throw new Error("There is nothing to commit.");
+	const asks = recentAsks(s);
+	const prompt = [
+		"Write a git commit message for the change below.",
+		"First line: what the change does, in the imperative mood, under 72 characters, no trailing period.",
+		"Then, only if it helps, a blank line and up to four short lines on what changed and why.",
+		"Match the language of the user's requests. Reply with the message only: no quotes, no code fence, no preamble.",
+		asks.length ? `\nWhat the user asked for:\n${asks.map((a) => `- ${a.replace(/\s+/g, " ")}`).join("\n")}` : "",
+		`\nFiles changed:\n${change.stat || "(none tracked yet)"}`,
+		change.untracked.length ? `\nNew files:\n${change.untracked.slice(0, 50).join("\n")}` : "",
+		`\nDiff:\n${change.patch}`,
+	].join("\n");
+	const reply = await (s as any).modelRuntime.completeSimple(
+		model,
+		{ messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }] },
+		{ maxTokens: 400, cacheRetention: "none" },
+	);
+	if (reply?.stopReason === "error") throw new Error(reply.errorMessage || "The model could not write a message.");
+	const text = (reply?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("").trim();
+	const message = text.replace(/^```[a-z]*\n?|\n?```$/g, "").replace(/^["']|["']$/g, "").trim();
+	if (!message) throw new Error("The model did not write a message.");
+	return message;
+}
+
 function checkBudget() {
 	const error = budgetError();
 	if (error) throw new Error(error);
@@ -1494,6 +1541,10 @@ async function handle(cmd: Command): Promise<unknown> {
 			return gitops.status(cwd);
 		case "git_diff":
 			return gitops.diff(cwd, cmd.file, !!cmd.staged);
+		case "git_review":
+			return gitops.review(cwd);
+		case "git_commit_message":
+			return { message: await commitMessage(s, cwd) };
 		case "git_stage":
 			await gitops.stage(cwd, cmd.paths ?? "all");
 			return gitops.status(cwd);
@@ -1574,6 +1625,8 @@ async function handle(cmd: Command): Promise<unknown> {
 		// Project tools (workbench.ts).
 		case "search":
 			return search(cwd, String(cmd.query ?? ""), { regex: !!cmd.regex, caseSensitive: !!cmd.caseSensitive, glob: cmd.glob });
+		case "files_find":
+			return findFiles(cwd, String(cmd.query ?? ""), Number(cmd.limit ?? 30));
 		case "db_tables":
 			return dbTables(cmd.path);
 		case "db_query":

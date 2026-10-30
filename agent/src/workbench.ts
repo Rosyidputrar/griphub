@@ -57,6 +57,142 @@ export function search(cwd: string, query: string, opts: { regex?: boolean; case
 }
 
 // ---------------------------------------------------------------------------
+// Files by name (the composer's @ mentions)
+
+/** Folders never offered as @ mentions wherever they are: dependencies, caches and build output. */
+const SKIP_DIRS = new Set([".git", "node_modules", ".dart_tool", "build", "dist", ".next", ".venv", "venv", "__pycache__", ".gradle", "Pods", "target", ".cache"]);
+const LIST_CAP = 20_000;
+
+/** The project's files, briefly remembered: one list per few seconds of typing, not one per keystroke. */
+let listed: { cwd: string; at: number; files: string[]; truncated: boolean } | null = null;
+
+/**
+ * The project's top `.gitignore`, as a test of a path from the project's top: what ripgrep leaves out, for the walk
+ * that stands in for it where there is no ripgrep (some phones, some CI runners). Covers the common forms: a name
+ * (`secret`, matched in any folder), a path (`/dist`, `docs/build`), a folder only (`tmp/`), and `*`, `?`, `**`
+ * wildcards. A negation (`!keep.me`) isn't followed: a file it brings back stays out of the list, which costs an @
+ * suggestion, never offers an ignored file.
+ */
+export function gitignoreTest(cwd: string): (rel: string, dir: boolean) => boolean {
+	let text = "";
+	try {
+		text = readFileSync(join(cwd, ".gitignore"), "utf8");
+	} catch {
+		return () => false;
+	}
+	const rules: { re: RegExp; dirOnly: boolean; whole: boolean }[] = [];
+	for (const raw of text.split(/\r?\n/)) {
+		let line = raw.trim();
+		if (!line || line.startsWith("#") || line.startsWith("!")) continue;
+		const dirOnly = line.endsWith("/");
+		if (dirOnly) line = line.replace(/\/+$/, "");
+		const anchored = line.startsWith("/");
+		if (anchored) line = line.replace(/^\/+/, "");
+		if (!line) continue;
+		const esc = (part: string) => part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]");
+		// `**/` is any number of folders, none included; another `**` is anything.
+		const glob = line
+			.split("**/")
+			.map((p) => p.split("**").map(esc).join(".*"))
+			.join("(?:.*/)?");
+		rules.push({ re: new RegExp(`^${glob}$`), dirOnly, whole: anchored || line.includes("/") });
+	}
+	return (rel, dir) =>
+		rules.some((r) => (!r.dirOnly || dir) && (r.whole ? r.re.test(rel) : r.re.test(rel.slice(rel.lastIndexOf("/") + 1))));
+}
+
+function walk(cwd: string): { files: string[]; truncated: boolean } {
+	const ignored = gitignoreTest(cwd);
+	const files: string[] = [];
+	const stack = [""];
+	while (stack.length) {
+		const rel = stack.pop()!;
+		let names: import("node:fs").Dirent[];
+		try {
+			names = readdirSync(join(cwd, rel), { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const d of names) {
+			const path = rel ? `${rel}/${d.name}` : d.name;
+			if (d.isDirectory()) {
+				if (!SKIP_DIRS.has(d.name) && !ignored(path, true)) stack.push(path);
+			} else if (d.isFile() && !ignored(path, false)) {
+				files.push(path);
+				if (files.length >= LIST_CAP) return { files, truncated: true };
+			}
+		}
+	}
+	return { files, truncated: false };
+}
+
+/** All of the project's files: ripgrep's list (which keeps out what .gitignore does), or a plain walk without it. */
+function projectFiles(cwd: string): Promise<{ files: string[]; truncated: boolean }> {
+	if (listed && listed.cwd === cwd && Date.now() - listed.at < 5_000) return Promise.resolve(listed);
+	return new Promise((resolve) => {
+		const files: string[] = [];
+		let buf = "";
+		let truncated = false;
+		let done = false;
+		const finish = (r: { files: string[]; truncated: boolean }) => {
+			if (done) return;
+			done = true;
+			listed = { cwd, at: Date.now(), ...r };
+			resolve(r);
+		};
+		const args = ["--files", "--hidden", "--no-require-git", ...[...SKIP_DIRS].flatMap((d) => ["-g", `!${d}/`])];
+		const child = spawn("rg", args, { cwd, env: process.env });
+		child.stdout.on("data", (chunk) => {
+			buf += chunk;
+			let nl: number;
+			while ((nl = buf.indexOf("\n")) >= 0) {
+				const line = buf.slice(0, nl).replace(/^\.\//, "");
+				buf = buf.slice(nl + 1);
+				if (!line) continue;
+				files.push(line);
+				if (files.length >= LIST_CAP) {
+					truncated = true;
+					child.kill();
+					return finish({ files, truncated });
+				}
+			}
+		});
+		child.on("error", () => finish(walk(cwd)));
+		child.on("close", (code) => finish(code === 0 || code === 1 || truncated ? { files, truncated } : walk(cwd)));
+	});
+}
+
+/**
+ * How well [path] answers [query], higher is better, or -1 when it doesn't: the file's name containing it beats a
+ * folder containing it, which beats its letters merely appearing in order ("chscr" for chat_screen); shorter paths
+ * win ties.
+ */
+export function fileScore(path: string, query: string): number {
+	const p = path.toLowerCase();
+	const q = query.toLowerCase();
+	if (!q) return 1000 - p.length;
+	const name = p.slice(p.lastIndexOf("/") + 1);
+	if (name.startsWith(q)) return 4000 - p.length;
+	if (name.includes(q)) return 3000 - p.length;
+	if (p.includes(q)) return 2000 - p.length;
+	let i = 0;
+	for (const c of p) if (c === q[i]) i++;
+	return i === q.length ? 1000 - p.length : -1;
+}
+
+/** The project files best matching [query], for the composer's @ list. */
+export async function findFiles(cwd: string, query: string, limit = 30): Promise<{ files: string[]; truncated: boolean }> {
+	const { files, truncated } = await projectFiles(cwd);
+	const scored: [string, number][] = [];
+	for (const f of files) {
+		const s = fileScore(f, query.trim());
+		if (s >= 0) scored.push([f, s]);
+	}
+	scored.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+	return { files: scored.slice(0, Math.max(1, Math.min(limit, 100))).map(([f]) => f), truncated };
+}
+
+// ---------------------------------------------------------------------------
 // SQLite
 
 async function openDb(path: string) {

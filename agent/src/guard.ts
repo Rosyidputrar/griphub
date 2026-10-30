@@ -4,9 +4,10 @@
  * command output, and a checkpoint before the agent starts changing files.
  */
 
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { generateUnifiedPatch, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
  * When the agent must ask before acting. `deny_risky` is for runs nobody is watching (a server's background tasks):
@@ -22,6 +23,8 @@ export interface ApprovalRecord {
 	summary: string;
 	reason: string;
 	key: string;
+	/** For `edit` and `write`: what the file would become, as a unified patch. Absent when it can't be worked out. */
+	patch?: string;
 }
 
 export interface GuardHooks {
@@ -84,6 +87,79 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, m
 	return mcp && toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
 }
 
+/** Files and patches bigger than this aren't previewed on the card: the path alone, as before. */
+const PATCH_MAX_FILE = 512 * 1024;
+const PATCH_MAX_CHARS = 64 * 1024;
+
+/** A path as the file tools take it: `~` is the home folder, relative paths are from the project. */
+function toolPath(raw: string, cwd: string): string {
+	const p = raw.startsWith("@") ? raw.slice(1) : raw;
+	const expanded = p === "~" ? homedir() : p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : p;
+	return resolve(cwd, expanded);
+}
+
+/** The replacements an `edit` call asks for, in each shape models send them (pi's edit tool takes the same ones). */
+export function editsOf(input: Record<string, unknown>): { oldText: string; newText: string }[] | null {
+	const isEdit = (e: unknown): e is { oldText: string; newText: string } =>
+		!!e && typeof (e as any).oldText === "string" && typeof (e as any).newText === "string";
+	let edits: unknown = input.edits;
+	if (typeof edits === "string") {
+		try {
+			edits = JSON.parse(edits);
+		} catch {
+			return null;
+		}
+	}
+	const out = Array.isArray(edits) ? [...edits] : isEdit(edits) ? [edits] : [];
+	if (isEdit(input)) out.push({ oldText: input.oldText, newText: input.newText });
+	return out.length > 0 && out.every(isEdit) ? out : null;
+}
+
+/**
+ * What an `edit` or a `write` would do to its file, as a unified patch for the approval card, so the change is seen
+ * before it is allowed. Undefined when it can't be told for certain (an edit's text is missing from the file or is
+ * there twice, the file is unreadable or too big): the card then shows the path alone and the tool reports its own
+ * error if it runs.
+ */
+export async function proposedPatch(toolName: string, input: Record<string, unknown>, cwd: string): Promise<string | undefined> {
+	if ((toolName !== "edit" && toolName !== "write") || typeof input.path !== "string" || !input.path) return undefined;
+	const file = toolPath(input.path, cwd);
+	let before = "";
+	try {
+		const buf = await readFile(file);
+		if (buf.length > PATCH_MAX_FILE || buf.includes(0)) return undefined;
+		before = buf.toString("utf8");
+	} catch (e) {
+		// A new file: everything is added. An edit needs the file to exist.
+		if ((e as NodeJS.ErrnoException).code !== "ENOENT" || toolName === "edit") return undefined;
+	}
+	const lf = (t: string) => t.replace(/\r\n/g, "\n");
+	before = lf(before);
+	let after: string;
+	if (toolName === "write") {
+		if (typeof input.content !== "string" || input.content.length > PATCH_MAX_FILE) return undefined;
+		after = lf(input.content);
+	} else {
+		const edits = editsOf(input);
+		if (!edits) return undefined;
+		// Every edit is matched against the original, once, as pi's edit tool does; overlapping ones are refused there.
+		const spots: { at: number; length: number; text: string }[] = [];
+		for (const e of edits) {
+			const old = lf(e.oldText);
+			const at = old ? before.indexOf(old) : -1;
+			if (at < 0 || before.indexOf(old, at + 1) >= 0) return undefined;
+			spots.push({ at, length: old.length, text: lf(e.newText) });
+		}
+		spots.sort((a, b) => a.at - b.at);
+		for (let i = 1; i < spots.length; i++) if (spots[i].at < spots[i - 1].at + spots[i - 1].length) return undefined;
+		after = before;
+		for (const s of [...spots].reverse()) after = after.slice(0, s.at) + s.text + after.slice(s.at + s.length);
+	}
+	if (after === before) return undefined;
+	const patch = generateUnifiedPatch(input.path, before, after, 3);
+	return patch.length > PATCH_MAX_CHARS ? undefined : patch;
+}
+
 /** Summary line for the approval card. */
 function describe(toolName: string, input: Record<string, unknown>) {
 	if (toolName === "bash" || toolName === "background_job") return String(input.command ?? "");
@@ -135,8 +211,9 @@ export class Guard {
 		this.pending.clear();
 	}
 
-	private ask(toolName: string, input: Record<string, unknown>, reason: string, key: string) {
-		return this.request({ toolName, summary: describe(toolName, input), reason, key });
+	private async ask(toolName: string, input: Record<string, unknown>, reason: string, key: string) {
+		const patch = await proposedPatch(toolName, input, this.hooks.cwd()).catch(() => undefined);
+		return this.request({ toolName, summary: describe(toolName, input), reason, key, ...(patch ? { patch } : {}) });
 	}
 
 	private request(fields: Omit<ApprovalRecord, "type" | "approvalId">): Promise<boolean> {

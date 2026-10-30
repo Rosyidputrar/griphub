@@ -62,12 +62,22 @@ class QueuedSubagentMessage {
 
 /// A risky step the subagent paused on; answered from the detail modal.
 class SubagentApproval {
-  SubagentApproval({required this.approvalId, required this.toolName, required this.summary, required this.reason, required this.key});
+  SubagentApproval({
+    required this.approvalId,
+    required this.toolName,
+    required this.summary,
+    required this.reason,
+    required this.key,
+    this.patch,
+  });
   final String approvalId;
   final String toolName;
   final String summary;
   final String reason;
   final String key;
+
+  /// For an edit or a write: the change as a unified patch, when the host could work it out.
+  final String? patch;
 }
 
 class SubagentState {
@@ -409,6 +419,7 @@ class SubagentStore {
             summary: record['summary'] as String? ?? '',
             reason: record['reason'] as String? ?? '',
             key: record['key'] as String? ?? '',
+            patch: record['patch'] is String && (record['patch'] as String).trim().isNotEmpty ? record['patch'] as String : null,
           );
           // A stop in progress keeps saying so; the approval is about to be cancelled.
           if (s.status != SubagentStatus.stopping) s.status = SubagentStatus.waitingApproval;

@@ -18,11 +18,14 @@ import 'i18n.dart';
 import 'changes_screen.dart';
 import 'code_view.dart';
 import 'editor_screen.dart';
+import 'chat_export.dart';
+import 'diff_view.dart';
 import 'errors.dart';
 import 'files_screen.dart';
 import 'git_screen.dart';
 import 'kit.dart';
 import 'preview_open.dart';
+import 'review_screen.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
 import 'theme.dart';
@@ -660,18 +663,22 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                Container(
-                  width: double.infinity,
-                  constraints: const BoxConstraints(maxHeight: 110),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.md)),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      a.summary,
-                      style: TextStyle(fontFamily: mono, fontSize: 12, color: p.text, height: 1.45),
+                // An edit or a write shows what it changes, so it is allowed knowing that; anything else, what it runs.
+                if (a.patch != null)
+                  ApprovalPatch(patch: a.patch!)
+                else
+                  Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxHeight: 110),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.md)),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        a.summary,
+                        style: TextStyle(fontFamily: mono, fontSize: 12, color: p.text, height: 1.45),
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 10),
                 _ApprovalActions(
                   key: ValueKey(a.id),
@@ -728,32 +735,54 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: _responded ? null : () => _answer(allow: false),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
-            child: Text(tr('Deny')),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton(
-            onPressed: _responded ? null : () => _answer(allow: true, always: true),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
-            child: Text(tr('Always')),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: FilledButton(
-            onPressed: _responded ? null : () => _answer(allow: true),
-            style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
-            child: Text(tr('Allow')),
-          ),
-        ),
-      ],
+    final deny = OutlinedButton(
+      onPressed: _responded ? null : () => _answer(allow: false),
+      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
+      child: Text(tr('Deny')),
+    );
+    final always = OutlinedButton(
+      onPressed: _responded ? null : () => _answer(allow: true, always: true),
+      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
+      child: Text(tr('Always')),
+    );
+    final allow = FilledButton(
+      onPressed: _responded ? null : () => _answer(allow: true),
+      style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
+      child: Text(tr('Allow')),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Equal thirds must fit the widest label; on a narrow phone with large text "Izinkan" broke into "Izin/kan".
+        final style = Theme.of(context).textTheme.labelLarge;
+        final scaler = MediaQuery.textScalerOf(context);
+        var widest = 0.0;
+        for (final l in [tr('Deny'), tr('Always'), tr('Allow')]) {
+          final tp = TextPainter(
+            text: TextSpan(text: l, style: style),
+            textScaler: scaler,
+            maxLines: 1,
+            textDirection: Directionality.of(context),
+          )..layout();
+          if (tp.width > widest) widest = tp.width;
+          tp.dispose();
+        }
+        if ((widest + 48) * 3 + 16 > constraints.maxWidth) {
+          // Stacked: the likely answer on top, the destructive one last.
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [allow, const SizedBox(height: 8), always, const SizedBox(height: 8), deny],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: deny),
+            const SizedBox(width: 8),
+            Expanded(child: always),
+            const SizedBox(width: 8),
+            Expanded(child: allow),
+          ],
+        );
+      },
     );
   }
 }
@@ -799,6 +828,51 @@ class PlanBar extends StatelessWidget {
 // Dev servers
 
 /// A server the agent started: preview it, or share a public link.
+/// After the agent's turn, when the project has uncommitted changes: how many files, and the way to review and commit
+/// them. Closed, it stays away until the next turn.
+class ReviewBanner extends StatelessWidget {
+  const ReviewBanner({super.key, required this.files, required this.onReview, required this.onClose});
+  final int files;
+  final VoidCallback onReview;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Material(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(Radii.lg),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 2, 2),
+          child: Row(
+            children: [
+              Icon(LucideIcons.gitCommitHorizontal, size: 18, color: p.success),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  files == 1 ? tr('1 file changed') : tr('{n} files changed').replaceAll('{n}', '$files'),
+                  style: text.labelLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(onPressed: onReview, child: Text(tr('Review & commit'))),
+              IconButton(
+                tooltip: tr('Close'),
+                icon: Icon(LucideIcons.x, size: 18, color: p.muted),
+                onPressed: onClose,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class DevServerBanner extends StatefulWidget {
   const DevServerBanner({super.key, required this.agent});
   final AgentController agent;
@@ -930,31 +1004,115 @@ class SlashMenu extends StatelessWidget {
     final q = query.toLowerCase();
     final matches = commands.where((c) => c.name.toLowerCase().contains(q)).take(8).toList();
     if (matches.isEmpty) return const SizedBox.shrink();
+    // The fill is a Material's, not the box's: rows paint their touch ripple on the nearest Material, and a coloured
+    // box between them hid it.
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       constraints: const BoxConstraints(maxHeight: 260),
       decoration: BoxDecoration(
-        color: p.bg,
         borderRadius: BorderRadius.circular(Radii.lg),
-        border: Border.all(color: p.border),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
       ),
-      child: ListView(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        children: [
-          for (final c in matches)
-            ListTile(
-              dense: true,
-              leading: Icon(c.isSkill ? LucideIcons.puzzle : LucideIcons.slash, size: 18, color: p.accent),
-              title: Text(
-                '/${c.name}${c.hint != null ? '  ${c.hint}' : ''}',
-                style: TextStyle(fontFamily: mono, fontSize: 13, color: p.text),
+      child: Material(
+        color: p.bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.lg),
+          side: BorderSide(color: p.border),
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          children: [
+            for (final c in matches)
+              ListTile(
+                dense: true,
+                leading: Icon(c.isSkill ? LucideIcons.puzzle : LucideIcons.slash, size: 18, color: p.accent),
+                title: Text(
+                  '/${c.name}${c.hint != null ? '  ${c.hint}' : ''}',
+                  style: TextStyle(fontFamily: mono, fontSize: 13, color: p.text),
+                ),
+                subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () => onPick(c),
               ),
-              subtitle: Text(c.description, maxLines: 1, overflow: TextOverflow.ellipsis),
-              onTap: () => onPick(c),
-            ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Where an @ mention is being typed in [text]: the @ and what follows it up to the cursor, with no space in between,
+/// and the @ at the start or after a space (not an email address). Null when the cursor isn't in one.
+({int start, String query})? mentionAt(String text, int cursor) {
+  if (cursor < 0 || cursor > text.length) return null;
+  for (var i = cursor - 1; i >= 0; i--) {
+    final c = text[i];
+    if (c == '@') {
+      if (i > 0 && !RegExp(r'\s').hasMatch(text[i - 1])) return null;
+      return (start: i, query: text.substring(i + 1, cursor));
+    }
+    if (RegExp(r'\s').hasMatch(c)) return null;
+  }
+  return null;
+}
+
+/// [text] with the mention at [start] (up to [cursor]) replaced by `@path `, and where the cursor goes after it.
+({String text, int cursor}) insertMention(String text, int start, int cursor, String path) {
+  final mention = '@$path ';
+  // A space typed already after the cursor isn't doubled.
+  final rest = text.substring(cursor);
+  final out = text.substring(0, start) + (rest.startsWith(' ') ? mention.trimRight() : mention) + rest;
+  return (text: out, cursor: start + mention.length);
+}
+
+/// The composer's @ list: project files matching what follows the @, picked to put their path in the message.
+class MentionMenu extends StatelessWidget {
+  const MentionMenu({super.key, required this.files, required this.onPick});
+  final List<String> files;
+  final void Function(String path) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    if (files.isEmpty) return const SizedBox.shrink();
+    // The fill is a Material's, not the box's: rows paint their touch ripple on the nearest Material, and a coloured
+    // box between them hid it.
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      constraints: const BoxConstraints(maxHeight: 260),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Radii.lg),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 20, offset: const Offset(0, 6))],
+      ),
+      child: Material(
+        color: p.bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Radii.lg),
+          side: BorderSide(color: p.border),
+        ),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          children: [
+            for (final f in files.take(8))
+              ListTile(
+                dense: true,
+                leading: Icon(LucideIcons.fileCode, size: 18, color: p.accent),
+                title: Text(
+                  f.substring(f.lastIndexOf('/') + 1),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontFamily: mono, fontSize: 13, color: p.text, fontWeight: FontWeight.w600),
+                ),
+                subtitle: f.contains('/')
+                    ? Text(f.substring(0, f.lastIndexOf('/')), maxLines: 1, overflow: TextOverflow.ellipsis)
+                    : null,
+                onTap: () => onPick(f),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -987,6 +1145,24 @@ Future<void> showProjectTools(
             children: [
               Text(tr('Project'), style: Theme.of(sheet).textTheme.titleLarge),
               const SizedBox(height: 12),
+              // The chat itself, once there is something in it to share.
+              if (agent.entries.isNotEmpty) ...[
+                SettingsGroup(
+                  children: [
+                    SettingsRow(
+                      icon: LucideIcons.share2,
+                      color: context.palette.accent,
+                      title: tr('Share this chat'),
+                      subtitle: tr('As text or a Markdown file'),
+                      onTap: () async {
+                        Navigator.pop(sheet);
+                        await showChatExport(context, agent);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
               SettingsGroup(
                 children: [
                   SettingsRow(
@@ -1009,6 +1185,14 @@ Future<void> showProjectTools(
                     title: tr('Changes & undo'),
                     subtitle: tr('What the agent changed, and roll it back'),
                     onTap: () => go(ChangesScreen(agent: agent)),
+                  ),
+                  // The agent's changes in one place: read every diff, then commit them with a message it writes.
+                  SettingsRow(
+                    icon: LucideIcons.gitCommitHorizontal,
+                    color: const Color(0xFF18794E),
+                    title: tr('Review & commit'),
+                    subtitle: tr('Every changed file with its diff, and a commit message the agent writes'),
+                    onTap: () => go(ReviewScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.gitBranch,

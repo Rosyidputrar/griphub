@@ -19,6 +19,12 @@ class Approval {
   String get summary => json['summary'] as String? ?? '';
   String get reason => json['reason'] as String? ?? '';
   String get key => json['key'] as String? ?? '';
+
+  /// For an edit or a write: the change as a unified patch, when the host could work it out.
+  String? get patch {
+    final p = json['patch'];
+    return p is String && p.trim().isNotEmpty ? p : null;
+  }
 }
 
 class CheckpointInfo {
@@ -76,6 +82,26 @@ class GitStatus {
   /// The repository's top folder: the [files]' paths start there (null from a host before this was sent).
   String? get root => json['root'] as String?;
   List<GitFile> get files => _l(json['files']).map(GitFile.new).toList();
+}
+
+/// The review before a commit: the status, and per file how many lines it adds and removes against the last commit.
+class GitReview {
+  GitReview(this.json) : status = GitStatus(json);
+  final Map<String, dynamic> json;
+  final GitStatus status;
+
+  ({int additions, int deletions, bool binary}) statOf(String path) {
+    final s = (json['stats'] as Map?)?[path];
+    if (s is! Map) return (additions: 0, deletions: 0, binary: false);
+    return (
+      additions: (s['additions'] as num?)?.toInt() ?? 0,
+      deletions: (s['deletions'] as num?)?.toInt() ?? 0,
+      binary: s['binary'] == true,
+    );
+  }
+
+  int get additions => status.files.fold(0, (n, f) => n + statOf(f.path).additions);
+  int get deletions => status.files.fold(0, (n, f) => n + statOf(f.path).deletions);
 }
 
 class GitBranch {
@@ -414,6 +440,11 @@ class Features extends ChangeNotifier {
       GitStatus(_m(await client.call('git_unstage', {'paths': paths ?? 'all', 'dir': ?dir})));
   Future<GitStatus> gitDiscard(List<String> paths, {String? dir}) async =>
       GitStatus(_m(await client.call('git_discard', {'paths': paths, 'dir': ?dir})));
+  Future<GitReview> gitReview({String? dir}) async => GitReview(_m(await client.call('git_review', {'dir': ?dir})));
+
+  /// A commit message for the uncommitted changes, written by the chat's model.
+  Future<String> gitCommitMessage({String? dir}) async =>
+      _m(await client.call('git_commit_message', {'dir': ?dir}))['message'] as String? ?? '';
   Future<String> gitCommit(String message, {bool all = false, String? dir}) async =>
       _m(await client.call('git_commit', {'message': message, 'all': all, 'dir': ?dir}))['commit'] as String;
   Future<List<GitCommit>> gitLog({String? dir}) async =>
@@ -452,6 +483,13 @@ class Features extends ChangeNotifier {
       }),
     );
     return (_l(r['matches']).map(SearchMatch.new).toList(), r['truncated'] == true);
+  }
+
+  /// The project's files best matching [query] by name, for the composer's @ list.
+  Future<List<String>> findFiles(String query, {int limit = 30}) async {
+    final r = _m(await client.call('files_find', {'query': query, 'limit': limit}));
+    final files = r['files'];
+    return files is List ? [for (final f in files) if (f is String) f] : const [];
   }
 
   Future<List<DbTable>> dbTables(String path) async =>

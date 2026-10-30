@@ -9,6 +9,7 @@ import 'features.dart';
 import 'integrations.dart';
 import 'jobs.dart';
 import 'models.dart';
+import 'offline_prompts.dart';
 import 'remote_mode.dart';
 import 'sent_attachments.dart';
 import 'subagent_notifications.dart';
@@ -199,6 +200,7 @@ class AgentController extends ChangeNotifier {
       await features.refreshRuns().catchError((_) {});
       unawaited(integrations.refresh().catchError((_) {}));
       notifyListeners();
+      unawaited(flushOffline());
     } catch (_) {
       // Dropped again before it finished: the next reconnect asks again.
     }
@@ -347,6 +349,9 @@ class AgentController extends ChangeNotifier {
       if (client.isRemote) remote.startBackupPulls();
       status = BootStatus.ready;
       bootFailures = 0;
+      // Messages typed while the server was out of reach, in an earlier run too, go now if the link is up.
+      offlinePrompts = OfflinePromptStore.instance.load();
+      unawaited(flushOffline());
     } catch (e) {
       status = BootStatus.failed;
       bootFailures++;
@@ -374,16 +379,103 @@ class AgentController extends ChangeNotifier {
   /// no model, host error): the caller must then keep the text, because a
   /// refused message never reaches the transcript and would otherwise be
   /// lost. The failure itself is shown as a notice.
+  ///
+  /// With a server agent out of reach the message is kept instead ([offlinePrompts]) and goes once the link is back;
+  /// that counts as sent.
   Future<bool> send(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
+    if (_linkDown) return _hold(trimmed);
     try {
       _noteQueued(await client.call<Object?>('prompt', {'text': trimmed}));
       return true;
     } on AgentError catch (e) {
+      if (_lostLink(e)) return _hold(trimmed);
       _addNotice(e.message, error: true);
       return false;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Messages typed while the server was out of reach
+
+  /// Waiting for the server link, oldest first, every chat's (see [offlineForCurrent]).
+  List<OfflinePrompt> offlinePrompts = [];
+
+  /// The open chat's waiting messages (and any kept before chats were known).
+  List<OfflinePrompt> get offlineForCurrent =>
+      [for (final p in offlinePrompts) if (p.session == null || p.session == sessionId) p];
+
+  int _offlineIds = 0;
+  bool _flushing = false;
+
+  bool get _linkDown => client.isRemote && !client.connection.value.connected;
+  bool _lostLink(AgentError e) => client.isRemote && (e.code == 'offline' || e.code == 'connection_lost');
+
+  bool _hold(String text, {List<Map<String, String>> images = const [], List<SentAttachment> attachments = const []}) {
+    offlinePrompts = [
+      ...offlinePrompts,
+      OfflinePrompt(
+        id: 'off-${clock().microsecondsSinceEpoch}-${_offlineIds++}',
+        text: text,
+        images: images,
+        attachments: attachments,
+        session: sessionId,
+      ),
+    ];
+    OfflinePromptStore.instance.save(offlinePrompts);
+    notifyListeners();
+    return true;
+  }
+
+  /// Sends the open chat's waiting messages in order, once the server is reachable. The link dropping again leaves
+  /// the rest waiting; a message the host refuses (budget, no model) stops there, marked with why, so nothing typed
+  /// after it overtakes it.
+  Future<void> flushOffline() async {
+    if (_flushing || _linkDown) return;
+    _flushing = true;
+    try {
+      for (final p in offlineForCurrent) {
+        if (p.error != null) break;
+        queueSentAttachments(p.attachments);
+        try {
+          final r = await client.call<Object?>('prompt', {
+            'text': p.text,
+            if (p.images.isNotEmpty) 'images': p.images,
+          });
+          _noteQueued(r, p.attachments);
+          offlinePrompts = [for (final o in offlinePrompts) if (o.id != p.id) o];
+        } on AgentError catch (e) {
+          retractSentAttachments(p.attachments);
+          if (!_lostLink(e)) p.error = e.message;
+          break;
+        } finally {
+          OfflinePromptStore.instance.save(offlinePrompts);
+          notifyListeners();
+        }
+      }
+    } finally {
+      _flushing = false;
+    }
+  }
+
+  /// Tries a refused waiting message again (after topping up, choosing a model, ...).
+  Future<void> retryOffline(String id) async {
+    for (final p in offlinePrompts) {
+      if (p.id == id) p.error = null;
+    }
+    notifyListeners();
+    await flushOffline();
+  }
+
+  /// Drops a waiting message; returns it, so its text can go back to the composer.
+  OfflinePrompt? dropOffline(String id) {
+    final p = offlinePrompts.where((o) => o.id == id).firstOrNull;
+    if (p == null) return null;
+    offlinePrompts = [for (final o in offlinePrompts) if (o.id != id) o];
+    OfflinePromptStore.instance.save(offlinePrompts);
+    notifyListeners();
+    return p;
   }
 
   Future<void> abort() => client.call('abort');
@@ -569,16 +661,19 @@ class AgentController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && images.isEmpty) return false;
+    final body = trimmed.isEmpty ? 'See the attached image.' : trimmed;
+    if (_linkDown) return _hold(body, images: images, attachments: attachments);
     queueSentAttachments(attachments);
     try {
       final r = await client.call<Object?>('prompt', {
-        'text': trimmed.isEmpty ? 'See the attached image.' : trimmed,
+        'text': body,
         'images': images,
       });
       _noteQueued(r, attachments);
       return true;
     } on AgentError catch (e) {
       retractSentAttachments(attachments);
+      if (_lostLink(e)) return _hold(body, images: images, attachments: attachments);
       _addNotice(e.message, error: true);
       return false;
     }
@@ -814,6 +909,9 @@ class AgentController extends ChangeNotifier {
       // A server link that could not replay what it missed: reload instead.
       case 'resync':
         unawaited(resync());
+      // Back without a gap: what was typed meanwhile goes now. After a gap, resync sends it once the chat is reloaded.
+      case 'reconnected' when record['resync'] != true:
+        unawaited(flushOffline());
       // On a server agent an exit is the link dropping, not the host: the client reconnects by itself.
       case 'exit' when client.isRemote:
         break;

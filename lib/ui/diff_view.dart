@@ -355,3 +355,44 @@ class DiffStat extends StatelessWidget {
     );
   }
 }
+
+/// What an edit or a write would change, on its approval card: the diff, scrolling inside the card, and a page with
+/// all of it when it is longer than the card shows.
+class ApprovalPatch extends StatelessWidget {
+  const ApprovalPatch({super.key, required this.patch, this.maxHeight = 260});
+  final String patch;
+  final double maxHeight;
+
+  /// About how many diff lines fit in [maxHeight]; past that the whole change gets its own page.
+  bool get _long => '\n'.allMatches(patch).length > maxHeight / 20;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DiffView(patch: patch, maxHeight: maxHeight),
+        if (_long)
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => Scaffold(
+                    appBar: AppBar(title: Text(tr('The whole change'))),
+                    body: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 32),
+                      child: DiffView(patch: patch),
+                    ),
+                  ),
+                ),
+              ),
+              icon: const Icon(LucideIcons.maximize2, size: 16),
+              label: Text(tr('See the whole change')),
+            ),
+          ),
+      ],
+    );
+  }
+}
