@@ -672,6 +672,12 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 	mkdirSync(join(srvDir, "workspace", "site", ".git"), { recursive: true });
 	writeFileSync(join(srvDir, "workspace", "site", "index.html"), "<h1>Dari server</h1>");
 	writeFileSync(join(srvDir, "workspace", "site", ".git", "HEAD"), "ref: refs/heads/main\n");
+	// A chat whose first line names the server's workspace: the restore must move it to the phone's.
+	mkdirSync(join(srvDir, ".pi", "agent", "sessions"), { recursive: true });
+	writeFileSync(
+		join(srvDir, ".pi", "agent", "sessions", "chat.jsonl"),
+		`${JSON.stringify({ cwd: join(srvDir, "workspace", "site") })}\n`,
+	);
 	const key = "cd".repeat(32);
 	await c.call("auto_backup_configure", { key });
 	const made = (await c.call("auto_backup_now")).data.backups[0];
@@ -694,6 +700,12 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 	assert.ok(restored.data.restored >= 2);
 	assert.equal(readFileSync(join(dir, "workspace", "site", "index.html"), "utf8"), "<h1>Dari server</h1>");
 	assert.equal(readFileSync(join(dir, "workspace", "site", ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+	// The server restore (autobackup.ts), not the plain local one: it reports when the backup was made, and it moves
+	// the chat's folder from the server's workspace path to this phone's. A name clash once made host.ts restore with
+	// its own one-argument function, which does neither.
+	assert.ok(restored.data.createdAt, "a server restore reports when the backup was made");
+	const chat = readFileSync(join(dir, ".pi", "agent", "sessions", "chat.jsonl"), "utf8");
+	assert.equal(JSON.parse(chat.split("\n")[0]).cwd, join(dir, "workspace", "site"), "the chat's folder is this phone's");
 	// No decrypted copy is left behind.
 	const leftovers = execFileSync("find", [dir, "-name", "restore-*.zip"]).toString().trim();
 	assert.equal(leftovers, "");

@@ -1,0 +1,15 @@
+{
+	// Type checking only (npm run typecheck); esbuild does the building (build.mjs).
+	"compilerOptions": {
+		"noEmit": true,
+		"strict": true,
+		"target": "es2023",
+		"lib": ["es2023"],
+		// esbuild bundles src/ into one ESM file (build.mjs), whatever package.json's "type" says: check it that way.
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"types": ["node"],
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*.ts"]
+}

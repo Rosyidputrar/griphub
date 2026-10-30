@@ -40,6 +40,12 @@ jobs:
         working-directory: agent
         run: npm ci
 
+      # esbuild bundles without looking at types; only tsc catches a shadowed import or a wrong call (it once let a
+      # local restoreBackup shadow the imported one, and server restores ran the wrong function).
+      - name: Typecheck
+        working-directory: agent
+        run: npm run typecheck
+
       # The ssh chain tests start a private sshd (loopback, throwaway keys) and must not be skipped here.
       - name: Install sshd
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server openssh-client

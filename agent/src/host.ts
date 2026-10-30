@@ -1023,7 +1023,9 @@ const RESTORE_AGENT_ALLOW = [
 	(rel: string) => rel.startsWith("prompts/"),
 ];
 
-function restoreBackup(path: string) {
+// Named apart from autobackup's restoreBackup (a server backup onto this phone), which host.ts also calls:
+// the import used to be shadowed by this declaration, and backup_restore_server restored with the wrong one.
+function restoreLocalBackup(path: string) {
 	const entries = readZip(readFileSync(path));
 	let restored = 0;
 	let skipped = 0;
@@ -1579,7 +1581,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "backup_create":
 			return createBackup(!!cmd.includeWorkspace);
 		case "backup_restore":
-			return restoreBackup(cmd.path);
+			return restoreLocalBackup(cmd.path);
 
 		// Linux container. On the phone: container.ts (proot). On a server: the rootless Podman box (podmanbox.ts), which
 		// the setup script builds; the same commands serve both, so the screens do not need to know which one they talk to.
