@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -97,7 +98,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> with BusyActions {
           }) ??
           false;
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
       return false;
     }
   }
@@ -167,9 +168,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> with BusyActions {
               ),
             ),
             if (_error != null)
-              SurfaceCard(
-                child: Text('$_error', style: text.bodySmall?.copyWith(color: p.danger)),
-              )
+              SurfaceCard(child: ErrorNotice(error: _error, onRetry: _load))
             else if (list == null)
               const Padding(
                 padding: EdgeInsets.all(40),
@@ -310,7 +309,7 @@ class _TemplateSheetState extends State<_TemplateSheet> {
       ));
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) setState(() => _problem = '$e');
+      if (mounted) setState(() => _problem = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

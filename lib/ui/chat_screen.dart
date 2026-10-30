@@ -11,6 +11,7 @@ import '../agent/features.dart';
 import 'i18n.dart';
 import 'chat_extras.dart';
 import 'deploy_sheet.dart';
+import 'errors.dart';
 import 'message_menu.dart';
 import 'message_views.dart';
 
@@ -290,7 +291,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await agent.features.enqueue(text);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       return;
     }
     input.clear();
@@ -394,7 +395,7 @@ class _ChatScreenState extends State<ChatScreen> {
       input.selection = TextSelection.collapsed(offset: input.text.length);
       focus.requestFocus();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Voice input')}: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Voice input')}: ${friendlyError(e)}')));
     }
   }
 
@@ -447,7 +448,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final text = action == 'edit' ? await agent.editMessage(entryId) : await agent.forkAt(entryId);
       _prefill(text.isEmpty ? entry.text : text);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('$e'))));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => _rewinding = null);
     }
@@ -1020,15 +1021,17 @@ class _Composer extends StatelessWidget {
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  contentPadding: const EdgeInsets.fromLTRB(18, 16, 18, 6),
+                  // 48 dp tall with one line, like the controls under it.
+                  contentPadding: const EdgeInsets.fromLTRB(18, 16, 18, 7),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                // Less inset than the look suggests: the controls' touch boxes reach past what they draw.
+                padding: const EdgeInsets.fromLTRB(3, 0, 5, 3),
                 child: Row(
                   children: [
+                    // Each control's 48 dp touch box carries its own margin: no gaps between them.
                     _IconChip(icon: LucideIcons.plus, label: tr('Attach'), onTap: onAttach),
-                    const SizedBox(width: 6),
                     // The chips share what the buttons on the right leave; the model chip shrinks first,
                     // and the buttons stay flush right however short the model name is.
                     Expanded(
@@ -1046,7 +1049,6 @@ class _Composer extends StatelessWidget {
                             const SizedBox(width: 6),
                             _ThinkingChip(agent: agent),
                           ],
-                          const SizedBox(width: 6),
                           _IconChip(
                             icon: LucideIcons.listChecks,
                             label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
@@ -1056,11 +1058,9 @@ class _Composer extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
                     // While the agent works, Stop stays reachable; typed text adds Send (queues a follow-up).
                     if (busy)
                       _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: agent.abort),
-                    if (busy && hasText) const SizedBox(width: 6),
                     if (hasText || sending)
                       _RoundButton(
                         onLongPress: sending ? null : onQueue,
@@ -1099,13 +1099,16 @@ class _IconChip extends StatelessWidget {
       child: Semantics(
         button: true,
         label: label,
-        child: Material(
-          color: active ? p.accent : p.raised,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: SizedBox.square(dimension: 34, child: Icon(icon, size: 17, color: active ? p.onAccent : p.text)),
+        child: TapTarget(
+          onTap: onTap,
+          child: Material(
+            color: active ? p.accent : p.raised,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: SizedBox.square(dimension: 34, child: Icon(icon, size: 17, color: active ? p.onAccent : p.text)),
+            ),
           ),
         ),
       ),
@@ -1167,29 +1170,37 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: p.raised,
-      borderRadius: BorderRadius.circular(Radii.pill),
-      child: InkWell(
+    // The button is the 48 dp box, so a screen reader's focus is that size too.
+    return Semantics(
+      button: true,
+      container: true,
+      child: TapTarget(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(Radii.pill),
-        child: Container(
-          height: 34,
-          padding: EdgeInsets.fromLTRB(leading == null ? 12 : 6, 0, 10, 0),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (leading != null) ...[leading!, const SizedBox(width: 6)],
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.text),
-                ),
+        child: Material(
+          color: p.raised,
+          borderRadius: BorderRadius.circular(Radii.pill),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(Radii.pill),
+            child: Container(
+              height: 34,
+              padding: EdgeInsets.fromLTRB(leading == null ? 12 : 6, 0, 10, 0),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (leading != null) ...[leading!, const SizedBox(width: 6)],
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.text),
+                    ),
+                  ),
+                  if (icon != null) ...[const SizedBox(width: 4), Icon(icon, size: 13, color: p.faint)],
+                ],
               ),
-              if (icon != null) ...[const SizedBox(width: 4), Icon(icon, size: 13, color: p.faint)],
-            ],
+            ),
           ),
         ),
       ),
@@ -1224,34 +1235,39 @@ class _RoundButton extends StatelessWidget {
       button: true,
       enabled: enabled,
       label: label,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: 38,
-        height: 38,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: active ? p.accent : (filled ? p.raised : p.surface),
-          border: filled ? null : Border.all(color: p.border),
-          boxShadow: active
-              ? [
-                  BoxShadow(
-                    color: p.accent.withValues(alpha: 0.45),
-                    blurRadius: 14,
-                    spreadRadius: -4,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            onLongPress: onLongPress,
-            child: busy
-                ? Center(child: BusySpinner(color: p.muted))
-                : Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
+      child: TapTarget(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: active ? p.accent : (filled ? p.raised : p.surface),
+            border: filled ? null : Border.all(color: p.border),
+            boxShadow: active
+                ? [
+                    BoxShadow(
+                      color: p.accent.withValues(alpha: 0.45),
+                      blurRadius: 14,
+                      spreadRadius: -4,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              onLongPress: onLongPress,
+              child: busy
+                  // The button's own label says what it is busy with ("Sending…").
+                  ? Center(child: BusySpinner(color: p.muted, semanticsLabel: ''))
+                  : Icon(icon, size: 18, color: active ? p.onAccent : (filled ? p.faint : p.text)),
+            ),
           ),
         ),
       ),

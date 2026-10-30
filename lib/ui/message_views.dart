@@ -16,6 +16,7 @@ import '../agent/sent_attachments.dart';
 import '../agent/updater.dart';
 import 'attachment_viewer.dart';
 import 'code_view.dart';
+import 'errors.dart';
 import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
@@ -1061,7 +1062,7 @@ class _ToolCallViewState extends State<ToolCallView> {
     try {
       await widget.agent!.stopJob(id);
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 

@@ -9,6 +9,7 @@ import '../agent/models.dart';
 import '../agent/pricing.dart';
 import '../agent/subagents.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'message_views.dart' show MarkdownText;
 import 'theme.dart';
@@ -486,7 +487,7 @@ class _SubagentApprovalPanelState extends State<SubagentApprovalPanel> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _responded = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(e.toString()))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -656,7 +657,7 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
     try {
       await f();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(e.toString()))));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -1336,7 +1337,7 @@ class CrossChatBanner extends StatelessWidget {
       HapticFeedback.selectionClick();
       if (!await agent.openSession(path)) return;
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text(tr(e.toString()))));
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 }

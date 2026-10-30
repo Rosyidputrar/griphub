@@ -165,7 +165,7 @@ void main() {
   });
 
   group('a wait behind a dialog', () {
-    Future<Completer<String>> open(WidgetTester tester, List<Object?> results) async {
+    Future<Completer<String>> open(WidgetTester tester, List<Object?> results, {bool confirm = false}) async {
       final work = Completer<String>();
       await pumpLook(
         tester,
@@ -173,7 +173,7 @@ void main() {
         Scaffold(
           body: Builder(
             builder: (context) => TextButton(
-              onPressed: () async => results.add(await runWithProgress(context, 'Restoring…', () => work.future)),
+              onPressed: () async => results.add(await runWithProgress(context, 'Restoring…', () => work.future, confirm: confirm)),
               child: const Text('go'),
             ),
           ),
@@ -187,17 +187,28 @@ void main() {
 
     EnergyOutcome? shown(WidgetTester tester) => tester.widget<EnergySpinner>(find.byType(EnergySpinner)).outcome;
 
-    testWidgets('ends with a check, then the dialog goes', (tester) async {
+    testWidgets('confirmed: ends with a check and "Done", then the dialog goes', (tester) async {
       final results = <Object?>[];
-      final work = await open(tester, results);
+      final work = await open(tester, results, confirm: true);
       expect(shown(tester), isNull);
       work.complete('done');
       await tester.pump();
       await tester.pump();
       expect(shown(tester), EnergyOutcome.success);
-      expect(find.text('Restoring…'), findsOneWidget, reason: 'held for a moment to show the check');
-      await frames(tester, EnergySpinner.outcomeDuration + const Duration(milliseconds: 100));
+      expect(find.text('Done'), findsOneWidget, reason: 'held for a moment, and no longer saying "Restoring…"');
       expect(find.text('Restoring…'), findsNothing);
+      await frames(tester, EnergySpinner.outcomeDuration + const Duration(milliseconds: 100));
+      expect(find.text('Done'), findsNothing);
+      expect(results, ['done']);
+    });
+
+    testWidgets('not confirmed: success just closes, for work whose next screen says it worked', (tester) async {
+      final results = <Object?>[];
+      final work = await open(tester, results);
+      work.complete('done');
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(EnergySpinner), findsNothing);
       expect(results, ['done']);
     });
 
@@ -208,11 +219,71 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(shown(tester), EnergyOutcome.failure);
+      expect(find.text('Failed'), findsOneWidget);
       expect(find.textContaining('no space left'), findsNothing, reason: 'the cross first');
       await frames(tester, EnergySpinner.outcomeDuration + const Duration(milliseconds: 100));
       expect(find.text('Restoring…'), findsNothing);
       expect(find.textContaining('no space left'), findsOneWidget);
       expect(results, [null]);
+    });
+  });
+
+  group('screen readers', () {
+    testWidgets('hear "Loading…", in the app\'s language, then "Done" or "Failed"', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final outcome = ValueNotifier<EnergyOutcome?>(null);
+      await pumpLook(
+        tester,
+        const Look(language: 'id'),
+        Scaffold(
+          body: Center(
+            child: ValueListenableBuilder(
+              valueListenable: outcome,
+              builder: (_, o, _) => EnergySpinner(size: 44, outcome: o),
+            ),
+          ),
+        ),
+      );
+      expect(find.bySemanticsLabel('Memuat…'), findsOneWidget);
+      outcome.value = EnergyOutcome.failure;
+      await tester.pump();
+      expect(find.bySemanticsLabel('Gagal'), findsOneWidget);
+      expect(tester.getSemantics(find.bySemanticsLabel('Gagal')).flagsCollection.isLiveRegion, isTrue, reason: 'announced when it comes');
+      outcome.value = EnergyOutcome.success;
+      await tester.pump();
+      expect(find.bySemanticsLabel('Selesai'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('a spinner in place of a button\'s text gives the button a label', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpLook(tester, const Look(), Scaffold(body: Center(child: FilledButton(onPressed: () {}, child: const BusySpinner()))));
+      expect(find.bySemanticsLabel('Loading…'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('the dialog\'s spinner is not read on top of its own label', (tester) async {
+      final semantics = tester.ensureSemantics();
+      final work = Completer<void>();
+      await pumpLook(
+        tester,
+        const Look(),
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => runWithProgress(context, 'Restoring…', () => work.future),
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('go'));
+      await frames(tester, const Duration(milliseconds: 300));
+      expect(find.bySemanticsLabel('Restoring…'), findsOneWidget);
+      expect(find.bySemanticsLabel('Loading…'), findsNothing);
+      work.complete();
+      await frames(tester, const Duration(milliseconds: 300));
+      semantics.dispose();
     });
   });
 }

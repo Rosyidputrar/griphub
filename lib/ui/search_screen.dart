@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'editor_screen.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -203,7 +204,7 @@ class _SearchScreenState extends State<SearchScreen> {
             child: error != null
                 ? ListView(
                     padding: const EdgeInsets.all(16),
-                    children: [Pill('$error', color: p.danger, icon: LucideIcons.circleAlert)],
+                    children: [Pill(friendlyError(error), color: p.danger, icon: LucideIcons.circleAlert)],
                   )
                 : list == null || list.isEmpty
                 ? _Empty(
@@ -240,8 +241,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
   String _folder() {
     final cwd = agent.cwd;
-    if (cwd.isEmpty) return 'the project';
-    return cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? 'the project';
+    if (cwd.isEmpty) return tr('the project');
+    return cwd.split('/').where((s) => s.isNotEmpty).lastOrNull ?? tr('the project');
   }
 }
 

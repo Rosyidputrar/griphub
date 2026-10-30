@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
-import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'accounts_screen.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -73,7 +73,7 @@ class _SyncScreenState extends State<SyncScreen> {
       await it.setSync(on);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e is AgentError ? tr(e.message) : '$e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       }
     } finally {
       if (mounted) setState(() => _turning = null);
@@ -174,7 +174,8 @@ class _SyncScreenState extends State<SyncScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (_turning != null) ...[const BusySpinner(), const SizedBox(width: 8)],
-                          Switch(
+                          LabeledSwitch(
+                            label: tr('Sync to GitHub'),
                             value: _turning ?? s?.enabled ?? false,
                             onChanged: s == null || _turning != null ? null : _toggle,
                           ),
@@ -194,7 +195,8 @@ class _SyncScreenState extends State<SyncScreen> {
                         ].join(' · '),
                         onTap: s.running ? null : _syncNow,
                         trailing: s.running
-                            ? const BusySpinner(size: 18)
+                            // The title already says "Syncing…".
+                            ? const BusySpinner(size: 18, semanticsLabel: '')
                             : null,
                       ),
                       if (s.repo != null)

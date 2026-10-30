@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import 'auto_backup.dart';
 import 'code_view.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -63,7 +64,7 @@ class _BackupScreenState extends State<BackupScreen> {
         });
       }
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     } finally {
       if (mounted) setState(() => _backingUp = false);
     }
@@ -83,7 +84,7 @@ class _BackupScreenState extends State<BackupScreen> {
     try {
       _snack('${tr('Saved to')} ${await agent.client.saveToDownloads(local)}');
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     }
   }
 
@@ -119,7 +120,7 @@ class _BackupScreenState extends State<BackupScreen> {
         });
       }
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     }
   }
 
@@ -167,7 +168,7 @@ class _BackupScreenState extends State<BackupScreen> {
         ].join(' · '),
       );
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     } finally {
       if (mounted) setState(() => _restoring = false);
     }

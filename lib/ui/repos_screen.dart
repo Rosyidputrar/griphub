@@ -6,6 +6,7 @@ import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import '../agent/integrations.dart';
 import 'accounts_screen.dart';
+import 'errors.dart';
 import 'git_screen.dart';
 import 'kit.dart';
 import 'task_log.dart';
@@ -109,7 +110,7 @@ class _ReposScreenState extends State<ReposScreen> {
                     future: repos,
                     builder: (context, snap) {
                       if (snap.hasError) {
-                        return Center(child: Text(snap.error.toString(), style: text.bodySmall));
+                        return Center(child: Text(friendlyError(snap.error), style: text.bodySmall));
                       }
                       if (!snap.hasData) {
                         return const Center(

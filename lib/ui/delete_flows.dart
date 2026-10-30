@@ -5,6 +5,7 @@ import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import '../agent/models.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -143,7 +144,7 @@ class _DeleteProjectDialogState extends State<_DeleteProjectDialog> {
                 const SizedBox(height: 10),
                 Text(tr('The folder and everything in it is deleted from this phone. This cannot be undone.')),
                 if (snap.hasError)
-                  warning('${snap.error}')
+                  warning(friendlyError(snap.error))
                 else if (check == null)
                   const Padding(
                     padding: EdgeInsets.all(16),

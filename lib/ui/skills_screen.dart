@@ -6,6 +6,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'message_views.dart';
 import 'task_log.dart';
@@ -85,7 +86,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Installed')}: ${hit.name}')));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) {
         installing.remove(hit.spec);
@@ -349,7 +350,7 @@ class _HitList extends StatelessWidget {
     return FutureBuilder<List<SkillHit>>(
       future: future,
       builder: (context, snap) {
-        if (snap.hasError) return Text('${snap.error}', style: text.bodySmall);
+        if (snap.hasError) return Text(friendlyError(snap.error), style: text.bodySmall);
         if (!snap.hasData) return const _Loading();
         final hits = snap.data!;
         if (hits.isEmpty) return Text(emptyText, style: text.bodySmall);
@@ -465,7 +466,7 @@ class _BrowseSheetState extends State<_BrowseSheet> {
                 if (snap.hasError) {
                   return Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Text('${snap.error}', style: text.bodySmall),
+                    child: Text(friendlyError(snap.error), style: text.bodySmall),
                   );
                 }
                 if (!snap.hasData) return const _Loading();

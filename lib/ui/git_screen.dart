@@ -11,6 +11,7 @@ import '../agent/updater.dart' show formatBytes;
 import 'attachment_viewer.dart';
 import 'code_view.dart';
 import 'diff_view.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'message_views.dart';
@@ -64,7 +65,7 @@ class _GitScreenState extends State<GitScreen> {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   void _snack(String s, {SnackBarAction? action}) {
@@ -704,7 +705,7 @@ class _GitScreenState extends State<GitScreen> {
         tr('Issues and pull requests are shown when this repository has a github.com remote.'),
       );
     }
-    if (_issuesError != null && _issues == null) return message(tr("Couldn't load issues"), '$_issuesError');
+    if (_issuesError != null && _issues == null) return message(tr("Couldn't load issues"), friendlyError(_issuesError));
     final issues = _issues;
     if (issues == null) return const Center(child: BusySpinner.page());
     return RefreshIndicator(
@@ -871,7 +872,7 @@ class _BranchSheetState extends State<BranchSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _branches = const []);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -889,7 +890,7 @@ class _BranchSheetState extends State<BranchSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = null);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -1050,7 +1051,7 @@ class _DiffSheetState extends State<_DiffSheet> {
           FutureBuilder<String>(
             future: _patch,
             builder: (context, snap) {
-              if (snap.hasError) return Text('${snap.error}', style: text.bodySmall);
+              if (snap.hasError) return Text(friendlyError(snap.error), style: text.bodySmall);
               if (!snap.hasData) {
                 return const Padding(
                   padding: EdgeInsets.all(32),
@@ -1117,7 +1118,7 @@ class _ChangedFileContentState extends State<_ChangedFileContent> {
     return FutureBuilder(
       future: _loaded,
       builder: (context, snap) {
-        if (snap.hasError) return Text('${snap.error}', style: text.bodySmall?.copyWith(color: p.danger));
+        if (snap.hasError) return Text(friendlyError(snap.error), style: text.bodySmall?.copyWith(color: p.danger));
         final loaded = snap.data;
         if (loaded == null) {
           return const Padding(padding: EdgeInsets.all(32), child: Center(child: BusySpinner.page()));
@@ -1191,7 +1192,7 @@ class _PrSheetState extends State<_PrSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
