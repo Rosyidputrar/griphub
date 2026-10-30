@@ -1573,6 +1573,7 @@ const _id = <String, String>{
   'running': 'berjalan',
   'Background job': 'Pekerjaan latar',
   'The host no longer tracks this job': 'Host tidak lagi melacak pekerjaan ini',
+  "Could not read the server's backup status": 'Status backup server tidak bisa dibaca',
   'exit code {n}': 'kode keluar {n}',
   'time limit reached': 'batas waktu tercapai',
   'stopped': 'dihentikan',

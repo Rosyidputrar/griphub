@@ -556,6 +556,32 @@ void main() {
       });
     }
 
+    testWidgets('a status that cannot be read says why and offers Try again; the switch waits for it', (tester) async {
+      final host = FakeHost();
+      var attempts = 0;
+      host.answers['auto_backup_status'] = (_) {
+        attempts++;
+        return attempts == 1 ? HostError('The connection to the server was lost.') : {'enabled': false, 'backups': const []};
+      };
+      final agent = newAgent();
+      agent.remote.configure(
+        setup: RemoteSetup(home: home.path),
+        store: RemoteProfileStore(File('${home.path}/.griphub/remote.json'))
+          ..save(RemoteProfile(host: 'vps.example.com', port: 22, user: 'griphub', hostKey: 'ssh-ed25519 AAAA', active: true, backupKey: 'ab' * 32)),
+      );
+      await pumpLook(tester, const Look(), Scaffold(body: ListView(padding: const EdgeInsets.all(16), children: [ServerBackupCard(agent: agent)])), height: 560);
+      await frames(tester, 4);
+      expect(find.textContaining('Could not read the server\'s backup status'), findsOneWidget);
+      expect(find.textContaining('The connection to the server was lost.'), findsOneWidget);
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull, reason: 'nothing to switch before the status is known');
+
+      await tester.tap(find.text('Try again'));
+      await frames(tester, 4);
+      expect(attempts, 2);
+      expect(find.textContaining('Could not read the server\'s backup status'), findsNothing);
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
+    });
+
     testWidgets('back on the phone: no switch, and "Restore on this phone" offers the newest copy', (tester) async {
       final (agent, _) = await agentWith(active: false);
       await pumpLook(tester, const Look(), Scaffold(body: ListView(padding: const EdgeInsets.all(16), children: [ServerBackupCard(agent: agent)])), height: 520);

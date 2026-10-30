@@ -26,10 +26,25 @@ class ServerBackupCard extends StatefulWidget {
 class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
   RemoteMode get remote => widget.agent.remote;
 
+  /// Why the server's backup status could not be read (null when it could, or while it is being read). Without it the
+  /// switch stays off with no word on why.
+  Object? _loadError;
+
   @override
   void initState() {
     super.initState();
-    if (remote.active) remote.refreshAutoBackup().catchError((_) => null);
+    _load();
+  }
+
+  /// Reads the server's backup status; a failure is kept and shown with a way to try again.
+  Future<void> _load() async {
+    if (!remote.active) return;
+    if (mounted) setState(() => _loadError = null);
+    try {
+      await remote.refreshAutoBackup();
+    } catch (e) {
+      if (mounted) setState(() => _loadError = e);
+    }
   }
 
   Future<void> _guarded(Object key, Future<void> Function() task) async {
@@ -79,6 +94,23 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
                 ),
                 style: text.bodySmall,
               ),
+              if (remote.active && status == null && _loadError != null) ...[
+                const SizedBox(height: 10),
+                _Line(
+                  icon: LucideIcons.triangleAlert,
+                  text: '${tr('Could not read the server\'s backup status')}: ${_loadError.toString().split('\n').first}',
+                  color: p.danger,
+                ),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: _load,
+                    icon: const Icon(LucideIcons.refreshCw, size: 16),
+                    label: Text(tr('Try again')),
+                  ),
+                ),
+              ],
               if (onServer.isNotEmpty || local.isNotEmpty || lastError != null || remote.backupPullError != null) ...[
                 const SizedBox(height: 10),
                 if (onServer.isNotEmpty)
