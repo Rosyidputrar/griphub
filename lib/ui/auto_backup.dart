@@ -208,7 +208,12 @@ Future<void> restoreServerBackup(BuildContext context, AgentController agent, Fi
   );
   if (ok != true || !context.mounted) return;
   final messenger = ScaffoldMessenger.maybeOf(context);
-  final r = await runWithProgress(context, tr('Restoring…'), () => agent.remote.restoreOnPhone(backup));
+  final r = await runWithProgress(
+    context,
+    tr('Restoring…'),
+    () => agent.remote.restoreOnPhone(backup),
+    confirm: true,
+  );
   if (r == null) return;
   messenger?.showSnackBar(
     SnackBar(

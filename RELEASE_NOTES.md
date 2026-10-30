@@ -6,7 +6,7 @@
 - Saat konteks diringkas, chat menampilkan "Meringkas konteks" dengan waktu yang berjalan, lalu berapa token yang dihemat (misalnya 320k → 24k token). Bila gagal, alasannya ditampilkan. Ketuk barisnya untuk penjelasan.
 - Pesan yang dikirim saat konteks sedang diringkas kini menunggu sampai selesai, tidak lagi ditolak.
 - Animasi memuat yang baru di seluruh aplikasi: komet yang berputar, besar saat satu layar menunggu data dan kecil di tombol atau baris. Warnanya menyesuaikan tema terang dan gelap, dan berhenti bergerak bila animasi dimatikan di sistem.
-- Memulihkan cadangan, menyiapkan deploy, dan memulai chat kini diakhiri tanda centang (berhasil) atau silang (gagal) sesaat sebelum dialognya tertutup.
+- Memulihkan cadangan kini diakhiri tanda centang saat berhasil. Bila memulihkan cadangan, menyiapkan deploy, atau memulai chat gagal, dialognya menampilkan tanda silang sesaat sebelum alasannya muncul.
 
 ## English
 
@@ -14,4 +14,4 @@
 - While the context is summarized, the chat shows "Summarizing the context" with a running clock, then how many tokens it saved (for example 320k → 24k tokens). A failure says why. Tap the line for what it means.
 - A message sent while the context is being summarized now waits for it instead of being refused.
 - A new loading animation across the app: circling comets, large when a whole screen is waiting and small on buttons and rows. The colours follow the light and dark themes, and it stands still when animations are turned off in the system.
-- Restoring a backup, preparing a deploy and starting a chat now end with a check (it worked) or a cross (it failed) for a moment before the dialog closes.
+- Restoring a backup now ends with a check when it worked. When restoring a backup, preparing a deploy or starting a chat fails, the dialog shows a cross for a moment before saying why.

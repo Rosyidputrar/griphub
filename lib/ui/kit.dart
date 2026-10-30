@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import 'energy.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
 /// Shared building blocks for the GripHub AI Agent look.
@@ -583,9 +584,15 @@ mixin BusyActions<T extends StatefulWidget> on State<T> {
 }
 
 /// Runs [task] behind a small dialog that says what it waits for and cannot be dismissed, for work that has no button
-/// of its own to show a spinner on. When the work ends the spinner turns into a check or a cross for a moment before
-/// the dialog goes. Errors are shown as a snackbar; the result is null then.
-Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Function() task) async {
+/// of its own to show a spinner on. A failure turns the spinner into a cross for a moment, then says why in a snackbar
+/// (the result is null then). With [confirm] success shows a check the same way: for work whose result nothing else on
+/// screen shows; where the next screen opening says it worked, the dialog just goes.
+Future<T?> runWithProgress<T>(
+  BuildContext context,
+  String label,
+  Future<T> Function() task, {
+  bool confirm = false,
+}) async {
   final nav = Navigator.of(context);
   final messenger = ScaffoldMessenger.maybeOf(context);
   final hold = Motion.of(context, EnergySpinner.outcomeDuration);
@@ -604,7 +611,17 @@ Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Func
               builder: (_, o, _) => EnergySpinner(size: 36, outcome: o),
             ),
             const SizedBox(width: 14),
-            Expanded(child: Text(label)),
+            // "Restoring…" next to a check would still read as running.
+            Expanded(
+              child: ValueListenableBuilder(
+                valueListenable: outcome,
+                builder: (_, o, _) => Text(switch (o) {
+                  EnergyOutcome.success => tr('Done'),
+                  EnergyOutcome.failure => tr('Failed'),
+                  null => label,
+                }),
+              ),
+            ),
           ],
         ),
       ),
@@ -621,7 +638,7 @@ Future<T?> runWithProgress<T>(BuildContext context, String label, Future<T> Func
   unawaited(nav.push(route));
   try {
     final result = await task();
-    await show(EnergyOutcome.success);
+    if (confirm) await show(EnergyOutcome.success);
     return result;
   } catch (e) {
     await show(EnergyOutcome.failure);
