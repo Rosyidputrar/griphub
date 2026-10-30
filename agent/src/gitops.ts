@@ -1,6 +1,8 @@
 /** Git for a project folder: status, diffs, commits, branches, sync, PRs. */
 
 import { spawn } from "node:child_process";
+import { open } from "node:fs/promises";
+import { join } from "node:path";
 
 function git(cwd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
 	return new Promise((resolve, reject) => {
@@ -126,6 +128,71 @@ export async function commit(cwd: string, message: string, all: boolean) {
 	if (all) await ok(cwd, ["add", "-A"]);
 	await ok(cwd, ["commit", "-q", "-m", message]);
 	return (await ok(cwd, ["log", "-1", "--format=%h %s"])).trim();
+}
+
+/** Lines added and removed in one file, or that it is binary. */
+export interface FileStat {
+	additions: number;
+	deletions: number;
+	binary?: boolean;
+}
+
+/** How many lines of an untracked file there are to add: it has no diff to count. Binary or past 2 MB: unknown. */
+async function newFileStat(path: string): Promise<FileStat> {
+	const f = await open(path).catch(() => null);
+	if (!f) return { additions: 0, deletions: 0 };
+	try {
+		const buf = Buffer.alloc(2 * 1024 * 1024);
+		const { bytesRead } = await f.read(buf, 0, buf.length, 0);
+		const data = buf.subarray(0, bytesRead);
+		if (data.includes(0)) return { additions: 0, deletions: 0, binary: true };
+		let lines = 0;
+		for (const b of data) if (b === 10) lines++;
+		if (bytesRead > 0 && data[bytesRead - 1] !== 10) lines++;
+		return { additions: lines, deletions: 0 };
+	} finally {
+		await f.close();
+	}
+}
+
+/**
+ * Everything the review before a commit shows at once: the status, and per file how many lines it adds and removes
+ * against the last commit (staged and not alike; an untracked file counts its lines). A repository with no commit yet
+ * counts against nothing.
+ */
+export async function review(cwd: string) {
+	const st = await status(cwd);
+	if (!st.repo) return { ...st, stats: {} as Record<string, FileStat> };
+	const stats: Record<string, FileStat> = {};
+	const hasHead = (await git(st.root, ["rev-parse", "--verify", "-q", "HEAD"])).code === 0;
+	const numstat = await git(st.root, hasHead ? ["diff", "--numstat", "-z", "HEAD"] : ["diff", "--numstat", "-z", "--cached"]);
+	// "adds\tdels\tpath\0", or for a rename "adds\tdels\t\0from\0to\0".
+	const parts = numstat.out.split("\0");
+	for (let i = 0; i < parts.length; i++) {
+		const m = parts[i].match(/^(-|\d+)\t(-|\d+)\t(.*)$/s);
+		if (!m) continue;
+		let path = m[3];
+		if (!path) {
+			i += 2;
+			path = parts[i] ?? "";
+		}
+		stats[path] = m[1] === "-" ? { additions: 0, deletions: 0, binary: true } : { additions: Number(m[1]), deletions: Number(m[2]) };
+	}
+	for (const f of st.files) if (f.untracked) stats[f.path] = await newFileStat(join(st.root, f.path));
+	return { ...st, stats };
+}
+
+/** The whole change against the last commit, for writing its message: the stat, then the diff (cut at [max] chars). */
+export async function changeSummary(cwd: string, max = 16_000) {
+	const st = await status(cwd);
+	if (!st.repo) return null;
+	const hasHead = (await git(st.root, ["rev-parse", "--verify", "-q", "HEAD"])).code === 0;
+	const base = hasHead ? ["HEAD"] : ["--cached"];
+	const stat = (await git(st.root, ["diff", "--stat=100", ...base])).out.trim();
+	let patch = (await git(st.root, ["diff", "--no-color", "-U1", ...base])).out;
+	if (patch.length > max) patch = `${patch.slice(0, max)}\n[... the rest of the diff is cut]`;
+	const untracked = st.files.filter((f) => f.untracked).map((f) => f.path);
+	return { stat, patch, untracked, files: st.files.length };
 }
 
 export async function log(cwd: string, limit = 40) {

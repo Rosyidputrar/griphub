@@ -25,6 +25,7 @@ import 'files_screen.dart';
 import 'git_screen.dart';
 import 'kit.dart';
 import 'preview_open.dart';
+import 'review_screen.dart';
 import 'search_screen.dart';
 import 'tasks_screen.dart';
 import 'theme.dart';
@@ -827,6 +828,51 @@ class PlanBar extends StatelessWidget {
 // Dev servers
 
 /// A server the agent started: preview it, or share a public link.
+/// After the agent's turn, when the project has uncommitted changes: how many files, and the way to review and commit
+/// them. Closed, it stays away until the next turn.
+class ReviewBanner extends StatelessWidget {
+  const ReviewBanner({super.key, required this.files, required this.onReview, required this.onClose});
+  final int files;
+  final VoidCallback onReview;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Material(
+        color: p.surface,
+        borderRadius: BorderRadius.circular(Radii.lg),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 2, 2),
+          child: Row(
+            children: [
+              Icon(LucideIcons.gitCommitHorizontal, size: 18, color: p.success),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  files == 1 ? tr('1 file changed') : tr('{n} files changed').replaceAll('{n}', '$files'),
+                  style: text.labelLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(onPressed: onReview, child: Text(tr('Review & commit'))),
+              IconButton(
+                tooltip: tr('Close'),
+                icon: Icon(LucideIcons.x, size: 18, color: p.muted),
+                onPressed: onClose,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class DevServerBanner extends StatefulWidget {
   const DevServerBanner({super.key, required this.agent});
   final AgentController agent;
@@ -1139,6 +1185,14 @@ Future<void> showProjectTools(
                     title: tr('Changes & undo'),
                     subtitle: tr('What the agent changed, and roll it back'),
                     onTap: () => go(ChangesScreen(agent: agent)),
+                  ),
+                  // The agent's changes in one place: read every diff, then commit them with a message it writes.
+                  SettingsRow(
+                    icon: LucideIcons.gitCommitHorizontal,
+                    color: const Color(0xFF18794E),
+                    title: tr('Review & commit'),
+                    subtitle: tr('Every changed file with its diff, and a commit message the agent writes'),
+                    onTap: () => go(ReviewScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.gitBranch,

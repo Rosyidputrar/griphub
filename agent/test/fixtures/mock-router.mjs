@@ -4,7 +4,8 @@
 // goes out as usual.
 //
 // Each reply streams MOCK_TEXT, then holds the stream open until the file MOCK_RELEASE exists (or the request is
-// aborted), then ends the turn. Every chat request is counted in MOCK_LOG, one line each.
+// aborted), then ends the turn. Every chat request is counted in MOCK_LOG, one line each, and its last message is
+// written to MOCK_BODIES.
 //
 // With MOCK_TOOL set (JSON: {"name":"bash","arguments":{...}}) the first reply calls that tool instead, and the reply
 // after the tool's result repeats the result ("Tool said: ..."), so a test can see what the host did with the call.
@@ -28,6 +29,8 @@ globalThis.fetch = async (input, init) => {
 	const enc = new TextEncoder();
 	const request = JSON.parse(typeof init?.body === "string" ? init.body : await new Response(init?.body ?? (input instanceof Request ? input.body : null)).text());
 	const last = request.messages?.at(-1);
+	// MOCK_BODIES: what each request asked, one JSON line each (the last message), for tests that check the prompt.
+	if (process.env.MOCK_BODIES) appendFileSync(process.env.MOCK_BODIES, `${JSON.stringify(last?.content ?? "")}\n`);
 	if (process.env.MOCK_TOOL) {
 		const said = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
 		const lines =

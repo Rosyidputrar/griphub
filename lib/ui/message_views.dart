@@ -228,10 +228,27 @@ class UserBubble extends StatelessWidget {
 /// A follow-up waiting for the agent's current turn to end: the user's
 /// bubble, dimmed, with "Waiting for its turn" and a cancel button. When the
 /// turn reaches its boundary it is sent and the normal bubble takes its place.
+///
+/// The same bubble holds a message typed while the server was out of reach: [status] says so, and when the host
+/// refused it once the link was back, [error] says why and [onRetry] sends it again.
 class QueuedMessageView extends StatefulWidget {
-  const QueuedMessageView({super.key, required this.prompt, required this.onCancel});
+  const QueuedMessageView({
+    super.key,
+    required this.prompt,
+    required this.onCancel,
+    this.status,
+    this.statusIcon = LucideIcons.clock,
+    this.error,
+    this.onRetry,
+  });
   final QueuedPrompt prompt;
   final VoidCallback onCancel;
+
+  /// Under the bubble; "Waiting for its turn" when null.
+  final String? status;
+  final IconData statusIcon;
+  final String? error;
+  final VoidCallback? onRetry;
 
   @override
   State<QueuedMessageView> createState() => _QueuedMessageViewState();
@@ -262,7 +279,7 @@ class _QueuedMessageViewState extends State<QueuedMessageView> with SingleTicker
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
             child: Semantics(
-              label: tr('Waiting for its turn'),
+              label: widget.error ?? widget.status ?? tr('Waiting for its turn'),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
@@ -306,13 +323,36 @@ class _QueuedMessageViewState extends State<QueuedMessageView> with SingleTicker
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  if (widget.error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        widget.error!,
+                        textAlign: TextAlign.end,
+                        style: text.labelSmall?.copyWith(color: p.danger),
+                      ),
+                    ),
+                  Wrap(
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Icon(LucideIcons.clock, size: 13, color: p.faint),
-                      const SizedBox(width: 4),
-                      Text(tr('Waiting for its turn'), style: text.labelSmall),
-                      const SizedBox(width: 2),
+                      if (widget.error == null) ...[
+                        Icon(widget.statusIcon, size: 13, color: p.faint),
+                        const SizedBox(width: 4),
+                        Text(widget.status ?? tr('Waiting for its turn'), style: text.labelSmall),
+                        const SizedBox(width: 2),
+                      ],
+                      if (widget.onRetry != null)
+                        TextButton.icon(
+                          onPressed: widget.onRetry,
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            textStyle: text.labelMedium,
+                          ),
+                          icon: const Icon(LucideIcons.send, size: 14),
+                          label: Text(tr('Send again')),
+                        ),
                       TextButton.icon(
                         onPressed: widget.onCancel,
                         style: TextButton.styleFrom(

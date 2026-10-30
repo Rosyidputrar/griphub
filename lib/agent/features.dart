@@ -84,6 +84,26 @@ class GitStatus {
   List<GitFile> get files => _l(json['files']).map(GitFile.new).toList();
 }
 
+/// The review before a commit: the status, and per file how many lines it adds and removes against the last commit.
+class GitReview {
+  GitReview(this.json) : status = GitStatus(json);
+  final Map<String, dynamic> json;
+  final GitStatus status;
+
+  ({int additions, int deletions, bool binary}) statOf(String path) {
+    final s = (json['stats'] as Map?)?[path];
+    if (s is! Map) return (additions: 0, deletions: 0, binary: false);
+    return (
+      additions: (s['additions'] as num?)?.toInt() ?? 0,
+      deletions: (s['deletions'] as num?)?.toInt() ?? 0,
+      binary: s['binary'] == true,
+    );
+  }
+
+  int get additions => status.files.fold(0, (n, f) => n + statOf(f.path).additions);
+  int get deletions => status.files.fold(0, (n, f) => n + statOf(f.path).deletions);
+}
+
 class GitBranch {
   GitBranch(this.json);
   final Map<String, dynamic> json;
@@ -420,6 +440,11 @@ class Features extends ChangeNotifier {
       GitStatus(_m(await client.call('git_unstage', {'paths': paths ?? 'all', 'dir': ?dir})));
   Future<GitStatus> gitDiscard(List<String> paths, {String? dir}) async =>
       GitStatus(_m(await client.call('git_discard', {'paths': paths, 'dir': ?dir})));
+  Future<GitReview> gitReview({String? dir}) async => GitReview(_m(await client.call('git_review', {'dir': ?dir})));
+
+  /// A commit message for the uncommitted changes, written by the chat's model.
+  Future<String> gitCommitMessage({String? dir}) async =>
+      _m(await client.call('git_commit_message', {'dir': ?dir}))['message'] as String? ?? '';
   Future<String> gitCommit(String message, {bool all = false, String? dir}) async =>
       _m(await client.call('git_commit', {'message': message, 'all': all, 'dir': ?dir}))['commit'] as String;
   Future<List<GitCommit>> gitLog({String? dir}) async =>

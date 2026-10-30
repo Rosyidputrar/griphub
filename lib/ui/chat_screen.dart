@@ -24,6 +24,7 @@ import 'live_clock.dart';
 import 'illustration.dart';
 import 'mesh.dart';
 import 'model_sheet.dart';
+import 'review_screen.dart';
 import 'tasks_screen.dart';
 import 'terminal_screen.dart';
 import 'server_screen.dart';
@@ -67,6 +68,11 @@ class _ChatScreenState extends State<ChatScreen> {
   int lastCount = 0;
   final attachments = <Attachment>[];
   List<SlashCommand>? slash;
+
+  /// Uncommitted files after the agent's last turn here (the review banner), and whether it was closed.
+  int _changedFiles = 0;
+  bool _reviewClosed = false;
+  bool _wasBusy = false;
 
   /// The @ list: files matching what is typed after the @ at the cursor, and the query they answer.
   List<String> mentionFiles = const [];
@@ -170,9 +176,36 @@ class _ChatScreenState extends State<ChatScreen> {
           ..addAll(_draftFiles());
       });
     }
+    // A turn just ended: did it leave changes to commit?
+    if (_wasBusy && !agent.busy) {
+      _reviewClosed = false;
+      unawaited(_checkChanges());
+    }
+    _wasBusy = agent.busy;
     final grew = agent.entries.length != lastCount;
     lastCount = agent.entries.length;
     if (followBottom || grew && agent.entries.lastOrNull is UserEntry) _jumpToBottom();
+  }
+
+  /// Takes a waiting message back: it no longer goes, and its text returns to an empty composer so it isn't lost.
+  void _dropOffline(String id) {
+    final p = agent.dropOffline(id);
+    if (p != null && input.text.trim().isEmpty) _prefill(p.text);
+  }
+
+  /// How many files the project has to commit; none when it isn't a repository or the host can't say.
+  Future<void> _checkChanges() async {
+    var n = 0;
+    try {
+      final st = await agent.features.gitStatus();
+      n = st.isRepo ? st.files.length : 0;
+    } catch (_) {}
+    if (mounted && n != _changedFiles) setState(() => _changedFiles = n);
+  }
+
+  Future<void> _openReview() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ReviewScreen(agent: agent)));
+    if (mounted) await _checkChanges();
   }
 
   /// The open chat's saved attachments, still on disk.
@@ -553,7 +586,8 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: Stack(
                 children: [
-                  agent.entries.isEmpty
+                  // A first message still waiting for the server is the chat's start: show it, not the welcome.
+                  agent.entries.isEmpty && agent.offlineForCurrent.isEmpty
                       ? _EmptyState(
                           agent: agent,
                           onConnect: _connectProvider,
@@ -601,6 +635,12 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             DevServerBanner(agent: agent),
             ApprovalCards(features: agent.features),
+            if (_changedFiles > 0 && !_reviewClosed && !agent.busy)
+              ReviewBanner(
+                files: _changedFiles,
+                onReview: _openReview,
+                onClose: () => setState(() => _reviewClosed = true),
+              ),
             PlanBar(agent: agent),
             // The agent's todo list for the task at hand (todo_write).
             if (agent.todo != null)
@@ -683,10 +723,11 @@ class _ChatScreenState extends State<ChatScreen> {
     // While the agent works: what it does, and how long the turn has taken (item under the transcript).
     final status = agent.busy && (activity != null || agent.turnStartedAt != null);
     final queued = agent.queuedPrompts;
+    final offline = agent.offlineForCurrent;
     return ListView.builder(
       controller: scroll,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      itemCount: entries.length + subs.length + (status ? 1 : 0) + queued.length + (retry ? 1 : 0),
+      itemCount: entries.length + subs.length + (status ? 1 : 0) + queued.length + offline.length + (retry ? 1 : 0),
       itemBuilder: (context, i) {
         if (i < entries.length) {
           final e = entries[i];
@@ -757,6 +798,23 @@ class _ChatScreenState extends State<ChatScreen> {
               key: ValueKey('queued-${queued[qi].id}'),
               prompt: queued[qi],
               onCancel: () => _cancelQueued(queued[qi]),
+            ),
+          );
+        }
+        // Typed while the server was out of reach: they go once it is back.
+        final oi = qi - queued.length;
+        if (oi < offline.length) {
+          final o = offline[oi];
+          return Padding(
+            padding: EdgeInsets.only(top: oi == 0 && queued.isEmpty ? 28 : 10),
+            child: QueuedMessageView(
+              key: ValueKey('offline-${o.id}'),
+              prompt: QueuedPrompt({'id': o.id, 'text': o.text, 'images': o.images.length}),
+              status: tr('Waiting for the connection'),
+              statusIcon: LucideIcons.wifiOff,
+              error: o.error,
+              onRetry: o.error == null ? null : () => agent.retryOffline(o.id),
+              onCancel: () => _dropOffline(o.id),
             ),
           );
         }
