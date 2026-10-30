@@ -6,6 +6,7 @@ import 'package:local_auth/local_auth.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -79,7 +80,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
       final ok = await auth.authenticate(localizedReason: tr('Unlock GripHub AI Agent'));
       if (mounted && ok) setState(() => locked = false);
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) setState(() => error = friendlyError(e));
     } finally {
       if (mounted) setState(() => asking = false);
     }

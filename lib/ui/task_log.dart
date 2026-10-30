@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'ci_panel.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -93,7 +94,7 @@ class _TaskSheetState<T> extends State<_TaskSheet<T>> {
         duration: const Duration(seconds: 8),
         content: Text(
           e != null
-              ? '${widget.title}: ${tr('failed')}. ${e.toString().split('\n').first}'
+              ? '${widget.title}: ${tr('failed')}. ${friendlyError(e).split('\n').first}'
               : '${widget.title}: ${tr('done')}${url != null ? ' · $url' : ''}',
         ),
         action: url != null && widget.openUrl != null

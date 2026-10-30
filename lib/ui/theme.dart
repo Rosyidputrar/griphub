@@ -66,9 +66,11 @@ class Palette extends ThemeExtension<Palette> {
     muted: Color(0xFF5F5F67),
     faint: Color(0xFF6A6A73),
     inverse: Color(0xFFFFFFFF),
-    danger: Color(0xFFE5484D),
-    success: Color(0xFF30A46C),
-    warning: Color(0xFFF76B15),
+    // Deep enough to read as small text on white and on the grey cards (4.4–5.4:1); the brighter ones (2.5–3.9:1)
+    // only worked as fills.
+    danger: Color(0xFFCE2C31),
+    success: Color(0xFF18794E),
+    warning: Color(0xFFC2410C),
     accent: Color(0xFF6E56CF),
     accentAlt: Color(0xFF3E63DD),
     glass: Color(0xEBFFFFFF),

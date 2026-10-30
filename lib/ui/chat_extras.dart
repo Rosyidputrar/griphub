@@ -18,6 +18,7 @@ import 'i18n.dart';
 import 'changes_screen.dart';
 import 'code_view.dart';
 import 'editor_screen.dart';
+import 'errors.dart';
 import 'files_screen.dart';
 import 'git_screen.dart';
 import 'kit.dart';
@@ -836,7 +837,7 @@ class _DevServerBannerState extends State<DevServerBanner> {
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => opening.remove(port));
     }
@@ -1032,7 +1033,7 @@ Future<void> showProjectTools(
                       } catch (e) {
                         if (sheet.mounted) {
                           ScaffoldMessenger.of(sheet)
-                              .showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: $e')));
+                              .showSnackBar(SnackBar(content: Text('${tr('Could not create it')}: ${friendlyError(e)}')));
                         }
                         return;
                       }
@@ -1060,7 +1061,7 @@ Future<void> showProjectTools(
                         title: tr('Web search'),
                         subtitle: tr('Allow the agent to search the web in this project'),
                         onTap: () => set(!on),
-                        trailing: Switch(value: on, onChanged: set),
+                        trailing: LabeledSwitch(label: tr('Web search'), value: on, onChanged: set),
                       ),
                     ],
                   );

@@ -7,6 +7,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'energy.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'theme.dart';
 
 /// Shared building blocks for the GripHub AI Agent look.
@@ -146,55 +147,65 @@ class PillSegments<T> extends StatelessWidget {
     final style = Theme.of(context).textTheme.labelMedium;
     final selected = options.containsKey(value) ? value : options.keys.first;
 
-    Widget segment(T key, String label) {
+    // [touch]: in a row, the track's 4 dp above and below belong to each segment's touch box (48 dp, for a 40 dp pill).
+    Widget segment(T key, String label, {bool touch = false}) {
       final on = key == selected;
       final fg = on ? p.inverse : p.muted;
       final icon = icons[key];
-      return Semantics(
-        button: true,
-        selected: on,
-        inMutuallyExclusiveGroup: true,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          decoration: BoxDecoration(
-            color: on ? p.text : Colors.transparent,
-            borderRadius: BorderRadius.circular(Radii.pill),
-          ),
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              customBorder: const StadiumBorder(),
-              onTap: on
-                  ? null
-                  : () {
-                      HapticFeedback.selectionClick();
-                      onChanged(key);
-                    },
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 40),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
-                      Flexible(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: style?.copyWith(color: fg),
-                        ),
+      void pick() {
+        HapticFeedback.selectionClick();
+        onChanged(key);
+      }
+
+      final pill = AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: on ? p.text : Colors.transparent,
+          borderRadius: BorderRadius.circular(Radii.pill),
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: on ? null : pick,
+            child: ConstrainedBox(
+              // A one-character label ("2") would make a 36 dp segment.
+              constraints: const BoxConstraints(minHeight: 40, minWidth: 48),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (icon != null) ...[Icon(icon, size: 16, color: fg), const SizedBox(width: 6)],
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: style?.copyWith(color: fg),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
         ),
+      );
+    return Semantics(
+        button: true,
+        selected: on,
+        inMutuallyExclusiveGroup: true,
+        child: touch
+            ? GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                excludeFromSemantics: true,
+                onTap: on ? null : pick,
+                child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: pill),
+              )
+            : pill,
       );
     }
 
@@ -209,7 +220,7 @@ class PillSegments<T> extends StatelessWidget {
       )..layout();
       final w = painter.width + 28 + (icons[key] != null ? 22 : 0);
       painter.dispose();
-      return w;
+      return w < 48 ? 48 : w;
     }
 
     return LayoutBuilder(
@@ -230,13 +241,16 @@ class PillSegments<T> extends StatelessWidget {
           );
         }
         return Container(
-          padding: const EdgeInsets.all(4),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.pill)),
           child: Row(
             mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
             children: [
               for (final e in options.entries)
-                if (expand) Expanded(child: segment(e.key, e.value)) else segment(e.key, e.value),
+                if (expand)
+                  Expanded(child: segment(e.key, e.value, touch: true))
+                else
+                  segment(e.key, e.value, touch: true),
             ],
           ),
         );
@@ -304,7 +318,7 @@ class SectionAction extends StatelessWidget {
       style: TextButton.styleFrom(
         foregroundColor: context.palette.accent,
         textStyle: Theme.of(context).textTheme.labelMedium,
-        visualDensity: VisualDensity.compact,
+        // Small to look at, 48 dp to touch.
         padding: const EdgeInsets.symmetric(horizontal: 10),
         iconSize: 16,
       ),
@@ -561,6 +575,76 @@ class BusyBar extends StatelessWidget {
   }
 }
 
+/// Gives a small control the 48 dp a finger needs without making it look bigger: the control keeps its size, centred,
+/// and a tap on the margin around it counts as a tap on it. Wrap it in the control's [Semantics], so a screen reader's
+/// box is the 48 dp too.
+class TapTarget extends StatelessWidget {
+  const TapTarget({super.key, required this.child, this.onTap, this.onLongPress, this.size = 48});
+  final Widget child;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    excludeFromSemantics: true,
+    onTap: onTap,
+    onLongPress: onLongPress,
+    child: ConstrainedBox(
+      constraints: BoxConstraints(minWidth: size, minHeight: size),
+      child: Center(widthFactor: 1, heightFactor: 1, child: child),
+    ),
+  );
+}
+
+/// A [Switch] that says what it switches. Beside a row's title a bare one is its own stop for a screen reader and
+/// reads "switch, on" with nothing else.
+class LabeledSwitch extends StatelessWidget {
+  const LabeledSwitch({super.key, required this.label, required this.value, required this.onChanged});
+  final String label;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    child: Switch(value: value, onChanged: onChanged),
+  );
+}
+
+/// Something that failed to load, in the user's words ([friendlyError]), with a way to try again: an error alone in
+/// the middle of a screen leaves nothing to do but find the refresh icon.
+class ErrorNotice extends StatelessWidget {
+  const ErrorNotice({super.key, required this.error, this.onRetry, this.center = false});
+  final Object? error;
+  final VoidCallback? onRetry;
+
+  /// Centred, alone on a screen or panel; otherwise aligned to the start, in a card or a list.
+  final bool center;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(color: p.danger);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+      children: [
+        Text(friendlyError(error), style: style, textAlign: center ? TextAlign.center : TextAlign.start),
+        if (onRetry != null) ...[
+          const SizedBox(height: 4),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(LucideIcons.rotateCcw, size: 16),
+            label: Text(tr('Try again')),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// One action at a time per key: a second tap while the first is still waiting on the host does nothing, instead of
 /// running it twice (two sheets, the same message sent twice, two screens pushed). [busy] says what is running, for the
 /// spinner, and the state rebuilds when it starts and ends.
@@ -646,7 +730,7 @@ Future<T?> runWithProgress<T>(
     return result;
   } catch (e) {
     await show(EnergyOutcome.failure);
-    messenger?.showSnackBar(SnackBar(content: Text('$e')));
+    messenger?.showSnackBar(SnackBar(content: Text(friendlyError(e))));
     return null;
   } finally {
     if (route.isActive) nav.removeRoute(route);

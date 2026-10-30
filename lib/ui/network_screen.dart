@@ -4,6 +4,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -60,7 +61,7 @@ class _NetworkScreenState extends State<NetworkScreen> {
       await it.updateSettings(patch);
       if (done != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -444,7 +445,7 @@ class _FeatureSwitch extends StatelessWidget {
       title: title,
       subtitle: subtitle,
       onTap: () => onChanged(!value),
-      trailing: Switch(value: value, onChanged: onChanged),
+      trailing: LabeledSwitch(label: title, value: value, onChanged: onChanged),
     );
   }
 }
@@ -559,7 +560,7 @@ class _KeyListState extends State<_KeyList> {
     try {
       await job();
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }

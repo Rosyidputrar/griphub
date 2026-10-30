@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'code_view.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'task_log.dart';
 import 'i18n.dart';
@@ -56,7 +57,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
       await action();
       if (success != null && mounted) _snack(success);
     } catch (e) {
-      if (mounted) _snack(e.toString());
+      if (mounted) _snack(friendlyError(e));
     }
   }
 
@@ -278,7 +279,7 @@ class _GithubConnectState extends State<_GithubConnect> {
       final ok = await it.githubDeviceWait(f.deviceCode, f.interval, cancelled: () => !mounted || mine != attempt);
       if (ok && mounted) widget.onDone();
     } catch (e) {
-      if (mounted && mine == attempt) widget.onError('$e');
+      if (mounted && mine == attempt) widget.onError(friendlyError(e));
     } finally {
       if (mounted && mine == attempt) {
         setState(() {
@@ -526,7 +527,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
       await widget.agent.integrations.updateSettings({'githubClientId': _id.text.trim()});
       if (mounted) widget.onSaved('OAuth client ID saved');
     } catch (e) {
-      if (mounted) widget.onSaved(e.toString());
+      if (mounted) widget.onSaved(friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

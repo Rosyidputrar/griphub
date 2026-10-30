@@ -5,6 +5,7 @@ import 'package:simple_icons/simple_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
 import 'chat_screen.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -62,7 +63,7 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   Future<void> _guard(Future<void> Function() task) async {
@@ -500,7 +501,7 @@ class _ScheduleRow extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (busy) ...[const BusySpinner(), const SizedBox(width: 4)],
-          Switch(value: s.enabled, onChanged: busy ? null : onToggle),
+          LabeledSwitch(label: s.name, value: s.enabled, onChanged: busy ? null : onToggle),
           PopupMenuButton<String>(
             enabled: !busy,
             icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
@@ -625,7 +626,7 @@ class _ScheduleSheetState extends State<_ScheduleSheet> {
       if (mounted) {
         setState(() {
           _saving = false;
-          _problem = '$e';
+          _problem = friendlyError(e);
         });
       }
       return;

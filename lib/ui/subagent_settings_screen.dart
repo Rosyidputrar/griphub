@@ -7,6 +7,7 @@ import '../agent/integrations.dart';
 import '../agent/pricing.dart';
 import 'chat_extras.dart';
 import 'i18n.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'theme.dart';
 
@@ -79,7 +80,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
       return true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr(e.toString()))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       }
       return false;
     }
@@ -190,7 +191,8 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (saving != null) ...[const BusySpinner(), const SizedBox(width: 8)],
-                        Switch(
+                        LabeledSwitch(
+                          label: tr('Same as the chat'),
                           value: !override,
                           onChanged: saving != null ? null : (v) => _setFollow(v, chatMode),
                         ),
@@ -327,7 +329,7 @@ class _Toggle extends StatelessWidget {
     title: title,
     subtitle: subtitle,
     onTap: () => onChanged(!value),
-    trailing: Switch(value: value, onChanged: onChanged),
+    trailing: LabeledSwitch(label: title, value: value, onChanged: onChanged),
   );
 }
 

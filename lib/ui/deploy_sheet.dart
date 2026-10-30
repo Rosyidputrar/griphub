@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'accounts_screen.dart';
+import 'errors.dart';
 import 'task_log.dart';
 import 'i18n.dart';
 import 'kit.dart';
@@ -63,7 +64,7 @@ Future<void> _deployFlow(BuildContext context, AgentController agent) async {
     ]);
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not prepare the deploy')}: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not prepare the deploy')}: ${friendlyError(e)}')));
     }
     return;
   } finally {

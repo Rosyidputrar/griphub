@@ -41,6 +41,7 @@ import 'package:re_highlight/re_highlight.dart' show Mode;
 import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'preview_open.dart';
@@ -181,7 +182,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
       _jumpToLine();
     } catch (e) {
       setState(() {
-        _error = '$e';
+        _error = friendlyError(e);
         _loading = false;
       });
     }
@@ -226,7 +227,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
       changed = await _changedOnDisk();
     } catch (e) {
       // The server cannot be reached: nothing is written, the edits stay.
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       return false;
     }
     if (changed) {
@@ -258,7 +259,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     } catch (e) {
       if (!mounted) return false;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       return false;
     }
   }

@@ -12,6 +12,7 @@ import 'accounts_screen.dart';
 import 'backup_screen.dart';
 import 'chat_extras.dart';
 import 'container_screen.dart';
+import 'errors.dart';
 import 'server_screen.dart';
 import 'kit.dart';
 import 'links.dart';
@@ -54,7 +55,7 @@ class _SettingsHubState extends State<SettingsHub> {
       widget.agent.approvalMode = v;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not change approvals')}: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not change approvals')}: ${friendlyError(e)}')));
       }
     } finally {
       if (mounted) setState(() => _approvalSaving = null);
@@ -97,7 +98,7 @@ class _SettingsHubState extends State<SettingsHub> {
         if (!await auth.isDeviceSupported()) throw tr('No screen lock is set on this phone.');
         if (!await auth.authenticate(localizedReason: tr('Unlock GripHub AI Agent'))) return;
       } catch (e) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
         return;
       }
     }
@@ -451,7 +452,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: const Color(0xFFE11D48),
                     title: tr('App lock'),
                     subtitle: tr('Fingerprint or screen lock when opening GripHub AI Agent'),
-                    trailing: Switch(value: look.appLock, onChanged: _setAppLock),
+                    trailing: LabeledSwitch(label: tr('App lock'), value: look.appLock, onChanged: _setAppLock),
                     onTap: () => _setAppLock(!look.appLock),
                   ),
                 ],
@@ -477,7 +478,8 @@ class _SettingsHubState extends State<SettingsHub> {
                     color: p.muted,
                     title: tr('Compact layout'),
                     subtitle: tr('Tighter spacing, more on screen'),
-                    trailing: Switch(
+                    trailing: LabeledSwitch(
+                      label: tr('Compact layout'),
                       value: look.compact,
                       onChanged: (v) => look.update(compact: v),
                     ),

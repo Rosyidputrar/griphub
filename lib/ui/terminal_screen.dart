@@ -9,6 +9,7 @@ import 'package:flutter_pty/flutter_pty.dart';
 import 'package:xterm/xterm.dart';
 
 import '../agent/agent_controller.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'terminal_pane.dart';
 import 'i18n.dart';
@@ -513,7 +514,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       }
       await _newTab(command: t.command, title: t.framework.isEmpty ? 'tests' : t.framework);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
     }
   }
 
@@ -683,7 +684,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
         bottom: PreferredSize(preferredSize: const Size.fromHeight(49), child: _tabStrip(p)),
       ),
       body: error != null && s == null
-          ? Center(child: Text('${tr('Could not start a shell')}: $error'))
+          ? Center(child: Text('${tr('Could not start a shell')}: ${friendlyError(error)}'))
           : s == null
           ? starting
                 ? const Center(child: BusySpinner(size: 18))

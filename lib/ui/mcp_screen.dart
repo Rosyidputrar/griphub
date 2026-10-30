@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -51,7 +52,7 @@ class _McpScreenState extends State<McpScreen> with BusyActions {
 
   void _error(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 
   Future<void> _edit({McpServer? existing, _Preset? preset}) async {
@@ -258,7 +259,7 @@ class _ServerCard extends StatelessWidget {
                 ),
               ),
               if (busy) const BusySpinner(),
-              Switch(value: s.enabled, onChanged: busy ? null : onEnabled),
+              LabeledSwitch(label: s.name, value: s.enabled, onChanged: busy ? null : onEnabled),
               PopupMenuButton<String>(
                 enabled: !busy,
                 icon: Icon(LucideIcons.ellipsis, size: 18, color: p.muted),
@@ -448,7 +449,7 @@ class _McpSheetState extends State<_McpSheet> {
       });
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) setState(() => _problem = '$e');
+      if (mounted) setState(() => _problem = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }

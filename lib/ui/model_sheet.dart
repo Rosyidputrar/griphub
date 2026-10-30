@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'errors.dart';
 import 'settings_screen.dart';
 import 'i18n.dart';
 import '../agent/pricing.dart';
@@ -48,7 +49,7 @@ class _ModelSheetState extends State<_ModelSheet> {
       await widget.agent.setModel(model);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      if (mounted) setState(() => _error = tr(e.toString()));
+      if (mounted) setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _saving = null);
     }

@@ -5,6 +5,7 @@ import 'package:simple_icons/simple_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'box_screen.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'task_log.dart';
 import 'terminal_screen.dart';
@@ -80,7 +81,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
       await it.setContainerShell(on);
       await widget.agent.refreshState();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
       if (mounted) setState(() => switching = false);
     }
@@ -209,7 +210,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
                                 : tr('The agent uses the Android shell; `box` still reaches Linux'),
                             trailing: switching
                                 ? const BusySpinner(size: 18)
-                                : Switch(value: c.enabled, onChanged: widget.agent.busy ? null : _setShell),
+                                : LabeledSwitch(label: tr('Use as the agent\'s shell'), value: c.enabled, onChanged: widget.agent.busy ? null : _setShell),
                           ),
                           SettingsRow(
                             icon: LucideIcons.terminal,

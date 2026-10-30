@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'errors.dart';
 import 'griphub_screen.dart';
 import '../agent/pricing.dart';
 import 'i18n.dart';
@@ -254,7 +255,7 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
     } on AgentError catch (e) {
       if (mounted) setState(() => _error = _readable(e.message));
     } catch (e) {
-      if (mounted) setState(() => _error = _readable(e.toString()));
+      if (mounted) setState(() => _error = _readable(friendlyError(e)));
     } finally {
       _timer?.cancel();
       if (mounted) setState(() => _busy = false);
@@ -420,7 +421,8 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
-                  runSpacing: 8,
+                  // The chips' touch boxes are 4 dp taller than they look.
+                  runSpacing: 4,
                   children: [
                     for (final m in _models)
                       _OptionChip(
@@ -461,7 +463,8 @@ class _ImageGenScreenState extends State<ImageGenScreen> {
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
-                  runSpacing: 8,
+                  // The chips' touch boxes are 4 dp taller than they look.
+                  runSpacing: 4,
                   children: [
                     for (final s in _sizes)
                       _OptionChip(
@@ -583,30 +586,37 @@ class _OptionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: selected ? p.accent : p.surface,
-      borderRadius: BorderRadius.circular(Radii.pill),
-      child: InkWell(
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: TapTarget(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(Radii.pill),
-        // Hugs its label: with alignment set, the Container grew to the Wrap's full width and every
-        // option filled a row of its own.
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontFamily: mono,
-                  fontSize: 13,
-                  color: selected ? p.onAccent : p.text,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                ),
+        child: Material(
+          color: selected ? p.accent : p.surface,
+          borderRadius: BorderRadius.circular(Radii.pill),
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(Radii.pill),
+            // Hugs its label: with alignment set, the Container grew to the Wrap's full width and every
+            // option filled a row of its own.
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontFamily: mono,
+                      fontSize: 13,
+                      color: selected ? p.onAccent : p.text,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

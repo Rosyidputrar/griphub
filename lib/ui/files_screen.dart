@@ -7,6 +7,7 @@ import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
 import 'db_screen.dart';
 import 'editor_screen.dart';
+import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'preview_open.dart';
@@ -151,7 +152,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
       if (!mounted || listing != _listing) return;
       setState(() {
         _entries = [];
-        _error = '$e';
+        _error = friendlyError(e);
         _loading = false;
       });
     }
@@ -290,7 +291,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
       );
       if (mounted) _load();
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     }
   }
 
@@ -307,7 +308,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
       });
       if (created == false) _snack('$name already exists');
     } catch (e) {
-      _snack('$e');
+      _snack(friendlyError(e));
     }
   }
 
@@ -324,7 +325,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
       });
       if (renamed == false) _snack('$name already exists');
     } catch (err) {
-      _snack('$err');
+      _snack(friendlyError(err));
     }
   }
 
@@ -343,7 +344,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         await _load();
       });
     } catch (err) {
-      _snack('$err');
+      _snack(friendlyError(err));
     }
   }
 
@@ -373,7 +374,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         await _load();
       });
     } catch (err) {
-      _snack('$err');
+      _snack(friendlyError(err));
     }
   }
 
@@ -412,7 +413,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         try {
           _snack('Saved to ${await agent.client.saveToDownloads(local)}');
         } catch (err) {
-          _snack('$err');
+          _snack(friendlyError(err));
         }
     }
   }
