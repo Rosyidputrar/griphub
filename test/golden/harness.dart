@@ -231,3 +231,19 @@ AgentController newAgent() => AgentController(AgentClient());
 String golden(String name) => 'goldens/$name.png';
 
 bool get updatingGoldens => autoUpdateGoldenFiles || Platform.environment['UPDATE_GOLDENS'] == '1';
+
+/// Waits until every picture on screen has loaded, then draws a frame. Pictures (and the SVG illustrations, read from
+/// the asset bundle and decoded off the frame) arrive on their own time, so without this a golden came out with or
+/// without its illustration depending on what ran before it.
+Future<void> loadImages(WidgetTester tester) async {
+  for (var round = 0; round < 6; round++) {
+    final images = find.byType(Image).evaluate().toList();
+    await tester.runAsync(() async {
+      for (final e in images) {
+        await precacheImage((e.widget as Image).image, e);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+    });
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}

@@ -545,6 +545,7 @@ void textScaleTests() {
     final agent = newAgent()..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});
     await pumpLook(tester, const Look(textScale: 2.0), ChatScreen(agent: agent));
     await frames(tester);
+    await loadImages(tester);
     await expectLater(find.byType(ChatScreen), matchesGoldenFile(golden('chat_text_x2.0')));
   });
 
@@ -552,6 +553,7 @@ void textScaleTests() {
     FakeHost();
     await pumpLook(tester, const Look(language: 'id', textScale: 2.0), SettingsHub(agent: newAgent()));
     await frames(tester);
+    await loadImages(tester);
     await expectLater(find.byType(SettingsHub), matchesGoldenFile(golden('settings_text_x2.0_id')));
   });
 }

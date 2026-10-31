@@ -61,6 +61,7 @@ void main() {
         FakeHost();
         await pumpLook(tester, look, ChatScreen(agent: agentWithModel()));
         await tester.pump(const Duration(milliseconds: 100));
+        await loadImages(tester);
         await expectLater(find.byType(ChatScreen), matchesGoldenFile(golden('empty_chat_suggestions_${look.name}')));
       });
     }
