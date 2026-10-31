@@ -46,21 +46,30 @@ class PrimaryButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(Radii.lg),
           onTap: enabled ? onPressed : null,
-          child: SizedBox(
-            height: 54,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (busy)
-                  BusySpinner(color: p.inverse)
-                else if (icon != null)
-                  Icon(icon, size: 18, color: p.inverse),
-                if (busy || icon != null) const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: TextStyle(color: p.inverse, fontWeight: FontWeight.w600, fontSize: 15),
-                ),
-              ],
+          // 54 dp tall, and taller when a long label with large text needs a second line (it ran off the side).
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 54),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (busy)
+                    BusySpinner(color: p.inverse)
+                  else if (icon != null)
+                    Icon(icon, size: 18, color: p.inverse),
+                  if (busy || icon != null) const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: p.inverse, fontWeight: FontWeight.w600, fontSize: 15),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

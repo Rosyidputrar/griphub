@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/griphub_screen.dart';
 import 'package:griphub_agent/ui/kit.dart';
+import 'package:griphub_agent/ui/onboarding.dart';
 
 import 'harness.dart';
 
@@ -25,6 +27,7 @@ void main() {
   });
 
   group('UI-02: sheets', sheetTests);
+  group('UI-03: first run', firstRunTests);
 
   group('UI-01: the suggestions on an empty chat', () {
     const looks = [
@@ -110,4 +113,37 @@ void sheetTests() {
     expect(await openSheet(tester, app: true, textScale: 1.3), 'delete');
     expectNoOverflow('the menu sheet');
   });
+}
+
+void firstRunTests() {
+  const looks = [
+    Look(width: 320, textScale: 2.0),
+    Look(width: 780),
+    Look(language: 'id', width: 780, textScale: 1.3),
+    Look(width: 360, textScale: 1.3),
+  ];
+  for (final look in looks) {
+    testWidgets('UI-03: onboarding fits ${look.name}', (tester) async {
+      FakeHost();
+      await pumpLook(tester, look, OnboardingScreen(agent: newAgent()), height: look.width >= 780 ? 340 : 844);
+      await tester.pump(const Duration(milliseconds: 100));
+      collectLayoutErrors(tester, look.name);
+      expectNoOverflow('onboarding');
+      // Skip has a 48 dp touch box, and the dots say which page this is.
+      final skip = tester.getSize(find.ancestor(of: find.text(look.language == 'id' ? 'Lewati' : 'Skip'), matching: find.byType(TapTarget)));
+      expect(skip.width >= 48 && skip.height >= 48, isTrue, reason: 'Skip is $skip');
+      expect(find.bySemanticsLabel(look.language == 'id' ? 'Halaman 1 dari 3' : 'Page 1 of 3'), findsOneWidget);
+    });
+  }
+
+  for (final look in const [Look(language: 'id', width: 320, textScale: 1.3), Look(width: 320, textScale: 2.0)]) {
+    testWidgets('UI-03: the API key screen fits ${look.name}', (tester) async {
+      final host = FakeHost();
+      host.answers['custom_providers'] = (_) => <Object>[];
+      await pumpLook(tester, look, GripHubScreen(agent: newAgent()), height: 1400);
+      await tester.pump(const Duration(milliseconds: 200));
+      collectLayoutErrors(tester, look.name);
+      expectNoOverflow('the API key screen');
+    });
+  }
 }

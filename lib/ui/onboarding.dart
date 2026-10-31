@@ -71,15 +71,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
               child: Row(
                 children: [
-                  Material(
-                    color: p.surface,
-                    borderRadius: BorderRadius.circular(Radii.md),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(Radii.md),
+                  // A 48 dp touch box around the small pill it draws.
+                  Semantics(
+                    button: true,
+                    label: tr('Skip'),
+                    child: TapTarget(
                       onTap: _start,
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                        child: Text(tr('Skip'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                      child: ExcludeSemantics(
+                        child: Material(
+                          color: p.surface,
+                          borderRadius: BorderRadius.circular(Radii.md),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(Radii.md),
+                            onTap: _start,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                              child: Text(
+                                tr('Skip'),
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -94,50 +107,66 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 onPageChanged: (i) => setState(() => page = i),
                 itemBuilder: (context, i) {
                   final (hero, title, body) = _slides[i];
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        SizedBox(height: 240, child: Center(child: _heroWidget(hero))),
-                        const SizedBox(height: 40),
-                        Text(tr(title), textAlign: TextAlign.center, style: text.displayMedium),
-                        const SizedBox(height: 14),
-                        Text(
-                          tr(body),
-                          textAlign: TextAlign.center,
-                          style: text.bodyLarge?.copyWith(color: p.muted),
+                  // Scrolls when the page is taller than the room (a phone on its side, very large text), and the picture
+                  // shrinks to leave room for the words.
+                  return LayoutBuilder(
+                    builder: (context, box) => SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: box.maxHeight),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              height: (box.maxHeight * 0.45).clamp(96.0, 240.0),
+                              child: Center(child: _heroWidget(hero)),
+                            ),
+                            SizedBox(height: box.maxHeight < 400 ? 16 : 40),
+                            Text(tr(title), textAlign: TextAlign.center, style: text.displayMedium),
+                            const SizedBox(height: 14),
+                            Text(
+                              tr(body),
+                              textAlign: TextAlign.center,
+                              style: text.bodyLarge?.copyWith(color: p.muted),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   );
                 },
               ),
             ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                for (var i = 0; i < _slides.length; i++)
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      // The app accent, like every other selected state (accentAlt is for categories).
-                      color: i == page ? p.accent : Colors.transparent,
-                      border: Border.all(color: i == page ? p.accent : p.faint, width: 1.5),
-                    ),
-                  ),
-              ],
+            // The dots are one thing to a screen reader: which page this is.
+            Semantics(
+              label: tr('Page {n} of {total}')
+                  .replaceAll('{n}', '${page + 1}')
+                  .replaceAll('{total}', '${_slides.length}'),
+              child: ExcludeSemantics(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var i = 0; i < _slides.length; i++)
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 220),
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          // The app accent, like every other selected state (accentAlt is for categories).
+                          color: i == page ? p.accent : Colors.transparent,
+                          border: Border.all(color: i == page ? p.accent : p.faint, width: 1.5),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-              child: PrimaryButton(
-                label: last ? tr('Add API key') : tr('Next'),
-                onPressed: last ? _addKey : _next,
-              ),
+              child: PrimaryButton(label: last ? tr('Add API key') : tr('Next'), onPressed: last ? _addKey : _next),
             ),
           ],
         ),

@@ -184,9 +184,14 @@ class _GripHubScreenState extends State<GripHubScreen> {
                   children: [
                     Icon(LucideIcons.lock, size: 13, color: p.muted),
                     const SizedBox(width: 6),
-                    Text(
-                      griphubBaseUrl,
-                      style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
+                    // The address wraps on a narrow phone with large text instead of running off the screen.
+                    Flexible(
+                      child: Text(
+                        griphubBaseUrl,
+                        softWrap: true,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
+                      ),
                     ),
                   ],
                 ),
