@@ -31,6 +31,7 @@ void main() {
   group('UI-13: status bar', statusBarTests);
   group('UI-14: touch targets', touchTargetTests);
   group('UI-15: reduced motion', motionTests);
+  group('UI-16: the chat list', chatsListTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -276,4 +277,43 @@ void motionTests() {
       expect(swap.duration, reduced ? Duration.zero : const Duration(milliseconds: 150));
     });
   }
+}
+
+void chatsListTests() {
+  List<Map<String, dynamic>> many(int n) => [
+    for (var i = 0; i < n; i++)
+      {'path': '/s/c$i.jsonl', 'id': 'c$i', 'name': 'Chat nomor $i', 'cwd': '/w', 'messageCount': 2, 'modified': 1761900000000 - i * 60000},
+  ];
+
+  testWidgets('UI-16: hundreds of chats: only the rows on screen are built, and the agent\'s reports do not rebuild them', (tester) async {
+    final host = FakeHost();
+    host.answers['sessions'] = (_) => many(400);
+    final agent = newAgent();
+    await pumpLook(tester, const Look(), HomeShell(agent: agent), height: 900);
+    await frames(tester);
+    await tester.tap(find.bySemanticsLabel(RegExp('^Chats')).first);
+    await frames(tester, 12);
+    final built = find.textContaining(RegExp(r'^Chat nomor \d+$')).evaluate().length;
+    expect(built, inInclusiveRange(1, 40), reason: '$built of 400 rows built');
+    // A row's element stays the same widget when the agent reports something else.
+    final row = find.text('Chat nomor 0');
+    final before = tester.element(row).widget;
+    agent.billingNotice = 'something else changed';
+    agent.notifyListeners();
+    await tester.pump();
+    expect(identical(tester.element(row).widget, before), isTrue, reason: 'not rebuilt for a report that is not about it');
+  });
+
+  testWidgets('UI-16: the search text survives the lazy list', (tester) async {
+    final host = FakeHost();
+    host.answers['sessions'] = (_) => many(400);
+    await pumpLook(tester, const Look(), HomeShell(agent: newAgent()), height: 900);
+    await frames(tester);
+    await tester.tap(find.bySemanticsLabel(RegExp('^Chats')).first);
+    await frames(tester, 12);
+    await tester.enterText(find.byType(TextField).last, 'nomor 39');
+    await frames(tester);
+    expect(find.text('Chat nomor 39'), findsOneWidget);
+    expect(find.text('Chat nomor 1'), findsNothing);
+  });
 }

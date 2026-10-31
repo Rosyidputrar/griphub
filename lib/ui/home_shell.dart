@@ -1257,6 +1257,15 @@ class _ChatsTabState extends State<_ChatsTab> {
   late Future<List<SessionSummary>> sessions = widget.agent.listSessions();
   String query = '';
 
+  /// Kept by the tab: the list builds its rows lazily, and a search field rebuilt from nothing would lose its text.
+  final _query = TextEditingController();
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
   /// Paths of chats picked for deleting; selection mode is on while it is not empty.
   final _selected = <String>{};
 
@@ -1384,21 +1393,22 @@ class _ChatsTabState extends State<_ChatsTab> {
             onPopInvokedWithResult: (didPop, _) {
               if (!didPop) setState(_selected.clear);
             },
-            child: RefreshIndicator(
-              onRefresh: () async => _reload(),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
-                children: [
-                  if (selecting)
-                    // At least the title's height (no jump between the two), and room for 48 dp buttons at any text size.
-                    ConstrainedBox(
-                      constraints: BoxConstraints(minHeight: text.displaySmall!.fontSize! * 1.25),
-                      child: _selectionBar(all),
-                    )
-                  else
-                    Text(tr('Chats'), style: text.displaySmall),
-                  const SizedBox(height: 16),
-                  TextField(
+            // Only what is on screen is built, and the rows are not rebuilt every time the agent reports (about 30 times
+            // a second while it streams): the list listens for the one thing a row shows from it, the chat being opened.
+            child: _OnSwitching(
+              agent: agent,
+              builder: (context, switchingTo) {
+                final rows = <Widget Function(BuildContext)>[
+                  (_) => selecting
+                      // At least the title's height (no jump between the two), and room for 48 dp buttons at any text size.
+                      ? ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: text.displaySmall!.fontSize! * 1.25),
+                          child: _selectionBar(all),
+                        )
+                      : Text(tr('Chats'), style: text.displaySmall),
+                  (_) => const SizedBox(height: 16),
+                  (_) => TextField(
+                    controller: _query,
                     onChanged: (v) => setState(() {
                       query = v;
                     }),
@@ -1409,17 +1419,17 @@ class _ChatsTabState extends State<_ChatsTab> {
                   ),
                   // A list that could not be read says so, with a retry (it spun forever).
                   if (snap.hasError)
-                    Padding(
+                    (_) => Padding(
                       padding: const EdgeInsets.all(24),
                       child: ErrorNotice(error: snap.error, onRetry: _reload, center: true),
                     )
                   else if (!snap.hasData)
-                    const Padding(
+                    (_) => const Padding(
                       padding: EdgeInsets.all(40),
                       child: Center(child: BusySpinner.page()),
                     )
                   else if (all.isEmpty)
-                    Padding(
+                    (_) => Padding(
                       padding: const EdgeInsets.only(top: 40),
                       child: Column(
                         children: [
@@ -1433,27 +1443,33 @@ class _ChatsTabState extends State<_ChatsTab> {
                       ),
                     ),
                   for (final e in groups.entries) ...[
-                    SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
+                    (_) => SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
                     for (final s in e.value)
-                      ListenableBuilder(
-                        listenable: agent,
-                        builder: (context, _) => _SessionRow(
-                          session: s,
-                          workspace: ws,
-                          selected: selecting ? _selected.contains(s.path) : null,
-                          busy: agent.switchingTo == s.path,
-                          onLongPress: () => selecting ? _toggle(s) : _menu(s),
-                          onTap: () async {
-                            if (selecting) return _toggle(s);
-                            if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
-                            if (context.mounted) await openChat(context, agent);
-                            _reload();
-                          },
-                        ),
+                      (context) => _SessionRow(
+                        session: s,
+                        workspace: ws,
+                        selected: selecting ? _selected.contains(s.path) : null,
+                        busy: switchingTo == s.path,
+                        onLongPress: () => selecting ? _toggle(s) : _menu(s),
+                        onTap: () async {
+                          if (selecting) return _toggle(s);
+                          if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                          if (context.mounted) await openChat(context, agent);
+                          _reload();
+                        },
                       ),
                   ],
-                ],
-              ),
+                ];
+                return RefreshIndicator(
+                  onRefresh: () async => _reload(),
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
+                    itemCount: rows.length,
+                    itemBuilder: (context, i) => rows[i](context),
+                  ),
+                );
+              },
             ),
           );
         },
@@ -1737,4 +1753,37 @@ class _ProjectsTabState extends State<_ProjectsTab> {
       },
     );
   }
+}
+
+/// Rebuilds [builder] when the chat being opened changes, and not on the agent's other reports.
+class _OnSwitching extends StatefulWidget {
+  const _OnSwitching({required this.agent, required this.builder});
+  final AgentController agent;
+  final Widget Function(BuildContext context, String? switchingTo) builder;
+
+  @override
+  State<_OnSwitching> createState() => _OnSwitchingState();
+}
+
+class _OnSwitchingState extends State<_OnSwitching> {
+  late String? _switching = widget.agent.switchingTo;
+
+  void _changed() {
+    if (widget.agent.switchingTo != _switching) setState(() => _switching = widget.agent.switchingTo);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.agent.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    widget.agent.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _switching);
 }
