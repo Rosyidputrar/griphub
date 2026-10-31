@@ -114,7 +114,7 @@ class _Job extends StatelessWidget {
                 ),
               ),
               if (!expand && steps.isNotEmpty)
-                Text('${steps.length} steps', style: TextStyle(fontSize: 11, color: p.faint)),
+                Text(tr('{n} steps').replaceAll('{n}', '${steps.length}'), style: TextStyle(fontSize: 11, color: p.faint)),
             ],
           ),
           if (expand)

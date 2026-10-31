@@ -398,7 +398,7 @@ class _HitList extends StatelessWidget {
                       )
                     else
                       IconButton(
-                        tooltip: 'Install ${h.name}',
+                        tooltip: tr('Install {name}').replaceAll('{name}', h.name),
                         onPressed: () => onInstall(h),
                         icon: Icon(LucideIcons.download, size: 18, color: p.accent),
                       ),

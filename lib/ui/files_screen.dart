@@ -293,7 +293,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
           controller: controller,
           autofocus: true,
           style: const TextStyle(fontFamily: mono),
-          decoration: const InputDecoration(hintText: 'name'),
+          decoration: InputDecoration(hintText: tr('name')),
           onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
         ),
         actions: [
@@ -307,7 +307,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
   String? _validName(String? name) {
     if (name == null || name.isEmpty) return null;
     if (name == '.' || name == '..' || name.contains('\u0000')) {
-      _snack('Invalid name');
+      _snack(tr('Invalid name'));
       return null;
     }
     return name;
@@ -324,7 +324,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         await _load();
         return true;
       });
-      if (created == false) return _snack('$name already exists');
+      if (created == false) return _snack(tr('{name} already exists').replaceAll('{name}', name));
       if (created == null || !mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -348,7 +348,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         await _load();
         return true;
       });
-      if (created == false) _snack('$name already exists');
+      if (created == false) _snack(tr('{name} already exists').replaceAll('{name}', name));
     } catch (e) {
       _snack(friendlyError(e));
     }
@@ -365,7 +365,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         await _load();
         return true;
       });
-      if (renamed == false) _snack('$name already exists');
+      if (renamed == false) _snack(tr('{name} already exists').replaceAll('{name}', name));
     } catch (err) {
       _snack(friendlyError(err));
     }
@@ -422,7 +422,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
 
   Future<void> _copyPath(_Entry e) async {
     await Clipboard.setData(ClipboardData(text: e.path));
-    if (mounted) _snack('Path copied');
+    if (mounted) _snack(tr('Path copied'));
   }
 
   Future<void> _entryAction(_Entry e, String action) async {
@@ -453,7 +453,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
         final local = await _fetch(e);
         if (local == null) return;
         try {
-          _snack('Saved to ${await agent.client.saveToDownloads(local)}');
+          _snack('${tr('Saved to')} ${await agent.client.saveToDownloads(local)}');
         } catch (err) {
           _snack(friendlyError(err));
         }

@@ -1401,7 +1401,7 @@ class _ChatsTabState extends State<_ChatsTab> {
                           if (q.isEmpty) const Illustration('chat', height: 200),
                           const SizedBox(height: 12),
                           Text(
-                            q.isEmpty ? 'No chats yet. Tap + to start one.' : 'Nothing matches.',
+                            tr(q.isEmpty ? 'No chats yet. Tap + to start one.' : 'Nothing matches.'),
                             style: text.bodySmall,
                           ),
                         ],

@@ -1200,7 +1200,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      writing && summary.isEmpty ? 'preparing…' : summary,
+                      writing && summary.isEmpty ? tr('preparing…') : summary,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),

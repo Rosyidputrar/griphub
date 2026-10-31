@@ -307,7 +307,7 @@ class _SettingsHubState extends State<SettingsHub> {
                       if (it.github != null) 'GitHub @${it.github!.login}',
                       if (it.vercelUser != null) 'Vercel',
                       if (it.cloudflareConnected) 'Cloudflare',
-                      if (it.hosts.isNotEmpty) '${it.hosts.length} server${it.hosts.length == 1 ? '' : 's'}',
+                      if (it.hosts.isNotEmpty) serverCount(it.hosts.length),
                     ].join(' · ').ifEmpty(tr('GitHub, Vercel, Cloudflare, SSH keys and servers')),
                     onTap: () => _open(AccountsScreen(agent: agent)),
                   ),
@@ -403,7 +403,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     title: tr('MCP servers'),
                     subtitle: agent.features.mcpServers.isEmpty
                         ? tr('Extra tools from Model Context Protocol servers')
-                        : '${agent.features.mcpServers.length} server${agent.features.mcpServers.length == 1 ? '' : 's'}',
+                        : serverCount(agent.features.mcpServers.length),
                     onTap: () => _open(McpScreen(agent: agent)),
                   ),
                   SettingsRow(
@@ -743,3 +743,6 @@ class _LinkChip extends StatelessWidget {
     );
   }
 }
+
+/// "1 server" / "3 servers" in the app's language (an English plural used to be built in place).
+String serverCount(int n) => n == 1 ? tr('1 server') : tr('{n} servers').replaceAll('{n}', '$n');

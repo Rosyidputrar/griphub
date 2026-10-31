@@ -161,7 +161,7 @@ class _GitScreenState extends State<GitScreen> {
     try {
       final hash = await _f.gitCommit(msg, all: _commitAll);
       _message.clear();
-      _snack('Committed ${hash.length > 7 ? hash.substring(0, 7) : hash}');
+      _snack('${tr('Committed')} ${hash.length > 7 ? hash.substring(0, 7) : hash}');
       _log = null;
       await _refresh();
     } catch (e) {
