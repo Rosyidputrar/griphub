@@ -49,6 +49,11 @@ function env(dir, extra = {}) {
 		GRIPHUB_WORKSPACE: join(dir, "workspace"),
 		GRIPHUB_DIR: join(dir, ".griphub"),
 		GRIPHUB_STORE_KEY: "ab".repeat(32),
+		// These tests run inside a GripHub agent too (the product tests itself); its session would otherwise leak in
+		// here. The agent dir must stay under this test's HOME (pi reads PI_CODING_AGENT_DIR first), and an outer
+		// GRIPHUB_MODE=server would turn a phone-mode host into a server one (server mode is chosen with --listen).
+		PI_CODING_AGENT_DIR: join(dir, ".pi", "agent"),
+		GRIPHUB_MODE: undefined,
 		...extra,
 	};
 }
