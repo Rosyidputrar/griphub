@@ -2,10 +2,10 @@
 // stand-in podman. Ported from CoderRa's agent/test/podmanbox.test.ts (types stripped); the cases through the real
 // host are in host-process.test.mjs.
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { bundle, tempDir } from "./helpers.mjs";
@@ -18,7 +18,7 @@ const { defaultExec, PodmanBox } = await bundle("podmanbox");
 // with the answers it is given.
 
 const ORIGINAL_ENV = Object.fromEntries(
-	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "STUB_EXEC_HANG", "STUB_PROBE_EXIT", "STUB_INSPECT_HANG", "STUB_START_HANG", "BOX_PROBE_SECS", "BOX_START_SECS", "BOX_ALIVE_SECS", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
+	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "STUB_EXEC_HANG", "STUB_PROBE_EXIT", "STUB_SYNC_RUN", "STUB_SYNC_HANG", "STUB_BASE64_FAIL", "STUB_INSPECT_HANG", "STUB_START_HANG", "BOX_PROBE_SECS", "BOX_START_SECS", "BOX_ALIVE_SECS", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
 );
 
 const BOX = fileURLToPath(new URL("../../server/box/box", import.meta.url));
@@ -48,6 +48,17 @@ case "$cmd" in
     [ -n "\${STUB_EXEC_HANG:-}" ] && exec sleep 30
     if [ -n "\${STUB_PROBE_EXIT:-}" ] && [ "$*" = "griphub-box true" ]; then echo "Error: crun: cannot start" >&2; exit "$STUB_PROBE_EXIT"; fi
     case "$*" in
+      *"/bin/sh -c"*)
+        # The launcher putting the git and ssh settings in: what it sent is kept. STUB_SYNC_RUN also runs the script it
+        # sent, with the box's home folder as the container's home (a stand-in: links are NOT confined to the
+        # container here, so no test of a planted link runs it).
+        [ -n "\${STUB_SYNC_HANG:-}" ] && exec sleep 30
+        echo run >> "$dir/sync.count"
+        cat > "$dir/sync.in"
+        if [ -n "\${STUB_SYNC_RUN:-}" ]; then
+          script="\${@: -1}"
+          ( cd / && HOME="$GRIPHUB_DIR/box-home" sh -c "$script" < "$dir/sync.in" ) || exit $?
+        fi ;;
       *box-works*) [ "\${STUB_EXEC_EXIT:-0}" = 0 ] || { echo "Error: crun: cannot start" >&2; exit "$STUB_EXEC_EXIT"; }; echo box-works ;;
       *memory.current*) [ -n "\${STUB_USAGE_FAIL:-}" ] && exit 1; cat "$dir/usage" 2>/dev/null ;;
     esac ;;
@@ -347,6 +358,176 @@ test("a probe that fails some other way does not refuse: the command meets podma
 	assert.doesNotMatch(ran.stderr, /did not answer/);
 	assert.equal(probes(r), 1, "it did probe");
 	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "an error is not an answer to remember");
+});
+
+// What the host puts in the box's home (git's identity, the ssh key) used to be copied there from the host, as the service
+// user. Any command in the box can change that folder, so a link planted in it (`ln -s ~/.ssh/authorized_keys
+// ~/.gitconfig.tmp`, or `.ssh` itself made a link) made those copies land on the server's own files: the phone's key
+// replaced by the box's own, the store key replaced by git's config. Now the host writes nothing in the box's home;
+// the files go in through `podman exec` and are installed by a script that runs in the container.
+const SOURCES = { ".gitconfig": "[user]\n\tname = Agent\n", ".ssh/config": "Host x\n  User y\n", ".ssh/id_ed25519": "PRIVATE-KEY\n", ".ssh/id_ed25519.pub": "ssh-ed25519 AAAA app\n", ".ssh/known_hosts": "example.org ssh-ed25519 BBBB\n" };
+const boxHomeOf = (r) => join(r.griphubDir, "box-home");
+const putSources = (r, files = SOURCES) => {
+	mkdirSync(join(r.home, ".ssh"), { recursive: true });
+	for (const [name, text] of Object.entries(files)) writeFileSync(join(r.home, name), text);
+};
+const sentLines = (r) => readFileSync(join(r.stub, "sync.in"), "utf8").trim().split("\n").map((l) => l.split(" "));
+const syncRuns = (r) => (existsSync(join(r.stub, "sync.count")) ? readFileSync(join(r.stub, "sync.count"), "utf8").trim().split("\n").length : 0);
+// The server's own files a command in the box must not be able to reach from there.
+const victimsOf = (r) => {
+	const v = { authorizedKeys: join(r.home, ".ssh", "authorized_keys"), storeKey: join(r.griphubDir, "env"), dir: join(r.home, "victim-dir") };
+	mkdirSync(join(r.home, ".ssh"), { recursive: true });
+	writeFileSync(v.authorizedKeys, "ssh-ed25519 PHONEKEY phone\n");
+	writeFileSync(v.storeKey, "GRIPHUB_STORE_KEY=abab\n");
+	mkdirSync(v.dir);
+	writeFileSync(join(v.dir, "config"), "keep\n");
+	return v;
+};
+
+test("links planted in the box's home are not followed: the server's own files stay as they are", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	const v = victimsOf(r);
+	const bh = boxHomeOf(r);
+	mkdirSync(join(bh, ".ssh"), { recursive: true });
+	// Planted from inside the box, under the names the old copy used, and under the names the new install uses.
+	for (const name of [".ssh/id_ed25519.pub.tmp", ".ssh/id_ed25519.pub.new", ".ssh/config.tmp"]) symlinkSync(v.authorizedKeys, join(bh, name));
+	for (const name of [".gitconfig.tmp", ".gitconfig.new"]) symlinkSync(v.storeKey, join(bh, name));
+	const ran = runBox(r, "true");
+	assert.equal(ran.status, 0, ran.stderr);
+	assert.equal(readFileSync(v.authorizedKeys, "utf8"), "ssh-ed25519 PHONEKEY phone\n", "the phone's key is still the only one");
+	assert.equal(readFileSync(v.storeKey, "utf8"), "GRIPHUB_STORE_KEY=abab\n", "the store key is still the store key");
+	assert.ok(lstatSync(join(bh, ".gitconfig.tmp")).isSymbolicLink(), "the host did not touch the box's home at all");
+	assert.equal(readlinkSync(join(bh, ".ssh/id_ed25519.pub.tmp")), v.authorizedKeys);
+	assert.equal(syncRuns(r), 1, "the settings went in once, through podman exec");
+});
+
+test("the box's .ssh made a link to a folder of the server does not make the server's files the box's to rewrite", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	const v = victimsOf(r);
+	const bh = boxHomeOf(r);
+	mkdirSync(bh, { recursive: true });
+	symlinkSync(v.dir, join(bh, ".ssh")); // `ln -s <a folder> ~/.ssh`
+	const ran = runBox(r, "true");
+	assert.equal(ran.status, 0, ran.stderr);
+	assert.equal(readFileSync(join(v.dir, "config"), "utf8"), "keep\n", "not overwritten with the ssh config");
+	assert.deepEqual(readdirSync(v.dir), ["config"], "nothing was made or removed there");
+	assert.ok(lstatSync(join(bh, ".ssh")).isSymbolicLink());
+	// And with no ssh settings on the server the old code deleted by the same road; now it deletes nothing.
+	rmSync(join(r.home, ".ssh", "config"));
+	assert.equal(runBox(r, "true", { BOX_ALIVE_SECS: "0" }).status, 0);
+	assert.deepEqual(readdirSync(v.dir), ["config"]);
+});
+
+test("the settings are sent as the files are, to a container that installs only the names it knows", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	assert.equal(runBox(r, "true").status, 0);
+	const lines = sentLines(r);
+	assert.deepEqual(lines.map((l) => `${l[0]} ${l[1]}`), ["put .gitconfig", "put .ssh/config", "put .ssh/id_ed25519", "put .ssh/id_ed25519.pub", "seed .ssh/known_hosts"]);
+	for (const [mode, name, data] of lines) assert.equal(Buffer.from(data, "base64").toString("utf8"), SOURCES[name], `${mode} ${name}`);
+	const argv = r.calls().filter((c) => c[0] === "exec" && c.includes("/bin/sh")).at(-1);
+	assert.ok(!argv.join(" ").includes("PRIVATE-KEY") && !argv.join(" ").includes(Buffer.from(SOURCES[".ssh/id_ed25519"]).toString("base64")), "the key goes over stdin, not in a command line anyone can list");
+});
+
+test("the settings go in when they change or after a while, not before every command; a reset forgets them", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	assert.equal(runBox(r, "echo one").status, 0);
+	assert.equal(runBox(r, "echo two").status, 0);
+	assert.equal(syncRuns(r), 1, "the second command found them in place");
+	writeFileSync(join(r.home, ".gitconfig"), "[user]\n\tname = Someone Else Entirely\n"); // the app changed it (a sign-in)
+	assert.equal(runBox(r, "echo three").status, 0);
+	assert.equal(syncRuns(r), 2, "a change is put in at once");
+	assert.equal(runBox(r, "echo four", { BOX_ALIVE_SECS: "0" }).status, 0);
+	assert.equal(syncRuns(r), 3, "and after a while they are put in again, so what a command in the box did to them does not last");
+	assert.ok(existsSync(join(r.griphubDir, "box.synced")));
+	assert.equal(spawnSync(BOX, ["--reset"], { cwd: r.home, env: process.env }).status, 0);
+	assert.ok(!existsSync(join(r.griphubDir, "box.synced")), "a new container has none of them yet");
+});
+
+test("what the container installs: files replace what is there (a link included), known_hosts is only seeded, what the server lacks is removed", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	process.env.STUB_SYNC_RUN = "1"; // the install script runs, with the box's home folder as the container's home
+	const bh = boxHomeOf(r);
+	mkdirSync(join(bh, ".ssh"), { recursive: true });
+	writeFileSync(join(bh, "sentinel"), "mine\n");
+	symlinkSync("../sentinel", join(bh, ".ssh", "config")); // a link inside the box's own home, at a name the install writes
+	writeFileSync(join(bh, ".gitconfig.new"), "left over\n");
+	assert.equal(runBox(r, "true").status, 0);
+	const read = (name) => readFileSync(join(bh, name), "utf8");
+	for (const [name, text] of Object.entries(SOURCES)) assert.equal(read(name), text, name);
+	assert.ok(!lstatSync(join(bh, ".ssh", "config")).isSymbolicLink(), "the link was replaced, not written through");
+	assert.equal(read("sentinel"), "mine\n", "what it pointed at was not written");
+	assert.ok(!existsSync(join(bh, ".gitconfig.new")) && !existsSync(join(bh, ".ssh", "config.new")), "no half-made file is left");
+	for (const name of Object.keys(SOURCES)) assert.equal(statSync(join(bh, name)).mode & 0o777, 0o600, `${name} is private`);
+	assert.equal(statSync(join(bh, ".ssh")).mode & 0o777, 0o700);
+
+	// The server no longer has the key; the host file known_hosts changed, but the box has learned its own: left alone.
+	rmSync(join(r.home, ".ssh", "id_ed25519"));
+	writeFileSync(join(r.home, ".ssh", "known_hosts"), "changed on the server\n");
+	writeFileSync(join(bh, ".ssh", "known_hosts"), "learned in the box\n");
+	assert.equal(runBox(r, "true", { BOX_ALIVE_SECS: "0" }).status, 0);
+	assert.ok(!existsSync(join(bh, ".ssh", "id_ed25519")), "removed");
+	assert.equal(read(".ssh/known_hosts"), "learned in the box\n");
+	// A known_hosts that is a link, even one that leads nowhere, counts as there: nothing is written through it.
+	rmSync(join(bh, ".ssh", "known_hosts"));
+	symlinkSync("nowhere", join(bh, ".ssh", "known_hosts"));
+	assert.equal(runBox(r, "true", { BOX_ALIVE_SECS: "0" }).status, 0);
+	assert.ok(!existsSync(join(bh, ".ssh", "nowhere")), "nothing was made where the link leads");
+	// Gone from the box, it is seeded again from the server.
+	rmSync(join(bh, ".ssh", "known_hosts"));
+	assert.equal(runBox(r, "true", { BOX_ALIVE_SECS: "0" }).status, 0);
+	assert.equal(read(".ssh/known_hosts"), "changed on the server\n");
+});
+
+test("the install script accepts only its own names and modes, and writes nothing else", (t) => {
+	const script = /^INSTALL='([\s\S]*?)'$/m.exec(readFileSync(BOX, "utf8"))?.[1];
+	assert.ok(script, "the install script is in the launcher");
+	const home = tempDir(t);
+	const outsideFile = join(dirname(home), `escaped-${process.pid}`);
+	t.after(() => rmSync(outsideFile, { force: true }));
+	const run = (input) => spawnSync("sh", ["-c", script], { input, encoding: "utf8", env: { PATH: process.env.PATH, HOME: home }, cwd: "/" });
+	const hi = Buffer.from("hi").toString("base64");
+	for (const name of [`../${outsideFile.split("/").pop()}`, ".ssh/../x", "/etc/x", ".ssh/authorized_keys", ".bashrc", ".gitconfig/../../y"]) {
+		assert.equal(run(`put ${name} ${hi}\n`).status, 2, `put ${name}`);
+	}
+	assert.equal(run(`run .gitconfig ${hi}\n`).status, 2, "an unknown mode");
+	assert.ok(!existsSync(outsideFile) && !existsSync(join(home, ".bashrc")) && !existsSync(join(home, ".ssh", "authorized_keys")), "nothing was written");
+	assert.equal(run(`put .gitconfig ${hi}\n`).status, 0);
+	assert.equal(readFileSync(join(home, ".gitconfig"), "utf8"), "hi");
+	assert.equal(run("put .gitconfig \n").status, 0, "an empty file is an empty file");
+	assert.equal(readFileSync(join(home, ".gitconfig"), "utf8"), "");
+});
+
+test("a key that cannot be read is not put in as an empty file: the command runs without the settings, and says so", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	writeFileSync(join(r.home, "bin", "base64"), "#!/bin/bash\nexit 1\n");
+	chmodSync(join(r.home, "bin", "base64"), 0o755);
+	const ran = runBox(r, "true");
+	assert.equal(ran.status, 0, ran.stderr);
+	assert.match(ran.stderr, /could not read the git and ssh settings/);
+	assert.equal(syncRuns(r), 0, "nothing was sent");
+});
+
+test("a container that does not take the settings in time refuses the command, like one that does not answer; one that fails says so and the command goes on", (t) => {
+	const r = rig(t, { state: "running" });
+	putSources(r);
+	process.env.STUB_SYNC_HANG = "1";
+	const hung = runBox(r, "touch ran-anyway", { BOX_PROBE_SECS: "1" });
+	assert.equal(hung.status, 70, hung.stderr);
+	assert.match(hung.stderr, /putting its git and ssh settings in took more than 1s/);
+	assert.ok(!existsSync(join(r.home, "ran-anyway")));
+	delete process.env.STUB_SYNC_HANG;
+	rmSync(join(r.griphubDir, "box.synced"), { force: true });
+	process.env.STUB_SYNC_RUN = "1";
+	mkdirSync(join(boxHomeOf(r), ".gitconfig"), { recursive: true }); // a folder where the file goes: the install cannot put it there
+	const failed = runBox(r, "true");
+	assert.equal(failed.status, 0, failed.stderr);
+	assert.match(failed.stderr, /could not put the git and ssh settings in the box \(exit code 3\)/);
 });
 
 test("resetting throws the container away and keeps the image and the home folder", async (t) => {

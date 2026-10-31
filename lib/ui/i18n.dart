@@ -916,6 +916,7 @@ const _id = <String, String>{
   'Look around the workspace and give me a short tour of what is there.': 'Lihat-lihat isi workspace dan jelaskan singkat apa saja yang ada.',
   'This command can delete data, publish or reach other machines': 'Perintah ini bisa menghapus data, memublikasikan, atau mengakses mesin lain',
   'Writes outside the project folder': 'Menulis di luar folder proyek',
+  'Writes inside a .git folder: git runs what is written there': 'Menulis di dalam folder .git: git menjalankan apa yang tertulis di sana',
   'External tool from an MCP server': 'Tool eksternal dari server MCP',
   'Approval required for every change': 'Setiap perubahan butuh persetujuan',
   'Enter a number, like 2 or 1.5': 'Masukkan angka, misalnya 2 atau 1,5',

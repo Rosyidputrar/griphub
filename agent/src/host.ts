@@ -38,7 +38,7 @@ import * as gitops from "./gitops.js";
 import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
-import { compactLimit, Integrations, type Log, run } from "./integrations.js";
+import { compactLimit, gitRun, Integrations, type Log, run } from "./integrations.js";
 import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
@@ -1129,7 +1129,7 @@ async function projectDeleteCheck(path: string) {
 	const chats = (await SessionManager.listAll()).filter((i) => i.cwd && within(resolve(i.cwd), dir));
 	const git = existsSync(join(dir, ".git"));
 	const lines = async (args: string[]) =>
-		(await run("git", args, { cwd: dir }).catch(() => "")).split("\n").filter((l) => l.trim()).length;
+		(await gitRun(args, { cwd: dir }).catch(() => "")).split("\n").filter((l) => l.trim()).length;
 	const blockers: string[] = [];
 	const s = session!;
 	if (s.isStreaming && within(resolve(s.sessionManager.getCwd()), dir)) blockers.push("The agent is working in this project");

@@ -27,7 +27,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { type Integrations, run } from "./integrations.js";
+import { gitRun, type Integrations, run } from "./integrations.js";
 import type { CustomProviders } from "./providers.js";
 
 const REPO = "griphub-sync";
@@ -464,7 +464,7 @@ export class GitHubSync {
 			const to = join(workspace, p.name);
 			if (!isNew(`git/${p.name}`, to)) continue;
 			const args = ["clone", "-q", ...(safeBranch(p.branch) ? ["-b", p.branch] : []), "--", p.remote, to];
-			await run("git", args, { cwd: workspace }).then(
+			await gitRun(args, { cwd: workspace }).then(
 				() => imported.projects++,
 				() => {},
 			);
@@ -513,11 +513,11 @@ export class GitHubSync {
 			if (!safeName(name) || name === "backups" || !lstatSync(dir).isDirectory()) continue;
 			if (this.state.localOnly.includes(name)) continue;
 			const origin = exists(join(dir, ".git"))
-				? (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim()
+				? (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim()
 				: "";
 			const remote = withoutCredentials(origin);
 			if (safeRemote(remote)) {
-				const branch = (await run("git", ["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
+				const branch = (await gitRun(["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
 				gitProjects.push({ name, remote, branch });
 				items.push(`git/${name}`);
 			} else {

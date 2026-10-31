@@ -4,9 +4,11 @@
  * command output, and a checkpoint before the agent starts changing files.
  */
 
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateUnifiedPatch, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
@@ -62,11 +64,86 @@ const RISKY_BASH = [
 	/\bDROP\s+(TABLE|DATABASE)\b|\bTRUNCATE\b/i,
 ];
 
+/** Characters pi turns into a plain space before it looks at a path. */
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * The file a path names when pi's file tools open it: the same steps as pi's own `resolveToCwd` (unusual spaces become
+ * spaces, one leading `@` is dropped, `~` is the home folder, `file://` is a path), done here because a check that reads
+ * the path any other way approves one file and lets the tool write another (`@/home/x/.ssh/authorized_keys` was
+ * "inside the project" to this check and the real file to pi). agent/test/guard-paths.test.mjs compares the two. Throws
+ * for a `file://` address pi would refuse too.
+ */
+export function resolveLikePi(raw: string, cwd: string): string {
+	let p = raw.replace(UNICODE_SPACES, " ");
+	if (p.startsWith("@")) p = p.slice(1);
+	if (p === "~") p = homedir();
+	else if (p.startsWith("~/")) p = join(homedir(), p.slice(2));
+	if (/^file:\/\//.test(p)) p = fileURLToPath(p);
+	return isAbsolute(p) ? resolve(p) : resolve(cwd, p);
+}
+
+/**
+ * Where a path really leads: links resolved as far as the path exists, then the rest of it as written. A link that
+ * leads nowhere (yet) is followed too, since writing through it creates what it points at. Null when that cannot be
+ * told (an unreadable folder, a loop of links): the caller then treats the path as outside.
+ */
+function canonicalTarget(path: string): string | null {
+	let head = path;
+	const tail: string[] = [];
+	for (let steps = 0; steps < 256; steps++) {
+		try {
+			return join(realpathSync(head), ...tail);
+		} catch (e) {
+			const code = (e as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+		}
+		try {
+			if (lstatSync(head).isSymbolicLink()) {
+				// A relative link is read from the folder it is in, as that folder really is: `..` from a folder reached
+				// through a link is the real folder's parent, not the parent of the name it was reached by.
+				head = resolve(realpathSync(dirname(head)), readlinkSync(head));
+				continue;
+			}
+		} catch (e) {
+			// Not there at all: look at its folder. A folder that cannot be read cannot be told.
+			const code = (e as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+		}
+		const parent = dirname(head);
+		if (parent === head) return null;
+		tail.unshift(basename(head));
+		head = parent;
+	}
+	return null;
+}
+
+const OUTSIDE_PROJECT = "Writes outside the project folder";
+const INSIDE_GIT = "Writes inside a .git folder: git runs what is written there";
+
+/**
+ * Why a file tool given [raw] needs a look: it would write outside [cwd], through links and all, or into a `.git` folder
+ * (hooks, a config that names a program: see gitsafe.ts, which is what actually keeps those from running on the host; a
+ * `bash` command can write there without passing here, so this is the common way in, not the only one). Null otherwise.
+ */
+function writeRisk(raw: string, cwd: string): string | null {
+	let target: string;
+	try {
+		target = resolveLikePi(raw, cwd);
+	} catch {
+		return OUTSIDE_PROJECT;
+	}
+	const real = canonicalTarget(target);
+	const root = canonicalTarget(resolve(cwd));
+	if (real === null || root === null || !isInside(real, root)) return OUTSIDE_PROJECT;
+	return relative(root, real).split(sep).includes(".git") ? INSIDE_GIT : null;
+}
+
 /**
  * Why a call deserves a second look, or null. `mcp` says whether tools from MCP servers count: a person is asked about
  * them, but an unattended run may use the servers the user set up (as background runs always could).
  */
-function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
+export function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
 	if (READ_ONLY.has(toolName)) return null;
 	// A background job is a bash command that runs a while: the same second look.
 	if (toolName === "bash" || toolName === "background_job") {
@@ -75,13 +152,9 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, m
 		return hit ? "This command can delete data, publish or reach other machines" : null;
 	}
 	if (toolName === "write" || toolName === "edit") {
-		const raw = String(input.path ?? "");
-		// Resolve ~, relative paths and .. segments before comparing, and
-		// compare against cwd + separator: /a/bc is not inside /a/b.
-		const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
-		const resolved = resolve(cwd, expanded);
-		if (resolved !== cwd && !resolved.startsWith(cwd + sep)) return "Writes outside the project folder";
-		return null;
+		// Compared where the file really is (see resolveLikePi, canonicalTarget): /a/bc is not inside /a/b, and neither
+		// is a file reached through a link that leads out of it.
+		return writeRisk(String(input.path ?? ""), cwd);
 	}
 	// Unknown/custom tools (MCP and friends) are treated as risky.
 	return mcp && toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
@@ -91,11 +164,9 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, m
 const PATCH_MAX_FILE = 512 * 1024;
 const PATCH_MAX_CHARS = 64 * 1024;
 
-/** A path as the file tools take it: `~` is the home folder, relative paths are from the project. */
+/** A path as the file tools take it (see resolveLikePi). */
 function toolPath(raw: string, cwd: string): string {
-	const p = raw.startsWith("@") ? raw.slice(1) : raw;
-	const expanded = p === "~" ? homedir() : p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : p;
-	return resolve(cwd, expanded);
+	return resolveLikePi(raw, cwd);
 }
 
 /** The replacements an `edit` call asks for, in each shape models send them (pi's edit tool takes the same ones). */

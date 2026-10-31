@@ -3,10 +3,20 @@
 import { spawn } from "node:child_process";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
+import { assertRepoConfigSafe, gitEnv, SAFE_GIT_FLAGS } from "./gitsafe.js";
 
-function git(cwd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+/** For a diff: no external diff program and no text-conversion program, whatever the project's settings say. */
+const NO_PROGRAMS = ["--no-ext-diff", "--no-textconv"];
+
+/**
+ * Runs git in a project folder. The agent can write that folder's git settings, so every call here goes through
+ * gitsafe.ts: flags that turn off the programs git would take from them, a refusal when the settings name one the flags
+ * cannot turn off, and an environment with no tokens (see there).
+ */
+async function git(cwd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+	await assertRepoConfigSafe(cwd);
 	return new Promise((resolve, reject) => {
-		const child = spawn("git", args, { cwd, env: process.env });
+		const child = spawn("git", [...SAFE_GIT_FLAGS, ...args], { cwd, env: gitEnv() });
 		let out = "";
 		let err = "";
 		child.stdout.on("data", (c) => (out += c));
@@ -93,13 +103,13 @@ export async function status(cwd: string) {
 export async function diff(cwd: string, file?: string, staged = false) {
 	// A file's path comes from the status: relative to the top. The whole diff stays the project folder's own.
 	if (file) cwd = await top(cwd);
-	const args = ["diff", "--no-color", "-U3"];
+	const args = ["diff", ...NO_PROGRAMS, "--no-color", "-U3"];
 	if (staged) args.push("--cached");
 	if (file) args.push("--", file);
 	let patch = await ok(cwd, args);
 	// Untracked files have no diff; show them as all-new.
 	if (!patch && file && !staged) {
-		const r = await git(cwd, ["diff", "--no-color", "--no-index", "/dev/null", file]);
+		const r = await git(cwd, ["diff", ...NO_PROGRAMS, "--no-color", "--no-index", "/dev/null", file]);
 		patch = r.out;
 	}
 	return { patch };
@@ -165,7 +175,7 @@ export async function review(cwd: string) {
 	if (!st.repo) return { ...st, stats: {} as Record<string, FileStat> };
 	const stats: Record<string, FileStat> = {};
 	const hasHead = (await git(st.root, ["rev-parse", "--verify", "-q", "HEAD"])).code === 0;
-	const numstat = await git(st.root, hasHead ? ["diff", "--numstat", "-z", "HEAD"] : ["diff", "--numstat", "-z", "--cached"]);
+	const numstat = await git(st.root, hasHead ? ["diff", ...NO_PROGRAMS, "--numstat", "-z", "HEAD"] : ["diff", ...NO_PROGRAMS, "--numstat", "-z", "--cached"]);
 	// "adds\tdels\tpath\0", or for a rename "adds\tdels\t\0from\0to\0".
 	const parts = numstat.out.split("\0");
 	for (let i = 0; i < parts.length; i++) {
@@ -188,8 +198,8 @@ export async function changeSummary(cwd: string, max = 16_000) {
 	if (!st.repo) return null;
 	const hasHead = (await git(st.root, ["rev-parse", "--verify", "-q", "HEAD"])).code === 0;
 	const base = hasHead ? ["HEAD"] : ["--cached"];
-	const stat = (await git(st.root, ["diff", "--stat=100", ...base])).out.trim();
-	let patch = (await git(st.root, ["diff", "--no-color", "-U1", ...base])).out;
+	const stat = (await git(st.root, ["diff", ...NO_PROGRAMS, "--stat=100", ...base])).out.trim();
+	let patch = (await git(st.root, ["diff", ...NO_PROGRAMS, "--no-color", "-U1", ...base])).out;
 	if (patch.length > max) patch = `${patch.slice(0, max)}\n[... the rest of the diff is cut]`;
 	const untracked = st.files.filter((f) => f.untracked).map((f) => f.path);
 	return { stat, patch, untracked, files: st.files.length };
