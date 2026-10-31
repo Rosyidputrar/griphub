@@ -570,3 +570,29 @@ SystemUiOverlayStyle systemOverlayFor(Brightness brightness, Palette p) =>
       statusBarColor: Colors.transparent,
       systemNavigationBarColor: p.bg,
     );
+
+/// The contrast ratio of two colours (WCAG): 1 to 21.
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  return (la > lb ? la + 0.05 : lb + 0.05) / (la > lb ? lb + 0.05 : la + 0.05);
+}
+
+/// Icons and text on a fill of [fill]: white or near-black, whichever reads better (white on amber, teal, orange or sky
+/// was 2.2 to 2.8:1).
+Color onFill(Color fill) {
+  const ink = Color(0xFF111113);
+  return contrastRatio(Colors.white, fill) >= contrastRatio(ink, fill) ? Colors.white : ink;
+}
+
+/// [fg] as a colour for text on [bg]: itself when it reads at [target]:1, otherwise darkened (or lightened on a dark
+/// background), same hue, until it does.
+Color readableOn(Color fg, Color bg, {double target = 4.5}) {
+  final darken = bg.computeLuminance() > 0.5;
+  var hsl = HSLColor.fromColor(fg);
+  var c = fg;
+  for (var i = 0; i < 60 && contrastRatio(c, bg) < target; i++) {
+    hsl = hsl.withLightness((hsl.lightness + (darken ? -0.01 : 0.01)).clamp(0.0, 1.0));
+    c = hsl.toColor();
+  }
+  return c;
+}

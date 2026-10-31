@@ -291,7 +291,7 @@ class IconTile extends StatelessWidget {
         border: solid ? null : Border.all(color: c.withValues(alpha: 0.22)),
       ),
       alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.5, color: solid ? Colors.white : c),
+      child: Icon(icon, size: size * 0.5, color: solid ? onFill(c) : c),
     );
   }
 }
@@ -449,6 +449,8 @@ class Pill extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final c = color ?? p.muted;
+    // The pill's own colour as its text, made dark enough to read on its tint over a card (danger and warning were 4:1).
+    final ink = readableOn(c, Color.alphaBlend(c.withValues(alpha: 0.12), p.surface));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
@@ -467,12 +469,12 @@ class Pill extends StatelessWidget {
             ),
             const SizedBox(width: 6),
           ] else if (icon != null) ...[
-            Icon(icon, size: 12, color: c),
+            Icon(icon, size: 12, color: ink),
             const SizedBox(width: 5),
           ],
           Text(
             label,
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c),
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: ink),
           ),
         ],
       ),

@@ -7,7 +7,8 @@ import 'i18n.dart';
 import 'theme.dart';
 
 /// Token colors for highlight.js class names, tuned to sit on [Palette.surface].
-Map<String, Color> _syntax(Brightness b) => b == Brightness.dark
+/// The syntax colours for a theme (tested for contrast in test/contrast_test.dart).
+Map<String, Color> syntaxColors(Brightness b) => b == Brightness.dark
     ? const {
         'keyword': Color(0xFFFF7B72),
         'built_in': Color(0xFFFFA657),
@@ -45,9 +46,10 @@ Map<String, Color> _syntax(Brightness b) => b == Brightness.dark
         'number': Color(0xFF0550AE),
         'string': Color(0xFF0A3069),
         'regexp': Color(0xFF0A3069),
-        'comment': Color(0xFF6E7781),
-        'doctag': Color(0xFF6E7781),
-        'meta': Color(0xFF6E7781),
+        // 4.5:1 on a card (0xFF6E7781 was 4.2).
+        'comment': Color(0xFF59636E),
+        'doctag': Color(0xFF59636E),
+        'meta': Color(0xFF59636E),
         'title': Color(0xFF8250DF),
         'function': Color(0xFF8250DF),
         'class': Color(0xFF953800),
@@ -93,7 +95,7 @@ List<TextSpan> highlightSpans(String code, String? language, Brightness brightne
   try {
     final nodes = highlight.parse(code, language: _aliases[lang] ?? lang).nodes;
     if (nodes == null) return [TextSpan(text: code)];
-    final colors = _syntax(brightness);
+    final colors = syntaxColors(brightness);
     return _spans(nodes, colors, null);
   } catch (_) {
     return [TextSpan(text: code)];

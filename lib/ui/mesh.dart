@@ -71,7 +71,7 @@ class RingBadge extends StatelessWidget {
         boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.45, color: Colors.white),
+      child: Icon(icon, size: size * 0.45, color: onFill(color)),
     );
   }
 }

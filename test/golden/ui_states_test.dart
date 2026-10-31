@@ -39,6 +39,7 @@ void main() {
   group('UI-18: switch rows', switchRowTests);
   group('UI-19: wide screens', wideScreenTests);
   group('UI-20: Back', backTests);
+  group('UI-21: pills', pillTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -501,5 +502,16 @@ void backTests() {
     await frames(tester, 12);
     expect(find.text('1 selected'), findsNothing, reason: 'the picking ended');
     expect(find.text('Nota toko'), findsOneWidget, reason: 'still on Chats');
+  });
+}
+
+void pillTests() {
+  testWidgets('UI-21: a danger pill on a card uses a text colour that reads', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(), Scaffold(body: Container(color: Palette.light.surface, child: Pill('Failed', color: Palette.light.danger))));
+    final text = tester.widget<Text>(find.text('Failed'));
+    final bg = Color.alphaBlend(Palette.light.danger.withValues(alpha: 0.12), Palette.light.surface);
+    final ratio = contrastRatio(text.style!.color!, bg);
+    expect(ratio, greaterThanOrEqualTo(4.5), reason: '$ratio:1');
   });
 }

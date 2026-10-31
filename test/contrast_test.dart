@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/ui/code_view.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
 double contrast(Color a, Color b) {
@@ -14,6 +15,7 @@ double contrast(Color a, Color b) {
 }
 
 void main() {
+  group('UI-21: small contrast shortfalls', smallContrastTests);
   group('accent as text', accentTextTests);
   test('UI-08: text on a danger fill reads in both themes (white on the dark red was 2.9:1)', () {
     for (final (name, p) in [('light', Palette.light), ('dark', Palette.dark)]) {
@@ -65,5 +67,32 @@ void accentTextTests() {
     expect(contrast(green.accent, Palette.light.bg), lessThan(4.5), reason: 'green really did fail as text');
     expect(green.accentText, isNot(green.accent));
     expect(HSLColor.fromColor(green.accentText).hue, closeTo(HSLColor.fromColor(green.accent).hue, 1), reason: 'still green, only darker');
+  });
+}
+
+
+void smallContrastTests() {
+  test('UI-21: a pill\'s text reads on its tint over a card, in both themes, whatever its colour', () {
+    for (final (name, p) in [('light', Palette.light), ('dark', Palette.dark)]) {
+      for (final c in [p.danger, p.warning, p.success, p.accent, p.accentAlt, p.muted]) {
+        final bg = Color.alphaBlend(c.withValues(alpha: 0.12), p.surface);
+        expect(contrast(readableOn(c, bg), bg), greaterThanOrEqualTo(4.5), reason: '$name $c');
+      }
+    }
+    final p = Palette.light;
+    final dangerBg = Color.alphaBlend(p.danger.withValues(alpha: 0.12), p.surface);
+    expect(contrast(p.danger, dangerBg), lessThan(4.5), reason: 'the plain colour really fell short');
+  });
+
+  test('UI-21: white or ink on a solid tile, whichever reads (white on amber was 2.2:1)', () {
+    for (final fill in const [Color(0xFFF59E0B), Color(0xFF14B8A6), Color(0xFFFF7A1A), Color(0xFF0EA5E9), Color(0xFF6E56CF), Color(0xFF111113)]) {
+      expect(contrast(onFill(fill), fill), greaterThanOrEqualTo(4.5), reason: '$fill');
+    }
+    expect(onFill(const Color(0xFF6E56CF)), Colors.white, reason: 'a dark fill keeps white');
+  });
+
+  test('UI-21: the light theme\'s code comments read on a card', () {
+    final comment = syntaxColors(Brightness.light)['comment']!;
+    expect(contrast(comment, Palette.light.surface), greaterThanOrEqualTo(4.5));
   });
 }
