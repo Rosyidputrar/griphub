@@ -8,7 +8,9 @@
  * (crawl) and take screenshots.
  */
 
+import { lookup as dnsLookup } from "node:dns";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import { Type } from "typebox";
 import { KeyError, withKeys } from "./keyring.js";
@@ -581,8 +583,80 @@ async function readCapped(res: Response, budget: number): Promise<string> {
 	return new TextDecoder().decode(out);
 }
 
-export async function webFetch(url: string, signal?: AbortSignal) {
+/**
+ * Whether [ip] is an address the agent has no business fetching from a page it was handed: this machine, a private
+ * network, a link-local address (a cloud server's metadata service is 169.254.169.254), multicast and reserved ranges.
+ * A web page the agent reads can say "fetch http://169.254.169.254/..." (or redirect there), and what comes back is
+ * the agent's to read and send on.
+ */
+export function isPrivateAddress(ip: string): boolean {
+	const v = ip.replace(/^\[|\]$/g, "").toLowerCase().split("%")[0];
+	if (isIP(v) === 4) {
+		const [a, b, c] = v.split(".").map(Number);
+		return (
+			a === 0 ||
+			a === 10 ||
+			a === 127 ||
+			(a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
+			(a === 169 && b === 254) ||
+			(a === 172 && b >= 16 && b <= 31) ||
+			(a === 192 && b === 0 && c === 0) ||
+			(a === 192 && b === 168) ||
+			(a === 198 && (b === 18 || b === 19)) ||
+			a >= 224 // multicast, reserved, broadcast
+		);
+	}
+	if (isIP(v) === 6) {
+		// An IPv4 address inside an IPv6 one (::ffff:127.0.0.1, or the NAT64 prefix) is judged as the IPv4 address.
+		const mapped = /^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(v);
+		if (mapped) return isPrivateAddress(mapped[1]);
+		const hex = /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v);
+		if (hex) {
+			const n = (parseInt(hex[1], 16) << 16) | parseInt(hex[2], 16);
+			return isPrivateAddress(`${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`);
+		}
+		return (
+			v === "::" ||
+			v === "::1" ||
+			/^f[cd]/.test(v) || // unique local fc00::/7
+			/^fe[89ab]/.test(v) || // link-local fe80::/10
+			/^fe[c-f]/.test(v) || // site-local (deprecated)
+			/^ff/.test(v) || // multicast
+			v.startsWith("2001:db8") // documentation
+		);
+	}
+	return false;
+}
+
+type Resolve = (host: string) => Promise<string[]>;
+
+/** Every address [host] resolves to, through the same lookup the connection will use (the DoH one when it is on). */
+const resolveAll: Resolve = (host) =>
+	new Promise((ok, fail) =>
+		dnsLookup(host, { all: true }, (err, addresses) => (err ? fail(err) : ok((addresses as { address: string }[]).map((a) => a.address)))),
+	);
+
+/** Throws unless [url] is a public web address: its host (an address, or every address its name resolves to) must not be private. */
+export async function assertPublicUrl(url: URL, resolve: Resolve = resolveAll): Promise<void> {
+	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`web_fetch only fetches http and https addresses, not ${url.protocol}`);
+	const host = url.hostname.replace(/^\[|\]$/g, "");
+	const refuse = () =>
+		new Error(`web_fetch only reaches public web addresses, and ${host} is a private or local one. For something on this machine, use a shell command such as curl.`);
+	if (isIP(host)) {
+		if (isPrivateAddress(host)) throw refuse();
+		return;
+	}
+	if (host === "localhost" || host.endsWith(".localhost")) throw refuse();
+	const addresses = await resolve(host);
+	// Any private answer refuses it: a name that is public for one lookup and private for the next is the attack.
+	if (addresses.some(isPrivateAddress)) throw refuse();
+}
+
+const MAX_REDIRECTS = 10;
+
+export async function webFetch(url: string, signal?: AbortSignal, deps: { fetch?: typeof fetch; resolve?: Resolve } = {}) {
 	if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+	const doFetch = deps.fetch ?? fetch;
 	// The caller may never abort, so cap the wait at 60s (combined with the
 	// caller's signal) and the body at 5 MB: the tool pages the text
 	// afterwards anyway (max 60k chars per call), so nothing is lost.
@@ -596,30 +670,42 @@ export async function webFetch(url: string, signal?: AbortSignal) {
 	let res: Response;
 	let raw: string;
 	try {
-		res = await fetch(url, {
-			headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
-			redirect: "follow",
-			signal: ctrl.signal,
-		});
+		// Redirects are followed here, one hop at a time, so that every address is looked at before it is fetched: an
+		// attacker's page that answers 302 to http://169.254.169.254/ would otherwise be followed inside fetch.
+		let target = new URL(url);
+		for (let hop = 0; ; hop++) {
+			await assertPublicUrl(target, deps.resolve);
+			res = await doFetch(target.href, {
+				headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
+				redirect: "manual",
+				signal: ctrl.signal,
+			});
+			const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+			if (!location) break;
+			if (hop >= MAX_REDIRECTS) throw new Error(`web_fetch stopped after ${MAX_REDIRECTS} redirects`);
+			await res.body?.cancel().catch(() => {});
+			target = new URL(location, target);
+		}
 		const type = res.headers.get("content-type") ?? "";
 		raw = await readCapped(res, 5_000_000);
-		return finishFetch(res, type, raw);
+		// `res.url` is empty for a response built by hand; the page's own address is the last hop.
+		return finishFetch(res, type, raw, target.href);
 	} finally {
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", onCallerAbort);
 	}
 }
 
-function finishFetch(res: Response, type: string, raw: string) {
+function finishFetch(res: Response, type: string, raw: string, finalUrl: string) {
 	let text: string;
 	let title = "";
 	if (/html|xml/.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {
 		title = stripTags(findBlocks(raw, TITLE, 1)[0]?.inner ?? "");
-		text = htmlToText(raw, res.url);
+		text = htmlToText(raw, finalUrl);
 	} else {
 		text = raw;
 	}
-	return { url: res.url, status: res.status, contentType: type, title, text };
+	return { url: finalUrl, status: res.status, contentType: type, title, text };
 }
 
 // The page is the web's to write, and every step below used to be a regular expression that could be made to run for
