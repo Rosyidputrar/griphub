@@ -276,8 +276,9 @@ class AgentClient {
       (await _method.invokeMethod<Map>('environment'))!.cast<String, String>();
 
   /// Sends a command and resolves with its `data`, or throws [AgentError]. While the server link is down it fails at
-  /// once with code `offline` instead of waiting, and a command that was in flight when the link dropped fails with
-  /// `connection_lost` (it may or may not have run; the replay after reconnecting shows what happened).
+  /// once with code `offline` instead of waiting, one that could not be written to the link fails with `not_sent` (it
+  /// never reached the host), and one that was in flight when the link dropped fails with `connection_lost` (it may or
+  /// may not have run; the replay after reconnecting shows what happened).
   Future<T> call<T>(String type, [Map<String, dynamic> args = const {}]) {
     if (isRemote && !connection.value.connected) {
       return Future.error(AgentError('Not connected to the server.', code: 'offline'));
@@ -293,7 +294,7 @@ class AgentClient {
     // come back under a name nobody is waiting for.
     backend.send(jsonEncode({...args, 'id': id, 'type': type})).catchError((Object e) {
       if (_pending.remove(id) != null) {
-        completer.completeError(AgentError('Could not send: $e', code: isRemote ? 'connection_lost' : null));
+        completer.completeError(AgentError('Could not send: $e', code: isRemote ? 'not_sent' : null));
       }
     });
     return completer.future.then((v) => v as T);

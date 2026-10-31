@@ -69,7 +69,7 @@ Future<T?> runTransfer<T>(
       ..showSnackBar(
         SnackBar(
           content: Text(switch (e.code) {
-            'offline' || 'connection_lost' => tr('The connection to the server was lost. Nothing was changed.'),
+            'offline' || 'connection_lost' || 'not_sent' => tr('The connection to the server was lost. Nothing was changed.'),
             _ => e.message,
           }),
         ),

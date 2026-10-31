@@ -812,7 +812,7 @@ class _ChatScreenState extends State<ChatScreen> {
               prompt: QueuedPrompt({'id': o.id, 'text': o.text, 'images': o.images.length}),
               status: tr('Waiting for the connection'),
               statusIcon: LucideIcons.wifiOff,
-              error: o.error,
+              error: o.error == null ? null : tr(o.error!),
               onRetry: o.error == null ? null : () => agent.retryOffline(o.id),
               onCancel: () => _dropOffline(o.id),
             ),

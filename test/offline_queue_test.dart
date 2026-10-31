@@ -5,6 +5,7 @@ import 'package:griphub_agent/agent/agent_backend.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/drafts.dart';
+import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/agent/offline_prompts.dart';
 
 import 'support/fake_backend.dart';
@@ -108,13 +109,51 @@ void main() {
     expect(storeFile().existsSync(), isFalse);
   });
 
-  test('a send the link drops halfway is kept too, not lost', () async {
-    backend.onCommand = (c) => c['type'] == 'prompt'
-        ? throw const FakeFailure('Could not send: broken pipe', code: 'connection_lost')
-        : const {};
-    expect(await agent.send('mid-drop'), isTrue);
-    expect(agent.offlineForCurrent.single.text, 'mid-drop');
+  test('one that never left (not written to the link) is kept, and goes once the link is back', () async {
+    final answer = backend.onCommand!;
+    backend.onCommand = (c) => c['type'] == 'prompt' ? throw const FakeFailure('Could not send: broken pipe', code: 'not_sent') : answer(c);
+    expect(await agent.send('not written'), isTrue);
+    expect(agent.offlineForCurrent.single.text, 'not written');
     expect(agent.entries, isEmpty, reason: 'no error notice for a message that is only waiting');
+  });
+
+  test('one the link dropped on its way is not sent again by itself: the host may have it, and it could run twice', () async {
+    backend.onCommand = (c) => c['type'] == 'prompt'
+        ? throw const FakeFailure('The connection to the server was lost.', code: 'connection_lost')
+        : const {};
+    expect(await agent.send('maybe arrived'), isFalse, reason: 'the composer keeps the text');
+    expect(agent.offlinePrompts, isEmpty);
+    expect((agent.entries.single as NoticeEntry).text, contains('check whether it arrived'));
+  });
+
+  test('a new message waits behind ones still waiting, even with the link up', () async {
+    await drop();
+    await agent.send('one');
+    refuse = 'Daily budget of 5 credits reached';
+    await comeBack();
+    await until(() => agent.offlineForCurrent.first.error != null, 'the refusal');
+    refuse = null;
+    expect(await agent.send('typed after'), isTrue);
+    expect(prompts, isEmpty, reason: '"typed after" must not overtake "one"');
+    expect(agent.offlineForCurrent.map((p) => p.text), ['one', 'typed after']);
+    await agent.retryOffline(agent.offlineForCurrent.first.id);
+    expect(prompts, ['one', 'typed after']);
+  });
+
+  test('lost on its way while the queue is being sent: it waits for the user, not sent twice', () async {
+    await drop();
+    await agent.send('first');
+    await agent.send('second');
+    final answer = backend.onCommand!;
+    var calls = 0;
+    backend.onCommand = (c) {
+      if (c['type'] == 'prompt' && calls++ == 0) throw const FakeFailure('lost', code: 'connection_lost');
+      return answer(c);
+    };
+    await comeBack();
+    await until(() => agent.offlineForCurrent.first.error != null, 'the first to be marked');
+    expect(agent.offlineForCurrent.first.error, contains('check whether it arrived'));
+    expect(prompts, isEmpty, reason: 'nothing resent by itself, and "second" waits behind it');
   });
 
   test('one the host refuses once back waits with the reason; nothing after it goes first; send again', () async {
@@ -149,6 +188,21 @@ void main() {
     final next = await start();
     await until(() => prompts.contains('from yesterday'), 'the kept message to go');
     expect(next.offlinePrompts, isEmpty);
+  });
+
+  test('opening the chat its messages were kept for sends them', () async {
+    var chat = 's';
+    final answer = backend.onCommand!;
+    backend.onCommand = (c) => c['type'] == 'state' || c['type'] == 'switch_session'
+        ? {'sessionId': chat, 'sessionFile': '$chat.jsonl', 'cwd': '/w', 'isStreaming': false}
+        : answer(c);
+    agent.offlinePrompts = [OfflinePrompt(id: 'o1', text: 'for the other chat', session: 'other')];
+    await agent.flushOffline();
+    expect(prompts, isEmpty, reason: 'not while another chat is open');
+    chat = 'other';
+    await agent.resync();
+    await until(() => prompts.isNotEmpty, 'the kept message to go');
+    expect(prompts, ['for the other chat']);
   });
 
   test('a message kept for another chat waits for that chat', () async {

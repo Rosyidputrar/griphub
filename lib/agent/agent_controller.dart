@@ -385,13 +385,13 @@ class AgentController extends ChangeNotifier {
   Future<bool> send(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
-    if (_linkDown) return _hold(trimmed);
+    if (_mustWait) return _hold(trimmed);
     try {
       _noteQueued(await client.call<Object?>('prompt', {'text': trimmed}));
       return true;
     } on AgentError catch (e) {
-      if (_lostLink(e)) return _hold(trimmed);
-      _addNotice(e.message, error: true);
+      if (_neverSent(e)) return _hold(trimmed);
+      _addNotice(_droppedWhileSending(e) ? _maybeArrived : e.message, error: true);
       return false;
     }
   }
@@ -410,7 +410,22 @@ class AgentController extends ChangeNotifier {
   bool _flushing = false;
 
   bool get _linkDown => client.isRemote && !client.connection.value.connected;
-  bool _lostLink(AgentError e) => client.isRemote && (e.code == 'offline' || e.code == 'connection_lost');
+
+  /// A new message waits too while the server is away, and while this chat already has messages waiting: it must not
+  /// overtake them (one the host refused waits for the user, and so does everything typed after it).
+  bool get _mustWait => client.isRemote && (_linkDown || offlineForCurrent.isNotEmpty);
+
+  /// The message surely never reached the host: refused before sending, or not written to the link. Safe to keep and
+  /// send again.
+  bool _neverSent(AgentError e) => client.isRemote && (e.code == 'offline' || e.code == 'not_sent');
+
+  /// The link dropped while the message was on its way: the host may have it and be working on it. Sending it again
+  /// by itself could run the task twice, so the user decides once the chat is back.
+  bool _droppedWhileSending(AgentError e) => client.isRemote && e.code == 'connection_lost';
+
+  static const _maybeArrived =
+      'The connection dropped while the message was being sent. Once it is back, check whether it arrived before '
+      'sending it again.';
 
   bool _hold(String text, {List<Map<String, String>> images = const [], List<SentAttachment> attachments = const []}) {
     offlinePrompts = [
@@ -432,7 +447,7 @@ class AgentController extends ChangeNotifier {
   /// the rest waiting; a message the host refuses (budget, no model) stops there, marked with why, so nothing typed
   /// after it overtakes it.
   Future<void> flushOffline() async {
-    if (_flushing || _linkDown) return;
+    if (_flushing || _linkDown || offlineForCurrent.isEmpty) return;
     _flushing = true;
     try {
       for (final p in offlineForCurrent) {
@@ -447,7 +462,9 @@ class AgentController extends ChangeNotifier {
           offlinePrompts = [for (final o in offlinePrompts) if (o.id != p.id) o];
         } on AgentError catch (e) {
           retractSentAttachments(p.attachments);
-          if (!_lostLink(e)) p.error = e.message;
+          // Never sent: it waits for the next time the link is back. Anything else waits for the user: refused by the
+          // host, or lost on the way (it may have arrived, and sending it again could run it twice).
+          if (!_neverSent(e)) p.error = _droppedWhileSending(e) ? _maybeArrived : e.message;
           break;
         } finally {
           OfflinePromptStore.instance.save(offlinePrompts);
@@ -662,7 +679,7 @@ class AgentController extends ChangeNotifier {
     final trimmed = text.trim();
     if (trimmed.isEmpty && images.isEmpty) return false;
     final body = trimmed.isEmpty ? 'See the attached image.' : trimmed;
-    if (_linkDown) return _hold(body, images: images, attachments: attachments);
+    if (_mustWait) return _hold(body, images: images, attachments: attachments);
     queueSentAttachments(attachments);
     try {
       final r = await client.call<Object?>('prompt', {
@@ -673,8 +690,8 @@ class AgentController extends ChangeNotifier {
       return true;
     } on AgentError catch (e) {
       retractSentAttachments(attachments);
-      if (_lostLink(e)) return _hold(body, images: images, attachments: attachments);
-      _addNotice(e.message, error: true);
+      if (_neverSent(e)) return _hold(body, images: images, attachments: attachments);
+      _addNotice(_droppedWhileSending(e) ? _maybeArrived : e.message, error: true);
       return false;
     }
   }
@@ -1118,11 +1135,15 @@ class AgentController extends ChangeNotifier {
   }
 
   void _applyState(Map<String, dynamic> s) {
+    final wasChat = sessionId;
     final m = s['model'];
     model = m == null ? null : ModelInfo((m as Map).cast<String, dynamic>());
     thinkingLevel = s['thinkingLevel'] as String? ?? 'off';
     thinkingLevels = (s['thinkingLevels'] as List? ?? const ['off']).cast<String>();
     sessionId = s['sessionId'] as String?;
+    // A chat with messages kept while the server was away is open again: they go now (on its last visit the link may
+    // have come back while another chat was open).
+    if (sessionId != wasChat && status == BootStatus.ready) scheduleMicrotask(() => unawaited(flushOffline()));
     sessionName = s['sessionName'] as String?;
     sessionFile = s['sessionFile'] as String?;
     cwd = s['cwd'] as String? ?? cwd;
