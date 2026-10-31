@@ -916,6 +916,13 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                         .where((s) => s.messageCount > 0)
                         .take(5)
                         .toList();
+                    // A list that could not be read says so, with a retry (it stayed blank).
+                    if (snap.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: ErrorNotice(error: snap.error, onRetry: _refresh),
+                      );
+                    }
                     if (!snap.hasData) return const SizedBox(height: 60);
                     if (list.isEmpty) {
                       return Padding(
@@ -1388,7 +1395,13 @@ class _ChatsTabState extends State<_ChatsTab> {
                       prefixIcon: const Icon(LucideIcons.search, size: 18),
                     ),
                   ),
-                  if (!snap.hasData)
+                  // A list that could not be read says so, with a retry (it spun forever).
+                  if (snap.hasError)
+                    Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: ErrorNotice(error: snap.error, onRetry: _reload, center: true),
+                    )
+                  else if (!snap.hasData)
                     const Padding(
                       padding: EdgeInsets.all(40),
                       child: Center(child: BusySpinner.page()),
