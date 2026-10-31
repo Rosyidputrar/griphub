@@ -12,7 +12,9 @@ import 'i18n.dart';
 import 'diff_view.dart';
 import 'errors.dart';
 import 'kit.dart';
+import 'chat_export.dart' show showMarkdownShare;
 import 'message_views.dart' show MarkdownText;
+import 'subagent_timeline.dart';
 import 'theme.dart';
 
 /// How many subagents the host runs at once (agent/src/subagent.ts MAX_RUNNING).
@@ -637,6 +639,55 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
   final _queueController = TextEditingController();
   bool _sending = false;
 
+  /// Follows the newest step while the subagent works, once the person has scrolled to the end (or asked to); scrolling
+  /// up to read stops following until they come back down.
+  final _scroll = ScrollController();
+  bool _follow = false;
+  bool _atEnd = true;
+
+  bool _onScroll(ScrollNotification n) => _check(n.depth, n.metrics, byHand: n is ScrollUpdateNotification && n.dragDetails != null);
+
+  /// The steps grew or shrank without a scroll (a new step, the first layout, the list measuring what it had only
+  /// estimated): while following, stay on the end.
+  bool _onMetrics(ScrollMetricsNotification n) {
+    if (n.depth == 0 && _follow && s.isActive) _followEnd();
+    return _check(n.depth, n.metrics, byHand: false);
+  }
+
+  void _followEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_follow || !_scroll.hasClients) return;
+      final pos = _scroll.position;
+      if (pos.isScrollingNotifier.value) return; // moving already: a drag, the animation down, a spring back
+      if (pos.pixels != pos.maxScrollExtent) _scroll.jumpTo(pos.maxScrollExtent);
+    });
+  }
+
+  // Only what the person does decides following; the jumps made to follow do not.
+  bool _check(int depth, ScrollMetrics m, {required bool byHand}) {
+    if (depth != 0) return false;
+    final atEnd = m.maxScrollExtent - m.pixels < 64;
+    if (atEnd != _atEnd || (byHand && _follow != atEnd)) {
+      setState(() {
+        _atEnd = atEnd;
+        if (byHand) _follow = atEnd;
+      });
+    }
+    return false;
+  }
+
+  void _toEnd() {
+    setState(() => _follow = true);
+    if (!_scroll.hasClients) return;
+    final end = _scroll.position.maxScrollExtent;
+    if (Motion.reduced(context)) {
+      _scroll.jumpTo(end);
+    } else {
+      // The list only estimates what it has not laid out; land on the end it measures on the way.
+      _scroll.animateTo(end, duration: Motion.normal, curve: Motion.curve).then((_) => _followEnd());
+    }
+  }
+
   /// The live state: a re-sent record may have replaced the object the sheet was opened with.
   SubagentState get s => agent.subagentStore[widget.state.id] ?? widget.state;
   AgentController get agent => widget.agent;
@@ -654,6 +705,7 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
   @override
   void dispose() {
     _queueController.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -667,7 +719,14 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(listenable: agent, builder: (context, _) => _build(context));
+    return ListenableBuilder(
+      listenable: agent,
+      builder: (context, _) {
+        // Following: once this frame has laid out the new step, show its end.
+        if (_follow && s.isActive) _followEnd();
+        return _build(context);
+      },
+    );
   }
 
   Widget _build(BuildContext context) {
@@ -719,6 +778,20 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
                 ),
               ),
               IconButton(
+                icon: const Icon(LucideIcons.share2),
+                tooltip: tr('Share'),
+                onPressed: () => showMarkdownShare(
+                  context,
+                  agent,
+                  markdown: subagentMarkdown(s),
+                  title: tr('Subagent'),
+                  fileName: 'griphub-subagent-${s.id}.md',
+                  heading: tr('Share this subagent'),
+                  blurb: tr("As Markdown: the task, its steps and its report. Its thinking and the tools' output are left out."),
+                  copied: tr('Copied'),
+                ),
+              ),
+              IconButton(
                 icon: const Icon(LucideIcons.x),
                 tooltip: tr('Close'),
                 onPressed: () => Navigator.of(context).pop(),
@@ -728,7 +801,14 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
         ),
         const Divider(height: 1),
         Expanded(
-          child: ListView(
+          child: Stack(
+            children: [
+              NotificationListener<ScrollMetricsNotification>(
+                onNotification: _onMetrics,
+                child: NotificationListener<ScrollNotification>(
+                onNotification: _onScroll,
+                child: ListView(
+            controller: _scroll,
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
             children: [
               // Now / summary.
@@ -813,14 +893,17 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
               ],
               section(tr('Task from the parent')),
               SelectableText(s.brief, style: text.bodyMedium),
-              section('${tr('Tools used')} (${s.tools.length})'),
-              if (s.tools.isEmpty)
-                Text(
-                  tr(s.isActive ? 'No tools used yet.' : 'No tools were used.'),
-                  style: text.bodyMedium?.copyWith(color: p.faint),
-                )
-              else
-                for (final t in s.tools) _ToolRow(key: ValueKey(t.id), tool: t),
+              // What it thought, wrote, ran and was sent, in order, as the chat shows its own.
+              section(
+                tr('Steps'),
+                trailing: s.tools.isEmpty
+                    ? null
+                    : Text(
+                        s.tools.length == 1 ? tr('1 tool') : tr('{n} tools').replaceAll('{n}', '${s.tools.length}'),
+                        style: text.labelSmall,
+                      ),
+              ),
+              SubagentTimeline(state: s),
               // Queue.
               if (canQueue) ...[
                 section('${tr('Queue')} (${s.queue.length})'),
@@ -908,6 +991,21 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
                   Text(tr('Force stop kills the running tool at once; results may be incomplete.'), style: text.bodySmall),
                 ],
               ],
+            ],
+          ),
+              ),
+              ),
+              // Back to the newest step, while it works and the person has scrolled up to read.
+              if (s.isActive && !_atEnd)
+                Positioned(
+                  right: 16,
+                  bottom: 12,
+                  child: IconButton.filledTonal(
+                    icon: const Icon(LucideIcons.arrowDown),
+                    tooltip: tr('Scroll to bottom'),
+                    onPressed: _toEnd,
+                  ),
+                ),
             ],
           ),
         ),
@@ -1106,113 +1204,6 @@ class _Note extends StatelessWidget {
   }
 }
 
-/// One tool the subagent used, styled like the chat's tool rows: status,
-/// tool icon, name and argument in mono; tap to open its output.
-class _ToolRow extends StatefulWidget {
-  const _ToolRow({super.key, required this.tool});
-  final SubagentToolRun tool;
-
-  @override
-  State<_ToolRow> createState() => _ToolRowState();
-}
-
-class _ToolRowState extends State<_ToolRow> {
-  bool open = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.palette;
-    final t = widget.tool;
-    final Widget indicator = switch (t.status) {
-      SubagentToolStatus.done => Icon(LucideIcons.check, size: 15, color: p.success),
-      SubagentToolStatus.failed => Icon(LucideIcons.x, size: 15, color: p.danger),
-      SubagentToolStatus.running =>
-        BusySpinner(size: 12),
-    };
-    final took = t.finishedAt?.difference(t.startedAt);
-    final output = t.output.length > 2000 ? '${t.output.substring(0, 2000)}…' : t.output;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Container(
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(Radii.md), border: Border.all(color: p.border)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              borderRadius: BorderRadius.circular(Radii.md),
-              onTap: () => setState(() => open = !open),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 9, 6, 9),
-                child: Row(
-                  children: [
-                    SizedBox.square(dimension: 16, child: Center(child: indicator)),
-                    const SizedBox(width: 10),
-                    Icon(toolIcon(t.name), size: 15, color: p.accent),
-                    const SizedBox(width: 6),
-                    Text(
-                      t.name,
-                      style: TextStyle(fontFamily: mono, fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        t.args,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
-                      ),
-                    ),
-                    if (took != null) ...[
-                      const SizedBox(width: 6),
-                      Text(formatDurationShort(took), style: TextStyle(fontSize: 11.5, color: p.faint)),
-                    ],
-                    AnimatedRotation(
-                      turns: open ? 0.5 : 0,
-                      duration: Motion.of(context, Motion.fast),
-                      curve: Motion.curve,
-                      child: Icon(LucideIcons.chevronDown, size: 18, color: p.faint),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            AnimatedSize(
-              duration: Motion.of(context, Motion.normal),
-              curve: Motion.curve,
-              alignment: Alignment.topCenter,
-              child: !open
-                  ? const SizedBox(width: double.infinity)
-                  : Container(
-                      width: double.infinity,
-                      margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.sm)),
-                      child: SelectableText(
-                        [
-                          if (t.args.isNotEmpty) t.args,
-                          if (t.args.isNotEmpty) '',
-                          output.isEmpty
-                              ? tr(t.status == SubagentToolStatus.running ? 'No output yet.' : 'No output.')
-                              : output,
-                        ].join('\n'),
-                        style: TextStyle(fontFamily: mono, fontSize: 12, height: 1.45, color: p.muted),
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Cross-chat banner
-
-/// Banner shown in a chat while subagents run in OTHER chats. Tapping it
-/// jumps to the parent chat (never a new chat), or lets you pick one when
-/// several chats have subagents. Inside the app the parent's title is fine to
-/// show — notifications, which reach the lock screen, never carry titles.
 class CrossChatBanner extends StatelessWidget {
   const CrossChatBanner({super.key, required this.agent});
   final AgentController agent;

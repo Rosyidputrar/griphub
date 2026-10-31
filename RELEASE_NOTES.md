@@ -73,6 +73,12 @@
 - Teks pill, ikon di kotak berwarna, komentar kode, kartu Hubungkan di mode gelap, dan spinner CI kini cukup kontras.
 - Ukuran teks dibatasi 2,2× (pengaturan aplikasi dikali pengaturan sistem dulu bisa mencapai 2,5×).
 - Ilustrasi kini selalu tampil setelah dimuat sekali, tidak kadang hilang.
+- Detail subagent kini tampil seperti chat: pikirannya, teks yang ditulisnya di antara langkah, setiap tool, dan pesan yang kamu kirim ke subagent, berurutan. Perintah bash tampil utuh dengan sorotan sintaks dan tombol Salin, file yang ditulis tampil isinya, edit menampilkan perubahannya, dan keluaran tool (hingga 16 ribu karakter) bisa disalin. Gambar hasil tool juga tampil.
+- Saat subagent sedang menulis file, isinya tampil langsung baris demi baris, begitu juga pikiran dan teksnya.
+- Pesan antrean yang sudah dikirim ke subagent kini tetap terlihat di urutan langkahnya, tidak lagi hilang.
+- Detail subagent mengikuti langkah terbaru setelah kamu menggulir ke bawah, dan berhenti mengikuti saat kamu menggulir ke atas untuk membaca. Tombol Gulir ke bawah membawamu kembali.
+- Subagent bisa dibagikan sebagai Markdown (tugas, langkah, dan laporannya): sebagai teks, file, disalin, atau disimpan ke Download.
+- Pembaca layar kini menyebut status setiap tool subagent (selesai, gagal, berjalan) dan apakah kartunya terbuka.
 
 ## English
 
@@ -147,3 +153,9 @@
 - Pill text, icons on coloured tiles, code comments, the Connect card in the dark theme and the CI spinner now have enough contrast.
 - Text size is held to 2.2x (the app's setting times the system's used to reach 2.5x).
 - Illustrations always show once loaded, instead of sometimes missing.
+- A subagent's details now read like the chat: its thinking, the text it wrote between steps, each tool, and the messages you sent it, in order. Bash commands show whole with syntax highlighting and Copy, written files show their content, edits show their changes, and tool output (up to 16k characters) can be copied. Pictures from tools show too.
+- While a subagent writes a file, its content shows live line by line, as do its thinking and text.
+- Queued messages already sent to a subagent now stay visible among its steps instead of disappearing.
+- A subagent's details follow the newest step once you scroll to the bottom, and stop following when you scroll up to read. A Scroll to bottom button takes you back.
+- A subagent can be shared as Markdown (its task, steps and report): as text, as a file, copied, or saved to Downloads.
+- Screen readers now say each subagent tool's status (done, failed, running) and whether its card is open.

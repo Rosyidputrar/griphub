@@ -25,6 +25,10 @@ const _allowed = {
   'message_views.dart:json',
   'message_views.dart:output',
   'message_views.dart:command',
+  // A subagent's tool cards name their code boxes as the chat's do.
+  'subagent_timeline.dart:bash',
+  'subagent_timeline.dart:json',
+  'subagent_timeline.dart:output',
   'tasks_screen.dart:owner/repo',
   'tasks_screen.dart:agent',
   'templates_screen.dart:review',

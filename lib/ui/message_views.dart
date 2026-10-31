@@ -1086,8 +1086,9 @@ class _ThinkingViewState extends State<ThinkingView> {
 /// What the agent is writing right now: only the newest lines, with the real line numbers and the size so far.
 /// The whole file arrives a few characters at a time and the chat redraws ~30 times a second; highlighting and
 /// laying out all of it on every frame made the app crawl on long files. The full text shows once it lands.
-class _LiveTail extends StatelessWidget {
-  const _LiveTail({required this.text, required this.name, required this.language});
+/// The newest lines of a file while it is being written, with its line count and size.
+class LiveTail extends StatelessWidget {
+  const LiveTail({super.key, required this.text, required this.name, required this.language});
   final String text;
   final String? name;
   final String? language;
@@ -1331,7 +1332,7 @@ class _ToolCallViewState extends State<ToolCallView> {
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
               child: writing
-                  ? _LiveTail(
+                  ? LiveTail(
                       text: liveText,
                       name: path?.split('/').last ?? b.toolName,
                       language: b.toolName == 'bash' ? 'bash' : ext,
@@ -1362,10 +1363,10 @@ class _ToolCallViewState extends State<ToolCallView> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               if (b.toolName == 'write' && liveText != null)
-                                _Section(
+                                ToolSection(
                                   label: tr('Content'),
                                   child: writing
-                                      ? _LiveTail(text: liveText, name: path?.split('/').last, language: ext)
+                                      ? LiveTail(text: liveText, name: path?.split('/').last, language: ext)
                                       : CodeBox(
                                           text: liveText,
                                           label: path?.split('/').last,
@@ -1374,7 +1375,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                                         ),
                                 )
                               else
-                                _Section(
+                                ToolSection(
                                   label: tr('Input'),
                                   child: CodeBox(
                                     text: const JsonEncoder.withIndent('  ').convert(args ?? {}),
@@ -1384,7 +1385,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                                 ),
                               if (run != null && run.output.isNotEmpty) ...[
                                 const SizedBox(height: 10),
-                                _Section(
+                                ToolSection(
                                   label: tr(status == ToolStatus.failed ? 'Error' : 'Output'),
                                   child: CodeBox(
                                     text: run.output.trimRight(),
@@ -1659,8 +1660,9 @@ class ToolImages extends StatelessWidget {
   }
 }
 
-class _Section extends StatelessWidget {
-  const _Section({required this.label, required this.child});
+/// A labelled part of a tool's card (INPUT, OUTPUT), as the chat and a subagent's view show them.
+class ToolSection extends StatelessWidget {
+  const ToolSection({super.key, required this.label, required this.child});
   final String label;
   final Widget child;
 

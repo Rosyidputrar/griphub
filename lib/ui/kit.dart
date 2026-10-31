@@ -472,9 +472,12 @@ class Pill extends StatelessWidget {
             Icon(icon, size: 12, color: ink),
             const SizedBox(width: 5),
           ],
-          Text(
-            label,
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: ink),
+          // Wraps rather than overflows where the pill is given less than its label (a long status, large text).
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: ink),
+            ),
           ),
         ],
       ),

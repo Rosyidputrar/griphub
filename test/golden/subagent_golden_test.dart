@@ -47,6 +47,7 @@ Map<String, dynamic> subRecord(
   String? stopCode,
   List<Map<String, dynamic>> tools = const [],
   List<Map<String, dynamic>> queue = const [],
+  List<Map<String, dynamic>>? timeline,
 }) => {
   'id': id,
   'toolCallId': ?toolCallId,
@@ -63,6 +64,7 @@ Map<String, dynamic> subRecord(
   'currentArgs': args,
   'toolCalls': tools,
   'queue': queue,
+  'timeline': ?timeline,
   'inputTokens': 12000,
   'outputTokens': 3400,
   'credits': credits,
@@ -95,6 +97,7 @@ final sampleTools = [
     'id': 't3',
     'name': 'bash',
     'args': 'rm -rf build && flutter build apk --release --split-per-abi --target-platform android-arm64',
+    'input': {'command': 'rm -rf build && flutter build apk --release --split-per-abi --target-platform android-arm64'},
     'output': 'Error: no Android SDK found',
     'status': 'failed',
     'startedAt': _ms(const Duration(seconds: 50)),
@@ -108,6 +111,17 @@ final sampleTools = [
     'status': 'running',
     'startedAt': _ms(const Duration(seconds: 5)),
   },
+];
+
+/// The order a-running did its work in: what it thought and wrote between its tools, and what the person sent it.
+final sampleTimeline = [
+  {'kind': 'thinking', 'text': 'Mulai dari hasil pencarian, lalu cek kode chat yang ada.', 'at': _ms(const Duration(seconds: 72))},
+  {'kind': 'tool', 'id': 't1', 'at': _ms(const Duration(seconds: 70))},
+  {'kind': 'text', 'text': 'Hasil pencarian cukup; sekarang **baca** layar chat.', 'at': _ms(const Duration(seconds: 61))},
+  {'kind': 'tool', 'id': 't2', 'at': _ms(const Duration(seconds: 60))},
+  {'kind': 'user', 'text': 'Coba build APK juga.', 'at': _ms(const Duration(seconds: 55))},
+  {'kind': 'tool', 'id': 't3', 'at': _ms(const Duration(seconds: 50))},
+  {'kind': 'tool', 'id': 't4', 'at': _ms(const Duration(seconds: 5))},
 ];
 
 const report =
@@ -130,6 +144,7 @@ AgentController agentWithSubagents() {
       args: 'lib/ui/chat_screen.dart',
       credits: 0.06,
       tools: sampleTools,
+      timeline: sampleTimeline,
       queue: [
         {'id': 'q1', 'text': 'Tambahkan juga perbandingan ukuran APK.', 'at': _ms(const Duration(seconds: 10))},
         {'id': 'q2', 'text': 'Fokus ke performa scroll list panjang.', 'at': _ms(const Duration(seconds: 4))},
@@ -429,7 +444,8 @@ void main() {
         height: 1700,
       );
       await tester.tap(find.text('flutter vs react native 2026'));
-      await tester.tap(find.text('rm -rf build && flutter build apk --release --split-per-abi --target-platform android-arm64'));
+      // The header, not the command shown under it.
+      await tester.tap(find.text('rm -rf build && flutter build apk --release --split-per-abi --target-platform android-arm64').first);
       await tester.enterText(find.byType(TextField), 'Sertakan juga Compose Multiplatform.');
       await frames(tester);
       await expectClean(tester);

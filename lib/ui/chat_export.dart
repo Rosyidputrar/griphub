@@ -119,12 +119,35 @@ Future<void> showChatExport(BuildContext context, AgentController agent) async {
     model: agent.model?.name,
     at: at,
   );
-  final name = chatExportName(agent.chatTitle, at);
+  await showMarkdownShare(
+    context,
+    agent,
+    markdown: markdown,
+    title: agent.chatTitle,
+    fileName: chatExportName(agent.chatTitle, at),
+    heading: tr('Share this chat'),
+    blurb: tr("As Markdown: messages, the agent's answers and the tools it used. Its thinking and the tools' output are left out."),
+    copied: tr('Chat copied'),
+  );
+}
+
+/// Share, copy or save [markdown]: as text (when short enough), as a file named [fileName], to the clipboard, or to
+/// Downloads. The chat's export and a subagent's use it alike.
+Future<void> showMarkdownShare(
+  BuildContext context,
+  AgentController agent, {
+  required String markdown,
+  required String title,
+  required String fileName,
+  required String heading,
+  required String blurb,
+  required String copied,
+}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
 
   Future<String> file() async {
     final dir = Directory('${Directory.systemTemp.path}/griphub-export')..createSync(recursive: true);
-    final f = File('${dir.path}/$name');
+    final f = File('${dir.path}/$fileName');
     await f.writeAsString(markdown);
     return f.path;
   }
@@ -148,12 +171,9 @@ Future<void> showChatExport(BuildContext context, AgentController agent) async {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(tr('Share this chat'), style: Theme.of(sheet).textTheme.titleLarge),
+            Text(heading, style: Theme.of(sheet).textTheme.titleLarge),
             const SizedBox(height: 4),
-            Text(
-              tr("As Markdown: messages, the agent's answers and the tools it used. Its thinking and the tools' output are left out."),
-              style: Theme.of(sheet).textTheme.bodySmall,
-            ),
+            Text(blurb, style: Theme.of(sheet).textTheme.bodySmall),
             const SizedBox(height: 12),
             SettingsGroup(
               children: [
@@ -163,14 +183,14 @@ Future<void> showChatExport(BuildContext context, AgentController agent) async {
                     title: tr('Share as text'),
                     subtitle: tr('To a chat app, an email or a note'),
                     onTap: () => run(sheet, () async {
-                      await agent.client.shareText(markdown, subject: agent.chatTitle);
+                      await agent.client.shareText(markdown, subject: title);
                       return null;
                     }),
                   ),
                 SettingsRow(
                   icon: LucideIcons.fileText,
                   title: tr('Share as a Markdown file'),
-                  subtitle: name,
+                  subtitle: fileName,
                   onTap: () => run(sheet, () async {
                     await agent.client.shareFile(await file());
                     return null;
@@ -181,7 +201,7 @@ Future<void> showChatExport(BuildContext context, AgentController agent) async {
                   title: tr('Copy as Markdown'),
                   onTap: () => run(sheet, () async {
                     await Clipboard.setData(ClipboardData(text: markdown));
-                    return tr('Chat copied');
+                    return copied;
                   }),
                 ),
                 SettingsRow(
