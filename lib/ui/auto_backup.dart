@@ -74,7 +74,8 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
+              TitledSwitchRow(
+                child: Row(
                 children: [
                   IconTile(icon: LucideIcons.shieldCheck, color: p.success),
                   const SizedBox(width: 12),
@@ -90,6 +91,7 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
                     ),
                   ],
                 ],
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -329,7 +331,8 @@ class _PhoneBackupCardState extends State<PhoneBackupCard> with BusyActions {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          TitledSwitchRow(
+            child: Row(
             children: [
               IconTile(icon: LucideIcons.shieldCheck, color: p.success),
               const SizedBox(width: 12),
@@ -341,6 +344,7 @@ class _PhoneBackupCardState extends State<PhoneBackupCard> with BusyActions {
                 onChanged: busy() || status == null ? null : (v) => _guarded('switch', () => _toggle(v)),
               ),
             ],
+            ),
           ),
           const SizedBox(height: 8),
           Text(

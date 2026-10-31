@@ -1,4 +1,6 @@
 // Second half of the UI audit (UI-10 to UI-24): states, motion, semantics and touch targets.
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -34,6 +36,7 @@ void main() {
   group('UI-15: reduced motion', motionTests);
   group('UI-16: the chat list', chatsListTests);
   group('UI-17: announcements', announcementTests);
+  group('UI-18: switch rows', switchRowTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -359,6 +362,70 @@ void announcementTests() {
     await tester.tap(find.text('Thought process'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.getSemantics(find.bySemanticsLabel(RegExp('Thought process'))), isSemantics(hasExpandedState: true, isExpanded: true));
+    handle.dispose();
+  });
+}
+
+void switchRowTests() {
+  /// Every semantics node's label, to count how often a title is read.
+  List<String> labels(WidgetTester tester) =>
+      find.semantics.byPredicate((n) => n.label.isNotEmpty).evaluate().map((n) => n.label).toList();
+
+  testWidgets('UI-18: a settings row with a switch reads its title once, with the state of its switch', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    var on = true;
+    await pumpLook(
+      tester,
+      const Look(),
+      Scaffold(
+        body: StatefulBuilder(
+          builder: (context, set) => SettingsRow(
+            title: 'App lock',
+            subtitle: 'Ask for the fingerprint',
+            onTap: () => set(() => on = !on),
+            trailing: LabeledSwitch(label: 'App lock', value: on, onChanged: (v) => set(() => on = v)),
+          ),
+        ),
+      ),
+    );
+    final all = labels(tester).join('\n');
+    expect(RegExp('App lock').allMatches(all).length, 1, reason: 'read once: $all');
+    expect(tester.getSemantics(find.bySemanticsLabel(RegExp('App lock'))), isSemantics(hasToggledState: true, isToggled: true));
+    handle.dispose();
+  });
+
+  testWidgets('UI-18: a switch on its own still says what it switches', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(tester, const Look(), Scaffold(body: Center(child: LabeledSwitch(label: 'Web search', value: false, onChanged: (_) {}))));
+    expect(tester.getSemantics(find.bySemanticsLabel('Web search')), isSemantics(hasToggledState: true, isToggled: false));
+    handle.dispose();
+  });
+
+  testWidgets('UI-18: a row with a menu beside its switch keeps them apart (the menu is not lost)', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(
+      tester,
+      const Look(),
+      Scaffold(
+        body: SettingsRow(
+          title: 'Nightly',
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LabeledSwitch(label: 'Nightly', value: true, onChanged: (_) {}),
+              PopupMenuButton<String>(tooltip: 'More', itemBuilder: (_) => const []),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.byTooltip('More'), findsOneWidget);
+    final switches = find.semantics.byPredicate((n) => n.flagsCollection.isToggled != Tristate.none);
+    expect(switches.evaluate(), isNotEmpty, reason: 'the switch is its own control: ${labels(tester)}');
+    expect(find.semantics.byPredicate((n) => n.tooltip == 'More').evaluate(), isNotEmpty, reason: 'and so is the menu');
     handle.dispose();
   });
 }

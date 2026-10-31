@@ -382,8 +382,23 @@ class SettingsRow extends StatelessWidget {
   final VoidCallback? onTap;
   final bool destructive;
 
+  /// The row's switch, with nothing else to tap beside it (a menu would be lost in one merged node).
+  bool get _onlySwitch {
+    final t = trailing;
+    if (t is LabeledSwitch) return true;
+    if (t is Row) {
+      return t.children.any((c) => c is LabeledSwitch) && t.children.every((c) => c is LabeledSwitch || c is BusySpinner || c is SizedBox);
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final row = _build(context);
+    return _onlySwitch ? TitledSwitchRow(child: row) : row;
+  }
+
+  Widget _build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return InkWell(
@@ -616,10 +631,29 @@ class LabeledSwitch extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: label,
-    child: Switch(value: value, onChanged: onChanged),
-  );
+  Widget build(BuildContext context) {
+    // Beside a title that already says what it switches (TitledSwitchRow) it adds nothing: the row is read once, as
+    // "<title>, switch, on", instead of the title and then the same words again for the switch.
+    if (context.dependOnInheritedWidgetOfExactType<_SwitchTitled>() != null) return Switch(value: value, onChanged: onChanged);
+    return Semantics(label: label, child: Switch(value: value, onChanged: onChanged));
+  }
+}
+
+/// A row whose visible title says what its [LabeledSwitch] switches: one thing to a screen reader (the title, the
+/// switch's state and its tap), not the title and then the switch's label repeating it.
+class TitledSwitchRow extends StatelessWidget {
+  const TitledSwitchRow({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => MergeSemantics(child: _SwitchTitled(child: child));
+}
+
+class _SwitchTitled extends InheritedWidget {
+  const _SwitchTitled({required super.child});
+
+  @override
+  bool updateShouldNotify(_SwitchTitled oldWidget) => false;
 }
 
 /// Something that failed to load, in the user's words ([friendlyError]), with a way to try again: an error alone in
