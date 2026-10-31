@@ -29,7 +29,7 @@ class FsError extends Error {
 /** A short temp folder (unix socket paths are limited to about 100 bytes). */
 function tempDir(t, prefix = "gh-") {
   const dir = mkdtempSync(join(tmpdir(), prefix));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   return dir;
 }
 

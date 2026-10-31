@@ -38,7 +38,7 @@ after(() => rmSync(out, { recursive: true, force: true }));
 function home(t) {
 	const dir = mkdtempSync(join(tmpdir(), "gh-"));
 	mkdirSync(join(dir, "workspace"));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 	return dir;
 }
 
@@ -939,7 +939,7 @@ test("a summary says what it cost, and the turns it replaced can still be read",
 
 test("a summary that fails is not bought again after every turn, and gives up after a few in a row", async (t) => {
 	const dir = mkdtempSync(join(tmpdir(), "gh-fail-"));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 	const log = join(dir, "requests.log");
 	const h = await phoneWithModel(t, 200_000, 25_000, { MOCK_FAIL_SUMMARY: "1", MOCK_LOG: log });
 	const summaries = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((l) => l === "summary").length : 0);
