@@ -1670,7 +1670,14 @@ async function handle(cmd: Command): Promise<unknown> {
 			await gitops.discard(cwd, cmd.paths ?? []);
 			return gitops.status(cwd);
 		case "git_commit":
-			return { commit: await gitops.commit(cwd, String(cmd.message ?? "").trim() || "Update", !!cmd.all) };
+			return {
+				commit: await gitops.commit(
+					cwd,
+					String(cmd.message ?? "").trim() || "Update",
+					!!cmd.all,
+					Array.isArray(cmd.paths) ? cmd.paths.map(String).filter((p) => p && !p.includes("\0")) : undefined,
+				),
+			};
 		case "git_log":
 			return gitops.log(cwd, cmd.limit ?? 40);
 		case "git_branches":

@@ -456,8 +456,9 @@ class Features extends ChangeNotifier {
   /// A commit message for the uncommitted changes, written by the chat's model.
   Future<String> gitCommitMessage({String? dir}) async =>
       _m(await client.call('git_commit_message', {'dir': ?dir}))['message'] as String? ?? '';
-  Future<String> gitCommit(String message, {bool all = false, String? dir}) async =>
-      _m(await client.call('git_commit', {'message': message, 'all': all, 'dir': ?dir}))['commit'] as String;
+  /// Commits. [paths] (as the status lists them) commits exactly those files; [all] adds everything first.
+  Future<String> gitCommit(String message, {bool all = false, List<String>? paths, String? dir}) async =>
+      _m(await client.call('git_commit', {'message': message, 'all': all, 'paths': ?paths, 'dir': ?dir}))['commit'] as String;
   Future<List<GitCommit>> gitLog({String? dir}) async =>
       (await client.call<List>('git_log', {'dir': ?dir})).map((e) => GitCommit(_m(e))).toList();
   Future<List<GitBranch>> gitBranches({String? dir}) async =>

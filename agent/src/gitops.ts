@@ -134,7 +134,20 @@ export async function discard(cwd: string, paths: string[]) {
 	}
 }
 
-export async function commit(cwd: string, message: string, all: boolean) {
+/**
+ * Commits. With [paths] (relative to the top of the repository, as the status lists them), exactly those files and
+ * nothing else: they are staged, and the commit is limited to them, so a file the agent left staged that the person did
+ * not pick stays out, and so does everything untracked that was not picked. [all] adds everything (`add -A`).
+ */
+export async function commit(cwd: string, message: string, all: boolean, paths?: string[]) {
+	if (paths) {
+		if (!paths.length) throw new Error("No files were selected to commit.");
+		const root = await top(cwd);
+		// Literal: a name such as `*.env` or `:(top)x` is that file, not a pattern.
+		await ok(root, ["--literal-pathspecs", "add", "-A", "--", ...paths]);
+		await ok(root, ["--literal-pathspecs", "commit", "-q", "-m", message, "--", ...paths]);
+		return (await ok(root, ["log", "-1", "--format=%h %s"])).trim();
+	}
 	if (all) await ok(cwd, ["add", "-A"]);
 	await ok(cwd, ["commit", "-q", "-m", message]);
 	return (await ok(cwd, ["log", "-1", "--format=%h %s"])).trim();

@@ -113,6 +113,8 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'May contain secrets: not included unless you tick it': 'Mungkin berisi rahasia: tidak ikut kecuali kamu mencentangnya',
+  'Commit and push to': 'Commit & push ke',
   'Background runs do not ask: risky actions (deleting files, force push, writing outside the project) are refused.': 'Tugas latar tidak bertanya: tindakan berisiko (menghapus file, force push, menulis di luar proyek) ditolak.',
   'Background runs do not ask before acting: commands, edits and pushes run on their own, whatever the Approvals setting is.': 'Tugas latar tidak meminta persetujuan: perintah, edit, dan push berjalan sendiri, apa pun pengaturan Persetujuan.',
   'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.': 'Agent akan menjalankan setiap perintah, mengedit file apa pun, dan memakai semua tool tanpa bertanya. Tetap aktif untuk semua chat sampai kamu mematikannya di Pengaturan > Persetujuan.',
