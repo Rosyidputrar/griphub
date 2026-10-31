@@ -33,6 +33,7 @@ import 'folder_picker.dart';
 import 'subagent_card.dart';
 import 'summarized_turns_screen.dart';
 import 'theme.dart';
+import 'usage_screen.dart';
 import 'transfer_dialog.dart';
 import 'todo_views.dart';
 
@@ -224,7 +225,11 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!scroll.hasClients || dragging) return;
       final target = scroll.position.maxScrollExtent;
       if (animate) {
-        scroll.animateTo(target, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        if (Motion.reduced(context)) {
+          scroll.jumpTo(target);
+        } else {
+          scroll.animateTo(target, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        }
         return;
       }
       scroll.jumpTo(target);
@@ -540,11 +545,16 @@ class _ChatScreenState extends State<ChatScreen> {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
   }
 
+  /// With a server set up the bar also holds the connection badge, and on a narrow phone (or with large text) the chat's
+  /// title was squeezed to a few letters or nothing: the three tools then go into one menu.
+  bool _compactBar(BuildContext context) =>
+      agent.remote.configured && MediaQuery.sizeOf(context).width / MediaQuery.textScalerOf(context).scale(1) < 430;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return ListenableBuilder(
-      listenable: agent,
+      listenable: Listenable.merge([agent, agent.remote]),
       builder: (context, _) => Scaffold(
         appBar: AppBar(
           leading: Navigator.of(context).canPop()
@@ -558,6 +568,29 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: [
             // Phone or server, and whether the server can be reached; only once a server is set up.
             ConnectionChip(agent: agent),
+            if (_compactBar(context))
+              ValueListenableBuilder<bool>(
+                valueListenable: deployPreparing,
+                builder: (context, preparing, _) => PopupMenuButton<String>(
+                  tooltip: tr('More'),
+                  icon: const Icon(LucideIcons.ellipsisVertical, size: 20),
+                  onSelected: (v) => switch (v) {
+                    'terminal' => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
+                    'deploy' => showDeploySheet(context, agent),
+                    _ => showProjectTools(context, agent, onPrompt: _prefill),
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(value: 'terminal', child: _MenuLine(LucideIcons.squareTerminal, tr('Terminal'))),
+                    PopupMenuItem(
+                      value: 'deploy',
+                      enabled: !agent.busy && !preparing,
+                      child: _MenuLine(LucideIcons.rocket, tr('Deploy')),
+                    ),
+                    PopupMenuItem(value: 'tools', child: _MenuLine(LucideIcons.layoutGrid, tr('Project tools'))),
+                  ],
+                ),
+              )
+            else ...[
             IconButton(
               tooltip: tr('Terminal'),
               icon: const Icon(LucideIcons.squareTerminal, size: 20),
@@ -577,10 +610,14 @@ class _ChatScreenState extends State<ChatScreen> {
               icon: const Icon(LucideIcons.layoutGrid, size: 20),
               onPressed: () => showProjectTools(context, agent, onPrompt: _prefill),
             ),
+            ],
             const SizedBox(width: 4),
           ],
         ),
-        body: Column(
+        // A readable column on a wide screen; the bar above stays full width.
+        body: ContentWidth(
+          max: 760,
+          child: Column(
           children: [
             ConnectionBanner(agent: agent),
             ServerUpdateBanner(agent: agent),
@@ -635,7 +672,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             DevServerBanner(agent: agent),
-            ApprovalCards(features: agent.features),
+            ApprovalCards(features: agent.features, agent: agent),
+            BypassBar(agent: agent),
             if (_changedFiles > 0 && !_reviewClosed && !agent.busy)
               ReviewBanner(
                 files: _changedFiles,
@@ -684,6 +722,7 @@ class _ChatScreenState extends State<ChatScreen> {
               onPickModel: () => showModelSheet(context, agent),
             ),
           ],
+        ),
         ),
       ),
     );
@@ -755,7 +794,10 @@ class _ChatScreenState extends State<ChatScreen> {
               },
               footer: footers[i],
             ),
-            NoticeEntry() => NoticeView(e),
+            NoticeEntry() => NoticeView(
+              e,
+              onRaiseBudget: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => UsageScreen(agent: agent))),
+            ),
             JobEntry() => JobNoticeView(e),
             CompactionEntry() => CompactionView(
               e,
@@ -985,38 +1027,58 @@ class _EmptyState extends StatelessWidget {
                   child: PrimaryButton(label: tr('Connect a model'), icon: LucideIcons.sparkles, onPressed: onConnect),
                 )
               else
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.35,
-                  children: [
-                    for (final (icon, color, title, blurb, prompt) in suggestions)
-                      SurfaceCard(
-                        padding: const EdgeInsets.all(14),
-                        onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            IconTile(icon: icon, color: color, size: 32),
-                            // Text from the top, so titles line up across a row whatever the blurb length.
-                            const SizedBox(height: 14),
-                            Text(tr(title), style: text.titleSmall),
-                            const SizedBox(height: 2),
-                            Text(tr(blurb), maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall),
-                            const Spacer(),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
+                // Two cards a row, each row as tall as its taller card. A grid with a fixed aspect ratio cut the blurb off
+                // (and drew overflow stripes) on a 360 dp phone at the default text size.
+                for (var i = 0; i < suggestions.length; i += 2) ...[
+                  if (i > 0) const SizedBox(height: 10),
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final (j, (icon, color, title, blurb, prompt)) in suggestions.skip(i).take(2).indexed) ...[
+                          if (j > 0) const SizedBox(width: 10),
+                          Expanded(
+                            child: SurfaceCard(
+                              padding: const EdgeInsets.all(14),
+                              onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconTile(icon: icon, color: color, size: 32),
+                                  // Text from the top, so titles line up across a row whatever the blurb length.
+                                  const SizedBox(height: 14),
+                                  Text(tr(title), style: text.titleSmall),
+                                  const SizedBox(height: 2),
+                                  Text(tr(blurb), maxLines: 3, overflow: TextOverflow.ellipsis, style: text.bodySmall),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        // An odd one out keeps half the width.
+                        if (suggestions.length - i == 1) ...[const SizedBox(width: 10), const Expanded(child: SizedBox())],
+                      ],
+                    ),
+                  ),
+                ],
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+/// Runs what a control does and says so when it fails (the link is down, the host refused). A failure nobody caught
+/// used to end as an unhandled async error and a tap that looked like it did nothing.
+Future<void> tellFailure(BuildContext context, Future<void> Function() call, {String? done}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await call();
+    if (done != null) messenger.showSnackBar(SnackBar(content: Text(done)));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
   }
 }
 
@@ -1044,6 +1106,17 @@ class _Composer extends StatelessWidget {
   final FocusNode focus;
   final AgentController agent;
   final VoidCallback onSend;
+
+  /// Stop. With a server agent and the link down it cannot reach the host: it says so instead of looking like it worked.
+  Future<void> _stop(BuildContext context) {
+    if (!agent.client.connection.value.connected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr("Offline: can't stop it from here. It stops by itself when it finishes; reconnect to stop it now."))),
+      );
+      return Future.value();
+    }
+    return tellFailure(context, agent.abort, done: tr('Stopping…'));
+  }
 
   /// The last message is still on its way: Send spins and is off.
   final bool sending;
@@ -1078,7 +1151,7 @@ class _Composer extends StatelessWidget {
         child: ListenableBuilder(
           listenable: focus,
           builder: (context, child) => AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: Motion.of(context, const Duration(milliseconds: 180)),
             decoration: BoxDecoration(
               color: p.surface,
               borderRadius: BorderRadius.circular(Radii.xl),
@@ -1164,14 +1237,14 @@ class _Composer extends StatelessWidget {
                             icon: LucideIcons.listChecks,
                             label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
                             active: agent.planMode,
-                            onTap: () => agent.setPlanMode(!agent.planMode),
+                            onTap: () => tellFailure(context, () => agent.setPlanMode(!agent.planMode)),
                           ),
                         ],
                       ),
                     ),
                     // While the agent works, Stop stays reachable; typed text adds Send (queues a follow-up).
                     if (busy)
-                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: agent.abort),
+                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: () => _stop(context)),
                     if (hasText || sending)
                       _RoundButton(
                         onLongPress: sending ? null : onQueue,
@@ -1237,7 +1310,7 @@ class _ThinkingChip extends StatelessWidget {
     return PopupMenuButton<String>(
       tooltip: tr('Thinking level'),
       initialValue: agent.thinkingLevel,
-      onSelected: agent.setThinking,
+      onSelected: (level) => tellFailure(context, () => agent.setThinking(level)),
       position: PopupMenuPosition.over,
       elevation: 0,
       itemBuilder: (context) => [
@@ -1350,7 +1423,7 @@ class _RoundButton extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: Motion.of(context, const Duration(milliseconds: 180)),
           width: 38,
           height: 38,
           decoration: BoxDecoration(
@@ -1384,4 +1457,20 @@ class _RoundButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// An icon and a label, for a menu item.
+class _MenuLine extends StatelessWidget {
+  const _MenuLine(this.icon, this.label);
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 18),
+      const SizedBox(width: 12),
+      Flexible(child: Text(label)),
+    ],
+  );
 }

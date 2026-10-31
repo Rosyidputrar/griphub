@@ -70,23 +70,39 @@ export { errorCode };
 // ---------------------------------------------------------------------------
 // Lines
 
-/** Splits a text stream into JSONL lines on LF only (readline would also split on U+2028/U+2029, which JSON allows). */
+/**
+ * Splits a text stream into JSONL lines on LF only (readline would also split on U+2028/U+2029, which JSON allows).
+ *
+ * The unfinished line is kept as the chunks that made it, joined once when its newline arrives, and a newline is looked
+ * for only in the chunk that came. It used to be one string that every chunk was appended to and searched again from the
+ * start: a message of 24 MB (a few phone photos, arriving 64 KB at a time) took 8 s of the host's one thread, 48 MB took
+ * 28 s, and the host answered no one meanwhile (pings, other chats, subagents).
+ */
 export class LineBuffer {
-	private rest = "";
+	/** The chunks of the line that has not ended yet, and how long they are together. */
+	private pending: string[] = [];
+	private size = 0;
 
 	constructor(private readonly maxLine = 64 * 1024 * 1024) {}
 
 	/** Feeds a chunk and returns the complete, non-blank lines it finished. */
 	push(chunk: string): string[] {
-		this.rest += chunk;
 		const out: string[] = [];
-		let nl: number;
-		while ((nl = this.rest.indexOf("\n")) >= 0) {
-			const line = this.rest.slice(0, nl).replace(/\r$/, "");
-			this.rest = this.rest.slice(nl + 1);
+		let start = 0;
+		for (let nl = chunk.indexOf("\n"); nl >= 0; nl = chunk.indexOf("\n", start)) {
+			let line = this.pending.length ? this.pending.join("") + chunk.slice(start, nl) : chunk.slice(start, nl);
+			this.pending = [];
+			this.size = 0;
+			if (line.endsWith("\r")) line = line.slice(0, -1);
 			if (line.trim()) out.push(line);
+			start = nl + 1;
 		}
-		if (this.rest.length > this.maxLine) throw new Error("Line too long");
+		if (start < chunk.length) {
+			const rest = start === 0 ? chunk : chunk.slice(start);
+			this.pending.push(rest);
+			this.size += rest.length;
+		}
+		if (this.size > this.maxLine) throw new Error("Line too long");
 		return out;
 	}
 }

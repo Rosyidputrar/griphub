@@ -184,7 +184,12 @@ class _DiffViewState extends State<DiffView> {
       children: [
         for (var i = 0; i < _files.length; i++) ...[
           if (i > 0) const SizedBox(height: 12),
-          _FileDiff(file: _files[i], showHeader: widget.showHeaders, maxLines: DiffView._maxLines),
+          _FileDiff(
+            file: _files[i],
+            showHeader: widget.showHeaders,
+            maxLines: DiffView._maxLines,
+            viewport: widget.maxHeight ?? MediaQuery.sizeOf(context).height * 0.7,
+          ),
         ],
       ],
     );
@@ -197,10 +202,17 @@ class _DiffViewState extends State<DiffView> {
 }
 
 class _FileDiff extends StatelessWidget {
-  const _FileDiff({required this.file, required this.showHeader, required this.maxLines});
+  const _FileDiff({required this.file, required this.showHeader, required this.maxLines, required this.viewport});
   final _ParsedFile file;
   final bool showHeader;
   final int maxLines;
+
+  /// The height a long diff scrolls within (it builds only the rows on screen there).
+  final double viewport;
+
+  /// Diffs longer than this are built lazily, a screenful at a time: all 4000 rows at once (inside an IntrinsicWidth,
+  /// which lays them all out twice) stalled the first frame of a large review (UI-12). Shorter ones are drawn as before.
+  static const lazyFrom = 300;
 
   @override
   Widget build(BuildContext context) {
@@ -258,6 +270,8 @@ class _FileDiff extends StatelessWidget {
             message(tr('Binary file changed'))
           else if (lines.isEmpty)
             message(file.note ?? tr('No content changes'))
+          else if (lines.length > lazyFrom)
+            _lazyRows(context, lines, gutter)
           else
             LayoutBuilder(
               builder: (context, box) => SingleChildScrollView(
@@ -282,7 +296,47 @@ class _FileDiff extends StatelessWidget {
     );
   }
 
-  Widget _row(BuildContext context, _Line l, double gutter) {
+  /// A long diff: its rows in a list that builds what is on screen. The width is worked out once from the longest line
+  /// (the font is monospaced) instead of by laying every row out.
+  Widget _lazyRows(BuildContext context, List<_Line> lines, double gutter) {
+    final p = context.palette;
+    final base = TextStyle(fontFamily: mono, fontSize: 12, height: 1.5, color: p.text);
+    final probe = TextPainter(
+      text: TextSpan(text: '0000000000', style: base),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final charWidth = probe.width / 10;
+    final rowHeight = probe.height + 1;
+    probe.dispose();
+    var longest = 0;
+    for (final l in lines) {
+      final n = l.text.length + 3 * '\t'.allMatches(l.text).length;
+      if (n > longest) longest = n;
+    }
+    final contentWidth = gutter * 2 + 20 + longest * charWidth + 14 + 24;
+    final height = (lines.length * rowHeight + 12).clamp(0.0, viewport);
+    return LayoutBuilder(
+      builder: (context, box) => SizedBox(
+        height: height,
+        child: Scrollbar(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: contentWidth > box.maxWidth ? contentWidth : box.maxWidth,
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                itemCount: lines.length,
+                itemBuilder: (context, i) => _row(context, lines[i], gutter, clip: true),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, _Line l, double gutter, {bool clip = false}) {
     final p = context.palette;
     final base = TextStyle(fontFamily: mono, fontSize: 12, height: 1.5, color: p.text);
     final num = base.copyWith(color: p.faint, fontSize: 11);
@@ -324,10 +378,19 @@ class _FileDiff extends StatelessWidget {
               style: base.copyWith(color: signColor),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 14),
-            child: Text(l.text.replaceAll('\t', '    '), softWrap: false, style: base),
-          ),
+          if (clip)
+            // A line wider than worked out (wide characters) is cut off rather than overflowing the row.
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: Text(l.text.replaceAll('\t', '    '), softWrap: false, overflow: TextOverflow.clip, style: base),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Text(l.text.replaceAll('\t', '    '), softWrap: false, style: base),
+            ),
         ],
       ),
     );

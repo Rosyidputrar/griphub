@@ -11,6 +11,20 @@ import 'illustration.dart';
 import 'kit.dart';
 import 'theme.dart';
 
+/// A file that probably holds a secret: an environment file, a private key, a credentials file. Such a file is not
+/// ticked for the commit (the person can still tick it) and says why.
+bool looksSecret(String path) {
+  final name = path.split('/').last.toLowerCase();
+  if (name.startsWith('.env')) return !RegExp(r'\.(example|sample|template|dist)$').hasMatch(name);
+  if (RegExp(r'\.(pem|key|p12|pfx|jks|keystore|ppk)$').hasMatch(name)) return true;
+  if (RegExp(r'^id_(rsa|dsa|ecdsa|ed25519)').hasMatch(name)) return !name.endsWith('.pub');
+  if (const {'.npmrc', '.pypirc', '.netrc', '.htpasswd', 'credentials', 'credentials.json', 'secrets.json', 'secrets.yml', 'secrets.yaml'}.contains(name)) {
+    return true;
+  }
+  if (RegExp(r'^service[-_]?account.*\.json$').hasMatch(name)) return true;
+  return path.split('/').any((part) => part == '.ssh' || part == '.aws' || part == '.gnupg');
+}
+
 /// What the agent changed, before it is committed: every changed file with its diff, a commit message the chat's
 /// model writes (editable), and Commit, or Commit and push. Undoing the agent's work is one tap away (Changes), so
 /// keeping and throwing away live on the same screen.
@@ -28,6 +42,10 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
   final _message = TextEditingController();
   bool _writing = false;
   Object? _writeError;
+
+  /// The files that go into the commit: all of them but those that look like secrets, until the person says otherwise.
+  final _picked = <String>{};
+  final _seen = <String>{};
 
   /// Files whose diff is open, and the diffs read so far.
   final _open = <String>{};
@@ -59,6 +77,13 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
         _review = r;
         _patches.clear();
         if (first) _open.addAll(r.status.files.take(_openAtStart).map((f) => f.path));
+        // What was ticked stays as it was; a file that is new to the list is ticked unless it looks like a secret.
+        final now = r.status.files.map((f) => f.path).toSet();
+        _picked.removeWhere((path) => !now.contains(path));
+        for (final f in r.status.files) {
+          if (first ? !looksSecret(f.path) : !_seen.contains(f.path) && !looksSecret(f.path)) _picked.add(f.path);
+        }
+        _seen.addAll(now);
       });
       // A message is the reason to open this screen: write one straight away, unless one is typed already.
       if (first && r.status.isRepo && r.status.files.isNotEmpty && _message.text.trim().isEmpty) _write();
@@ -98,7 +123,11 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
     final nav = Navigator.of(context);
     await runBusy(push ? 'push' : 'commit', () async {
       try {
-        final done = await _features.gitCommit(message, all: true);
+        final files = [
+          for (final f in _review!.status.files)
+            if (_picked.contains(f.path)) ...[f.path, ?f.from],
+        ];
+        final done = await _features.gitCommit(message, paths: files);
         if (push) await _features.gitPush();
         messenger.showSnackBar(
           SnackBar(content: Text('${tr(push ? 'Committed and pushed' : 'Committed')}: $done')),
@@ -172,7 +201,7 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
                     children: [
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                        padding: const EdgeInsets.fromLTRB(4, 0, 4, 2),
                         child: Row(
                           children: [
                             Expanded(
@@ -185,6 +214,21 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
                             ),
                             DiffStat(additions: r.additions, deletions: r.deletions),
                           ],
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: busy()
+                              ? null
+                              : () => setState(() {
+                                  if (_picked.length == r.status.files.length) {
+                                    _picked.clear();
+                                  } else {
+                                    _picked.addAll(r.status.files.map((f) => f.path));
+                                  }
+                                }),
+                          child: Text(tr(_picked.length == r.status.files.length ? 'Select none' : 'Select all')),
                         ),
                       ),
                       for (final f in r.status.files) ...[_file(f, r), const SizedBox(height: 8)],
@@ -229,9 +273,14 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
           InkWell(
             onTap: () => setState(() => open ? _open.remove(f.path) : _open.add(f.path)),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+              padding: const EdgeInsets.fromLTRB(0, 4, 8, 4),
               child: Row(
                 children: [
+                  // Ticked files go into the commit; a file that looks like a secret starts unticked.
+                  Checkbox(
+                    value: _picked.contains(f.path),
+                    onChanged: busy() ? null : (v) => setState(() => v == true ? _picked.add(f.path) : _picked.remove(f.path)),
+                  ),
                   Semantics(label: what, child: Icon(icon, size: 18, color: color)),
                   const SizedBox(width: 10),
                   Expanded(
@@ -250,6 +299,11 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.muted),
+                          ),
+                        if (looksSecret(f.path))
+                          Text(
+                            tr('May contain secrets: not included unless you tick it'),
+                            style: TextStyle(fontSize: 11.5, color: p.warning),
                           ),
                       ],
                     ),
@@ -340,25 +394,27 @@ class _ReviewScreenState extends State<ReviewScreen> with BusyActions {
               const SizedBox(height: 10),
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final none = busy() || _message.text.trim().isEmpty;
+                  final none = busy() || _message.text.trim().isEmpty || _picked.isEmpty;
                   final commit = FilledButton.icon(
                     onPressed: none ? null : () => _commit(push: false),
                     style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
                     icon: busy('commit')
                         ? BusySpinner(size: 16, color: p.inverse)
                         : const Icon(LucideIcons.gitCommitHorizontal, size: 16),
-                    label: Text(tr('Commit')),
+                    label: Text(_picked.length == r.status.files.length ? tr('Commit') : '${tr('Commit')} (${_picked.length})'),
                   );
                   if (!canPush) return commit;
+                  // Where it goes: the host pushes the current branch to origin.
+                  final pushLabel = '${tr('Commit and push to')} origin/${r.status.branch}';
                   final push = OutlinedButton.icon(
                     onPressed: none ? null : () => _commit(push: true),
                     style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
                     icon: busy('push') ? const BusySpinner(size: 16) : const Icon(LucideIcons.upload, size: 16),
-                    label: Text(tr('Commit and push')),
+                    label: Text(pushLabel, maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
                   );
                   // Side by side when "Commit and push" fits half the width; stacked otherwise, Commit on top.
                   final label = TextPainter(
-                    text: TextSpan(text: tr('Commit and push'), style: Theme.of(context).textTheme.labelLarge),
+                    text: TextSpan(text: pushLabel, style: Theme.of(context).textTheme.labelLarge),
                     textScaler: MediaQuery.textScalerOf(context),
                     maxLines: 1,
                     textDirection: Directionality.of(context),

@@ -90,5 +90,16 @@ echo "--- a custom account name"
 /server/bootstrap.sh --no-box --user agent2 --pubkey "$PUB1" > /tmp/run6.txt 2>&1 || bad "custom user run failed"
 check "second account is separate" bash -c 'id agent2 && test -f /home/agent2/.griphub/env && ! cmp -s /home/agent2/.griphub/env /home/griphub/.griphub/env'
 
+echo "--- a Node that is already on the server, but not in /usr/local/bin"
+# apt and NodeSource put it in /usr/bin. The service file runs /usr/local/bin/node, which only this script's own Node
+# install made, so a server like that got a service that could not start (status 203/EXEC).
+rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
+ln -s /opt/node/bin/node /usr/bin/node
+/server/bootstrap.sh --no-box --pubkey "$PUB1" > /tmp/run7.txt 2>&1 || { cat /tmp/run7.txt; bad "the run with Node in /usr/bin failed"; }
+check "it kept the Node that was there" grep -q 'keeping it' /tmp/run7.txt
+check "it linked it where the service looks for it" bash -c '[ "$(readlink /usr/local/bin/node)" = /usr/bin/node ]'
+check "the service account can run it" runuser -u griphub -- /usr/local/bin/node -p 0
+check "it did not install a second Node" bash -c '! grep -q "installing Node.js" /tmp/run7.txt'
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASSED"; else echo "$fails FAILED"; exit 1; fi

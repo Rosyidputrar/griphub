@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'agent/agent_client.dart';
 import 'agent/agent_controller.dart';
@@ -42,16 +43,19 @@ class GripHubApp extends StatelessWidget {
         themeMode: appearance.value,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(appearance.textScale * MediaQuery.textScalerOf(context).scale(14) / 14),
+        builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+          value: systemOverlayFor(Theme.of(context).brightness, context.palette),
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(effectiveTextScale(appearance.textScale, MediaQuery.textScalerOf(context).scale(14) / 14)),
+            ),
+            child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
           ),
-          child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
         ),
         home: ListenableBuilder(
           listenable: agent,
           builder: (context, _) => AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
+            duration: Motion.of(context, const Duration(milliseconds: 250)),
             child: !appearance.onboarded
                 ? OnboardingScreen(agent: agent)
                 : switch (agent.status) {
@@ -171,3 +175,10 @@ class _BootFailed extends StatelessWidget {
     );
   }
 }
+
+/// The app's text size times the system's, held to [maxTextScale]: the two multiply, and at the system's largest
+/// setting with the app's largest (1.25) that was 2.5x, a size no screen was laid out for.
+double effectiveTextScale(double app, double system) => (app * system).clamp(0.0, maxTextScale);
+
+/// The largest text the screens are tested at (2x goldens) and laid out for, with a little room.
+const maxTextScale = 2.2;

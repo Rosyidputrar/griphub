@@ -4,7 +4,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const server = (f) => fileURLToPath(new URL(`../../server/${f}`, import.meta.url));
@@ -12,6 +14,7 @@ const src = (f) => readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta
 const BOOTSTRAP = server("bootstrap.sh");
 const UNIT = readFileSync(server("griphub-hostd.service"), "utf8");
 const BOX = readFileSync(server("box/box"), "utf8");
+const BOOTSTRAP_TEXT = readFileSync(server("bootstrap.sh"), "utf8");
 const HOST = src("host.ts");
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEKEYONEEXAMPLEKEYONEEXAMPLEKEYONE00 griphub-app";
 
@@ -88,6 +91,72 @@ test("bootstrap --dry-run shows the plan, the restricted key line and a setup co
 	const second = bootstrap("--dry-run", "--pubkey", KEY, "--user", "griphub2");
 	assert.equal(second.status, 0, second.stderr);
 	assert.match(second.stdout, /\/home\/griphub2\/\.griphub/);
+});
+
+// The service runs /usr/local/bin/node. The script put that link there only when it installed Node itself, so a server that
+// already had a good Node (/usr/bin/node from apt or NodeSource) was "kept" with no link, and the service failed to start
+// (status 203/EXEC) on exactly those servers. These run the real script as a dry run, with a stand-in `node` first on PATH
+// and the link's place moved into a temporary folder (GRIPHUB_TEST_NODE_LINK).
+function nodeRig(t, { node = "24.30.0", link } = {}) {
+	const dir = mkdtempSync(join(tmpdir(), "gh-nodelink-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const fakeNode = (path, version) => {
+		writeFileSync(path, `#!/bin/sh\ncase "$1" in -p) echo ${version} ;; -v) echo v${version} ;; *) exit 0 ;; esac\n`);
+		chmodSync(path, 0o755);
+	};
+	mkdirSync(join(dir, "elsewhere"));
+	mkdirSync(join(dir, "usr-local-bin"));
+	const found = join(dir, "elsewhere", "node");
+	fakeNode(found, node);
+	const place = join(dir, "usr-local-bin", "node");
+	if (link) link({ place, fakeNode, dir });
+	const run = (...extra) =>
+		spawnSync("bash", [BOOTSTRAP, "--dry-run", "--pubkey", KEY, "--address", "a.example.com", ...extra], {
+			encoding: "utf8",
+			env: { ...process.env, PATH: `${join(dir, "elsewhere")}:${process.env.PATH}`, GRIPHUB_TEST_NODE_LINK: place },
+		});
+	return { run, found, place, dir };
+}
+
+test("a Node that is already on the server is kept, and linked where the service looks for it", (t) => {
+	const r = nodeRig(t);
+	const out = r.run();
+	assert.equal(out.status, 0, out.stderr);
+	assert.match(out.stdout, /is new enough; keeping it/);
+	assert.doesNotMatch(out.stdout, /installing Node\.js/);
+	assert.ok(out.stdout.includes(`+ ln -s ${r.found} ${r.place}`), `the link is planned:\n${out.stdout.split("\n").filter((l) => /ln -s|node/i.test(l)).join("\n")}`);
+});
+
+test("a good Node already at the link's place is left as it is", (t) => {
+	const r = nodeRig(t, { link: ({ place, fakeNode }) => fakeNode(place, "22.19.0") });
+	const out = r.run();
+	assert.equal(out.status, 0, out.stderr);
+	assert.ok(!out.stdout.includes(`ln -s ${r.found}`), "nothing is put over it");
+	assert.doesNotMatch(out.stdout, /linking .* which the service runs/);
+});
+
+test("a Node at the link's place that is too old, or a link to nowhere, stops the script with a reason: nothing is replaced", (t) => {
+	for (const link of [({ place, fakeNode }) => fakeNode(place, "18.20.0"), ({ place, dir }) => symlinkSync(join(dir, "gone"), place)]) {
+		const r = nodeRig(t, { link });
+		const out = r.run();
+		assert.notEqual(out.status, 0, out.stdout);
+		assert.match(out.stderr, /^error: .* is there but is not a Node\.js 22\.19 or newer that can run, and the service runs that one/m);
+		assert.ok(!out.stdout.includes(`ln -s ${r.found}`), "it did not link over it");
+	}
+});
+
+test("with no new enough Node anywhere the script installs its own, as before, and links nothing it did not make", (t) => {
+	const r = nodeRig(t, { node: "18.20.0" });
+	const out = r.run();
+	assert.equal(out.status, 0, out.stderr);
+	assert.match(out.stdout, /installing Node\.js 24\./);
+	assert.ok(out.stdout.includes("/opt/node/bin/node /usr/local/bin/node"), "its own Node goes to the usual place");
+	assert.ok(!out.stdout.includes(`ln -s ${r.found}`));
+});
+
+test("the place the script links Node to is the one the service file runs", () => {
+	assert.match(BOOTSTRAP_TEXT, /^NODE_LINK=\$\{GRIPHUB_TEST_NODE_LINK:-\/usr\/local\/bin\/node\}$/m);
+	assert.match(UNIT, /^ExecStart=\/usr\/local\/bin\/node /m);
 });
 
 test("bootstrap warns up front about a machine that is too small, and is quiet about one that is not", () => {

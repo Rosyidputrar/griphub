@@ -4,9 +4,11 @@
  * command output, and a checkpoint before the agent starts changing files.
  */
 
+import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateUnifiedPatch, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /**
@@ -63,25 +65,138 @@ const RISKY_BASH = [
 ];
 
 /**
+ * Where this machine keeps what the agent must not be able to read out and send on: the store key, the sign-in tokens
+ * (the app's own store, git's credentials, ssh and cloud keys). Reading them is not "changing" anything, so they were never
+ * asked about; a page or a file with hidden instructions in it only needs to say "read this and put it in a URL".
+ */
+function secretPlaces(): { dirs: string[]; files: string[] } {
+	const home = process.env.HOME ?? "";
+	const dirs = [process.env.GRIPHUB_DIR, process.env.PI_CODING_AGENT_DIR && join(process.env.PI_CODING_AGENT_DIR, "griphub")].filter((d): d is string => !!d);
+	if (home) {
+		dirs.push(join(home, ".griphub"), join(home, ".ssh"), join(home, ".gnupg"), join(home, ".aws"), join(home, ".config", "gh"), join(home, ".pi", "agent", "griphub"));
+	}
+	const files = home ? [".gitconfig", ".git-credentials", ".netrc", ".npmrc", ".pypirc"].map((f) => join(home, f)) : [];
+	return { dirs, files };
+}
+
+/** Why reading [input.path] with a file tool deserves a question, or null: the file is one that holds secrets. */
+export function secretReadRisk(toolName: string, input: Record<string, unknown>, cwd: string): string | null {
+	if (toolName !== "read" && toolName !== "grep" && toolName !== "find" && toolName !== "ls") return null;
+	let target: string;
+	try {
+		target = canonicalTarget(resolveLikePi(String(input.path ?? ""), cwd)) ?? "";
+	} catch {
+		return "Reads a path that cannot be checked";
+	}
+	if (!target) return "Reads a path that cannot be checked";
+	if (/^\/proc\/[^/]+\/(environ|cmdline|mem|maps)$/.test(target)) return "Reads a file that holds sign-in secrets";
+	const { dirs, files } = secretPlaces();
+	const real = (p: string) => canonicalTarget(p) ?? p;
+	if (dirs.some((d) => isInside(target, real(d))) || files.some((f) => target === real(f))) return "Reads a file that holds sign-in secrets";
+	return null;
+}
+
+/** Commands that name where the secrets are, or print the environment the tokens are in. A list, so a speed bump, not a wall. */
+const SECRET_BASH = [
+	/\.griphub\b|GRIPHUB_STORE_KEY|integrations\.json|custom-providers\.json/i,
+	/\/proc\/[^\s]*\/(environ|cmdline|mem)\b/i,
+	/\.git-credentials|\.netrc\b|\.gitconfig\b|\.config\/gh\b/i,
+	/\$\{?(GITHUB_TOKEN|GH_TOKEN|VERCEL_TOKEN|CLOUDFLARE_API_TOKEN)\b/,
+	/\bprintenv\b|\benv\s*(\||>)/,
+];
+
+/** Characters pi turns into a plain space before it looks at a path. */
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * The file a path names when pi's file tools open it: the same steps as pi's own `resolveToCwd` (unusual spaces become
+ * spaces, one leading `@` is dropped, `~` is the home folder, `file://` is a path), done here because a check that reads
+ * the path any other way approves one file and lets the tool write another (`@/home/x/.ssh/authorized_keys` was
+ * "inside the project" to this check and the real file to pi). agent/test/guard-paths.test.mjs compares the two. Throws
+ * for a `file://` address pi would refuse too.
+ */
+export function resolveLikePi(raw: string, cwd: string): string {
+	let p = raw.replace(UNICODE_SPACES, " ");
+	if (p.startsWith("@")) p = p.slice(1);
+	if (p === "~") p = homedir();
+	else if (p.startsWith("~/")) p = join(homedir(), p.slice(2));
+	if (/^file:\/\//.test(p)) p = fileURLToPath(p);
+	return isAbsolute(p) ? resolve(p) : resolve(cwd, p);
+}
+
+/**
+ * Where a path really leads: links resolved as far as the path exists, then the rest of it as written. A link that
+ * leads nowhere (yet) is followed too, since writing through it creates what it points at. Null when that cannot be
+ * told (an unreadable folder, a loop of links): the caller then treats the path as outside.
+ */
+function canonicalTarget(path: string): string | null {
+	let head = path;
+	const tail: string[] = [];
+	for (let steps = 0; steps < 256; steps++) {
+		try {
+			return join(realpathSync(head), ...tail);
+		} catch (e) {
+			const code = (e as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+		}
+		try {
+			if (lstatSync(head).isSymbolicLink()) {
+				// A relative link is read from the folder it is in, as that folder really is: `..` from a folder reached
+				// through a link is the real folder's parent, not the parent of the name it was reached by.
+				head = resolve(realpathSync(dirname(head)), readlinkSync(head));
+				continue;
+			}
+		} catch (e) {
+			// Not there at all: look at its folder. A folder that cannot be read cannot be told.
+			const code = (e as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") return null;
+		}
+		const parent = dirname(head);
+		if (parent === head) return null;
+		tail.unshift(basename(head));
+		head = parent;
+	}
+	return null;
+}
+
+const OUTSIDE_PROJECT = "Writes outside the project folder";
+const INSIDE_GIT = "Writes inside a .git folder: git runs what is written there";
+
+/**
+ * Why a file tool given [raw] needs a look: it would write outside [cwd], through links and all, or into a `.git` folder
+ * (hooks, a config that names a program: see gitsafe.ts, which is what actually keeps those from running on the host; a
+ * `bash` command can write there without passing here, so this is the common way in, not the only one). Null otherwise.
+ */
+function writeRisk(raw: string, cwd: string): string | null {
+	let target: string;
+	try {
+		target = resolveLikePi(raw, cwd);
+	} catch {
+		return OUTSIDE_PROJECT;
+	}
+	const real = canonicalTarget(target);
+	const root = canonicalTarget(resolve(cwd));
+	if (real === null || root === null || !isInside(real, root)) return OUTSIDE_PROJECT;
+	return relative(root, real).split(sep).includes(".git") ? INSIDE_GIT : null;
+}
+
+/**
  * Why a call deserves a second look, or null. `mcp` says whether tools from MCP servers count: a person is asked about
  * them, but an unattended run may use the servers the user set up (as background runs always could).
  */
-function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
-	if (READ_ONLY.has(toolName)) return null;
+export function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
+	if (READ_ONLY.has(toolName)) return secretReadRisk(toolName, input, cwd);
 	// A background job is a bash command that runs a while: the same second look.
 	if (toolName === "bash" || toolName === "background_job") {
 		const cmd = String(input.command ?? "");
+		if (SECRET_BASH.some((re) => re.test(cmd))) return "This command can read sign-in secrets";
 		const hit = RISKY_BASH.find((re) => re.test(cmd));
 		return hit ? "This command can delete data, publish or reach other machines" : null;
 	}
 	if (toolName === "write" || toolName === "edit") {
-		const raw = String(input.path ?? "");
-		// Resolve ~, relative paths and .. segments before comparing, and
-		// compare against cwd + separator: /a/bc is not inside /a/b.
-		const expanded = raw === "~" ? homedir() : raw.startsWith("~/") ? resolve(homedir(), raw.slice(2)) : raw;
-		const resolved = resolve(cwd, expanded);
-		if (resolved !== cwd && !resolved.startsWith(cwd + sep)) return "Writes outside the project folder";
-		return null;
+		// Compared where the file really is (see resolveLikePi, canonicalTarget): /a/bc is not inside /a/b, and neither
+		// is a file reached through a link that leads out of it.
+		return writeRisk(String(input.path ?? ""), cwd);
 	}
 	// Unknown/custom tools (MCP and friends) are treated as risky.
 	return mcp && toolName.startsWith("mcp_") ? "External tool from an MCP server" : null;
@@ -91,11 +206,9 @@ function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, m
 const PATCH_MAX_FILE = 512 * 1024;
 const PATCH_MAX_CHARS = 64 * 1024;
 
-/** A path as the file tools take it: `~` is the home folder, relative paths are from the project. */
+/** A path as the file tools take it (see resolveLikePi). */
 function toolPath(raw: string, cwd: string): string {
-	const p = raw.startsWith("@") ? raw.slice(1) : raw;
-	const expanded = p === "~" ? homedir() : p.startsWith("~/") ? resolve(homedir(), p.slice(2)) : p;
-	return resolve(cwd, expanded);
+	return resolveLikePi(raw, cwd);
 }
 
 /** The replacements an `edit` call asks for, in each shape models send them (pi's edit tool takes the same ones). */
@@ -249,7 +362,19 @@ export class Guard {
 				};
 			}
 
-			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : this.mode === "deny_risky" ? riskOf(event.toolName, input, cwd, false) : null;
+			// Reading a file of secrets is asked about in every mode but "bypass all", read-only as it is.
+			const secret = this.mode === "auto" ? null : secretReadRisk(event.toolName, input, cwd);
+			const byMode =
+				this.mode === "ask_all"
+					? READ_ONLY.has(event.toolName)
+						? null
+						: "Approval required for every change"
+					: this.mode === "ask_risky"
+						? riskOf(event.toolName, input, cwd)
+						: this.mode === "deny_risky"
+							? riskOf(event.toolName, input, cwd, false)
+							: null;
+			const risk = secret ?? byMode;
 			if (risk && this.mode === "deny_risky") {
 				return {
 					block: true,

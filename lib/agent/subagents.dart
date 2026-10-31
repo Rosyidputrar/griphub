@@ -1,3 +1,5 @@
+import 'models.dart' show ToolImage, contentImageData;
+
 /// Subagent state mirrored from the host's `subagent_*` records.
 ///
 /// This store is deliberately pure: it only reduces record maps, so it is
@@ -43,15 +45,44 @@ SubagentStopCode? _stopCode(String? s) => switch (s) {
 enum SubagentToolStatus { running, done, failed }
 
 class SubagentToolRun {
-  SubagentToolRun({required this.id, required this.name, required this.args, required this.startedAt});
+  SubagentToolRun({required this.id, required this.name, required this.args, required this.startedAt, this.input});
   final String id;
   final String name;
+
+  /// One line: the path, the command (cut short), the query.
   final String args;
   final DateTime startedAt;
+
+  /// The arguments themselves (the whole command, a file's content, an edit's old and new text), when known.
+  Map<String, dynamic>? input;
   String output = '';
+
+  /// Pictures in the result (a `read` of an image).
+  List<ToolImage> images = const [];
   SubagentToolStatus status = SubagentToolStatus.running;
   DateTime? finishedAt;
 }
+
+/// One step of a subagent's work, in order, as the chat shows its own (host `SubagentTimelineEntry`).
+enum SubagentEntryKind { thinking, text, user, tool }
+
+class SubagentEntry {
+  const SubagentEntry(this.kind, {this.text = '', this.toolId, required this.at});
+  final SubagentEntryKind kind;
+  final String text;
+
+  /// For [SubagentEntryKind.tool]: which tool call came here.
+  final String? toolId;
+  final DateTime at;
+}
+
+SubagentEntryKind? _entryKind(String? k) => switch (k) {
+  'thinking' => SubagentEntryKind.thinking,
+  'text' => SubagentEntryKind.text,
+  'user' => SubagentEntryKind.user,
+  'tool' => SubagentEntryKind.tool,
+  _ => null,
+};
 
 class QueuedSubagentMessage {
   QueuedSubagentMessage({required this.id, required this.text, required this.at});
@@ -112,6 +143,22 @@ class SubagentState {
   /// The host's English activity line; only a fallback, the UI builds a localized one.
   String? currentActivity;
   final List<SubagentToolRun> tools = [];
+
+  /// What it thought, wrote, called and was sent, in order: from the host's record, and live from its events.
+  final List<SubagentEntry> timeline = [];
+
+  /// The thinking and text of the message being written now, before it ends.
+  String liveThinking = '';
+  String liveText = '';
+
+  /// The arguments of tool calls still being written (raw JSON so far), by call id: a file shows as it is written.
+  final Map<String, String> liveArgs = {};
+
+  /// The tool each of [liveArgs] is for.
+  final Map<String, String> liveNames = {};
+
+  /// A tool call by id.
+  SubagentToolRun? tool(String id) => tools.where((t) => t.id == id).firstOrNull;
   final List<QueuedSubagentMessage> queue = [];
   int inputTokens = 0;
   int outputTokens = 0;
@@ -217,8 +264,12 @@ class SubagentState {
             name: m['name'] as String? ?? '',
             args: m['args'] as String? ?? '',
             startedAt: _date(m['startedAt']) ?? DateTime.now(),
+            input: (m['input'] as Map?)?.cast<String, dynamic>(),
           );
           t.output = m['output'] as String? ?? '';
+          t.images = contentImageData([
+            for (final i in (m['images'] as List? ?? const []).whereType<Map>()) {'type': 'image', ...i},
+          ]);
           t.status = m['status'] == 'failed'
               ? SubagentToolStatus.failed
               : m['status'] == 'done'
@@ -227,6 +278,30 @@ class SubagentState {
           t.finishedAt = _date(m['finishedAt']);
           return t;
         }));
+    }
+    // The host's timeline replaces the one built from events (an older host sends none: keep ours).
+    final tl = r['timeline'] as List?;
+    if (tl != null) {
+      timeline
+        ..clear()
+        ..addAll(
+          tl.whereType<Map>().map((e) {
+            final kind = _entryKind(e['kind'] as String?);
+            if (kind == null) return null;
+            return SubagentEntry(
+              kind,
+              text: e['text'] as String? ?? '',
+              toolId: e['id'] as String?,
+              at: _date(e['at']) ?? DateTime.now(),
+            );
+          }).nonNulls,
+        );
+      if (isTerminal) {
+        liveThinking = '';
+        liveText = '';
+        liveArgs.clear();
+        liveNames.clear();
+      }
     }
     final q = r['queue'] as List?;
     if (q != null) {
@@ -246,6 +321,53 @@ class SubagentState {
   /// Applies one pi session event forwarded for this subagent.
   void applyEvent(Map<String, dynamic> e) {
     switch (e['type']) {
+      // The message being written: thinking and text as they stream, and the arguments of a tool call (a file).
+      case 'message_update':
+        final d = (e['assistantMessageEvent'] as Map?)?.cast<String, dynamic>() ?? const {};
+        final delta = d['delta'] as String? ?? '';
+        switch (d['type']) {
+          case 'thinking_delta':
+            liveThinking += delta;
+          case 'text_delta':
+            liveText += delta;
+          case 'toolcall_delta' when d['id'] != null:
+            final id = '${d['id']}';
+            liveArgs[id] = (liveArgs[id] ?? '') + delta;
+            if (d['toolName'] is String) liveNames[id] = d['toolName'] as String;
+        }
+      // The message ended: its thinking, text and tool-call places join the timeline, in its order (as the host does).
+      case 'message_end':
+        final m = (e['message'] as Map?)?.cast<String, dynamic>();
+        if (m?['role'] == 'assistant') {
+          final at = DateTime.now();
+          for (final c in (m!['content'] as List? ?? const []).whereType<Map>()) {
+            switch (c['type']) {
+              case 'thinking' when (c['thinking'] as String? ?? '').trim().isNotEmpty:
+                timeline.add(SubagentEntry(SubagentEntryKind.thinking, text: c['thinking'] as String, at: at));
+              case 'text' when (c['text'] as String? ?? '').trim().isNotEmpty:
+                timeline.add(SubagentEntry(SubagentEntryKind.text, text: c['text'] as String, at: at));
+              case 'toolCall' when c['id'] != null:
+                final id = '${c['id']}';
+                if (!_placed(id)) timeline.add(SubagentEntry(SubagentEntryKind.tool, toolId: id, at: at));
+                liveArgs.remove(id);
+                liveNames.remove(id);
+                final args = c['arguments'];
+                final input = args is Map ? args.cast<String, dynamic>() : null;
+                // The call usually starts after its message ends; keep what it was given for then.
+                if (tool(id) case final t?) {
+                  t.input ??= input;
+                } else if (input != null) {
+                  _pendingInput[id] = input;
+                }
+            }
+          }
+          liveThinking = '';
+          liveText = '';
+        }
+      case 'subagent_user_message':
+        timeline.add(
+          SubagentEntry(SubagentEntryKind.user, text: e['text'] as String? ?? '', at: _date(e['at']) ?? DateTime.now()),
+        );
       case 'agent_start':
         currentTool = null;
         if (status == SubagentStatus.queued) status = SubagentStatus.running;
@@ -254,15 +376,21 @@ class SubagentState {
         currentTool = e['toolName'] as String?;
         currentArgs = _argsSummary(e['toolName'] as String?, e['args']);
         if (tools.every((t) => t.id != id)) {
+          final args = e['args'];
           tools.add(
             SubagentToolRun(
               id: id,
               name: e['toolName'] as String? ?? '',
               args: _argsSummary(e['toolName'] as String?, e['args']),
               startedAt: DateTime.now(),
+              input: args is Map ? args.cast<String, dynamic>() : _pendingInput[id],
             ),
           );
         }
+        _pendingInput.remove(id);
+        liveArgs.remove(id);
+        liveNames.remove(id);
+        if (!_placed(id)) timeline.add(SubagentEntry(SubagentEntryKind.tool, toolId: id, at: DateTime.now()));
       case 'tool_execution_update':
         final id = e['toolCallId'] as String? ?? '';
         final t = tools.where((t) => t.id == id).firstOrNull;
@@ -272,6 +400,8 @@ class SubagentState {
         final t = tools.where((t) => t.id == id).firstOrNull;
         if (t != null) {
           t.output = _contentText((e['result'] as Map?)?['content']);
+          final images = contentImageData((e['result'] as Map?)?['content']);
+          if (images.isNotEmpty) t.images = images.take(2).toList();
           t.status = e['isError'] == true ? SubagentToolStatus.failed : SubagentToolStatus.done;
           t.finishedAt = DateTime.now();
         }
@@ -286,6 +416,12 @@ class SubagentState {
         currentActivity = null;
     }
   }
+
+  /// Whether the timeline already has a place for tool call [id].
+  bool _placed(String id) => timeline.any((t) => t.kind == SubagentEntryKind.tool && t.toolId == id);
+
+  /// Arguments a message gave a tool call before the call started.
+  final Map<String, Map<String, dynamic>?> _pendingInput = {};
 
   void applyStatus(Map<String, dynamic> r) {
     // Terminal state only ever comes from subagent_finished.

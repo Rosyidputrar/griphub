@@ -257,7 +257,7 @@ class _LinkifiedTextState extends State<LinkifiedText> {
     if (parts.every((x) => x.$2 == null)) return Text(widget.text, style: widget.style);
     final p = context.palette;
     final base = widget.style ?? DefaultTextStyle.of(context).style;
-    final linkStyle = base.copyWith(color: p.accent, decoration: TextDecoration.underline, decorationColor: p.accent);
+    final linkStyle = base.copyWith(color: p.accentText, decoration: TextDecoration.underline, decorationColor: p.accentText);
     return Text.rich(
       TextSpan(
         style: base,

@@ -120,7 +120,7 @@ class _BoxScreenState extends State<BoxScreen> {
             TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
             FilledButton(
               style: danger
-                  ? FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white)
+                  ? dangerButtonStyle(context)
                   : null,
               onPressed: () => Navigator.pop(context, true),
               child: Text(action),

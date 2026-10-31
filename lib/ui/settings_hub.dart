@@ -51,8 +51,7 @@ class _SettingsHubState extends State<SettingsHub> {
     if (!mounted) return;
     setState(() => _approvalSaving = v);
     try {
-      await widget.agent.integrations.updateSettings({'approvalMode': v});
-      widget.agent.approvalMode = v;
+      await widget.agent.setApprovalMode(v);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not change approvals')}: ${friendlyError(e)}')));
@@ -195,7 +194,8 @@ class _SettingsHubState extends State<SettingsHub> {
         };
         return Scaffold(
           appBar: AppBar(title: Text(tr('Settings'))),
-          body: ListView(
+          body: ContentWidth(
+            child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
             children: [
               SurfaceCard(
@@ -308,7 +308,7 @@ class _SettingsHubState extends State<SettingsHub> {
                       if (it.github != null) 'GitHub @${it.github!.login}',
                       if (it.vercelUser != null) 'Vercel',
                       if (it.cloudflareConnected) 'Cloudflare',
-                      if (it.hosts.isNotEmpty) '${it.hosts.length} server${it.hosts.length == 1 ? '' : 's'}',
+                      if (it.hosts.isNotEmpty) serverCount(it.hosts.length),
                     ].join(' · ').ifEmpty(tr('GitHub, Vercel, Cloudflare, SSH keys and servers')),
                     onTap: () => _open(AccountsScreen(agent: agent)),
                   ),
@@ -328,6 +328,16 @@ class _SettingsHubState extends State<SettingsHub> {
                 options: {'ask_all': tr('Ask all'), 'ask_risky': tr('Risky only'), 'auto': tr('Bypass all')},
                 busy: _approvalSaving != null,
                 onChanged: _setApprovalMode,
+              ),
+              // What the setting is: questions before common risky actions. Not a wall against a page or file that tells the
+              // agent what to do, so it is not described as one.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                child: Text(
+                  tr('Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.'),
+                  key: const ValueKey('approvals-caption'),
+                  style: text.bodySmall?.copyWith(color: p.muted),
+                ),
               ),
               if ((it.settings?.approvalMode ?? agent.approvalMode) == 'auto')
                 Padding(
@@ -394,7 +404,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     title: tr('MCP servers'),
                     subtitle: agent.features.mcpServers.isEmpty
                         ? tr('Extra tools from Model Context Protocol servers')
-                        : '${agent.features.mcpServers.length} server${agent.features.mcpServers.length == 1 ? '' : 's'}',
+                        : serverCount(agent.features.mcpServers.length),
                     onTap: () => _open(McpScreen(agent: agent)),
                   ),
                   SettingsRow(
@@ -485,28 +495,40 @@ class _SettingsHubState extends State<SettingsHub> {
                     ),
                     onTap: () => look.update(compact: !look.compact),
                   ),
+                  // The title on its own line and the swatches under it, so neither starves on a narrow phone; each swatch
+                  // is a 48 dp target that says its colour and whether it is the one chosen.
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                    child: Row(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(child: Text(tr('Accent colour'), style: text.titleSmall)),
-                        for (var i = 0; i < accentChoices.length; i++)
-                          GestureDetector(
-                            onTap: () => look.update(accent: i),
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 8),
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Theme.of(context).brightness == Brightness.light
-                                    ? accentChoices[i].$1
-                                    : accentChoices[i].$2,
-                                border: Border.all(color: look.accent == i ? p.text : Colors.transparent, width: 2.5),
+                        Text(tr('Accent colour'), style: text.titleSmall),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          children: [
+                            for (var i = 0; i < accentChoices.length; i++)
+                              Semantics(
+                                button: true,
+                                selected: look.accent == i,
+                                label: tr(accentNames[i]),
+                                child: TapTarget(
+                                  onTap: () => look.update(accent: i),
+                                  child: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Theme.of(context).brightness == Brightness.light
+                                          ? accentChoices[i].$1
+                                          : accentChoices[i].$2,
+                                      border: Border.all(color: look.accent == i ? p.text : Colors.transparent, width: 2.5),
+                                    ),
+                                    child: look.accent == i ? Icon(LucideIcons.check, size: 14, color: p.inverse) : null,
+                                  ),
+                                ),
                               ),
-                              child: look.accent == i ? Icon(LucideIcons.check, size: 14, color: p.inverse) : null,
-                            ),
-                          ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
@@ -541,6 +563,7 @@ class _SettingsHubState extends State<SettingsHub> {
                 ],
               ),
             ],
+          ),
           ),
         );
       },
@@ -734,3 +757,6 @@ class _LinkChip extends StatelessWidget {
     );
   }
 }
+
+/// "1 server" / "3 servers" in the app's language (an English plural used to be built in place).
+String serverCount(int n) => n == 1 ? tr('1 server') : tr('{n} servers').replaceAll('{n}', '$n');

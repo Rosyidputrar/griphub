@@ -57,6 +57,9 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int tab = 0;
+
+  /// The Chats tab is picking chats: Back leaves that first, and only then the tab.
+  final _chatsSelecting = ValueNotifier(false);
   final subs = <StreamSubscription<Object?>>[];
   AppLifecycleState lifecycle = AppLifecycleState.resumed;
   int approvalsSeen = 0;
@@ -148,6 +151,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _chatsSelecting.dispose();
     agent.confirmStopToSwitch = null;
     WidgetsBinding.instance.removeObserver(this);
     agent.features.removeListener(_onFeatures);
@@ -328,20 +332,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final tabs = [
       _HomeTab(agent: agent, onSeeAll: () => setState(() => tab = 1), onNewChat: _newChat),
-      _ChatsTab(agent: agent),
+      _ChatsTab(agent: agent, selecting: _chatsSelecting),
       SkillsScreen(agent: agent, embedded: true),
       _ProjectsTab(agent: agent),
     ];
-    return Scaffold(
+    // Back from Chats, Skills or Projects goes to Home, as in other apps; only Back from Home leaves the app.
+    return PopScope(
+      canPop: tab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_chatsSelecting.value) setState(() => tab = 0);
+      },
+      child: Scaffold(
       extendBody: true,
       // Every tab stays built (scroll positions survive); the active one fades
       // and drifts in, the others fade out and stop ticking.
       body: Stack(
         children: [
-          for (var i = 0; i < tabs.length; i++) _TabLayer(active: i == tab, forward: i >= tab, child: tabs[i]),
+          for (var i = 0; i < tabs.length; i++)
+            _TabLayer(active: i == tab, forward: i >= tab, child: ContentWidth(child: tabs[i])),
         ],
       ),
       bottomNavigationBar: _NavBar(index: tab, onTap: (i) => setState(() => tab = i), onCreate: _newChat),
+      ),
     );
   }
 }
@@ -378,14 +390,14 @@ class _TabLayerState extends State<_TabLayer> {
           ignoring: !active,
           child: AnimatedOpacity(
             opacity: active ? 1 : 0,
-            duration: const Duration(milliseconds: 240),
+            duration: Motion.of(context, const Duration(milliseconds: 240)),
             curve: Curves.easeOutCubic,
             onEnd: () {
               if (!widget.active && mounted) setState(() => hidden = true);
             },
             child: AnimatedSlide(
               offset: active ? Offset.zero : Offset(widget.forward ? 0.04 : -0.04, 0),
-              duration: const Duration(milliseconds: 300),
+              duration: Motion.of(context, const Duration(milliseconds: 300)),
               curve: Curves.easeOutCubic,
               child: widget.child,
             ),
@@ -413,6 +425,11 @@ class _NavBar extends StatelessWidget {
     (LucideIcons.folders, 'Projects'),
   ];
 
+  static double _side(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    return w > 600 ? (w - 564) / 2 : 18;
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -427,8 +444,9 @@ class _NavBar extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           children: [
             Positioned(
-              left: 18,
-              right: 18,
+              // A bar the width of a tablet is a long reach between its tabs: it stays phone-sized, centred.
+              left: _side(context),
+              right: _side(context),
               bottom: 12,
               child: Container(
                 height: 68,
@@ -517,7 +535,7 @@ class _NavItemState extends State<_NavItem> {
                 // The white disc grows in with a little overshoot.
                 AnimatedScale(
                   scale: selected ? 1 : 0,
-                  duration: const Duration(milliseconds: 380),
+                  duration: Motion.of(context, const Duration(milliseconds: 380)),
                   curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
                   child: Container(
                     width: 48,
@@ -527,11 +545,11 @@ class _NavItemState extends State<_NavItem> {
                 ),
                 AnimatedScale(
                   scale: pressed ? 0.8 : (selected ? 1.08 : 1),
-                  duration: const Duration(milliseconds: 220),
+                  duration: Motion.of(context, const Duration(milliseconds: 220)),
                   curve: Curves.easeOutBack,
                   child: TweenAnimationBuilder<Color?>(
                     tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
-                    duration: const Duration(milliseconds: 220),
+                    duration: Motion.of(context, const Duration(milliseconds: 220)),
                     builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
                   ),
                 ),
@@ -576,7 +594,7 @@ class _CreateButtonState extends State<_CreateButton> {
         },
         child: AnimatedScale(
           scale: pressed ? 0.9 : 1,
-          duration: const Duration(milliseconds: 160),
+          duration: Motion.of(context, const Duration(milliseconds: 160)),
           curve: Curves.easeOutBack,
           child: Container(
             width: 66,
@@ -591,7 +609,7 @@ class _CreateButtonState extends State<_CreateButton> {
             ),
             child: AnimatedRotation(
               turns: turns,
-              duration: const Duration(milliseconds: 420),
+              duration: Motion.of(context, const Duration(milliseconds: 420)),
               curve: Curves.easeOutBack,
               child: Icon(LucideIcons.plus, size: 28, color: p.onAccent),
             ),
@@ -903,7 +921,7 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                     Expanded(child: Text(tr('Recent'), style: text.titleLarge)),
                     TextButton(
                       onPressed: widget.onSeeAll,
-                      style: TextButton.styleFrom(foregroundColor: context.palette.accent),
+                      style: TextButton.styleFrom(foregroundColor: context.palette.accentText),
                       child: Text(tr('See all')),
                     ),
                   ],
@@ -916,6 +934,13 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                         .where((s) => s.messageCount > 0)
                         .take(5)
                         .toList();
+                    // A list that could not be read says so, with a retry (it stayed blank).
+                    if (snap.hasError) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: ErrorNotice(error: snap.error, onRetry: _refresh),
+                      );
+                    }
                     if (!snap.hasData) return const SizedBox(height: 60);
                     if (list.isEmpty) {
                       return Padding(
@@ -956,8 +981,15 @@ class _ConnectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A near-black card on the light theme; on the dark one that was the page's own colour (0xFF111113 on 0xFF0B0B0D),
+    // so it gets a lighter fill and an edge there.
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.xl)),
+      decoration: BoxDecoration(
+        color: dark ? connectCardDark : const Color(0xFF111113),
+        borderRadius: BorderRadius.circular(Radii.xl),
+        border: dark ? Border.all(color: Colors.white.withValues(alpha: 0.14)) : null,
+      ),
       clipBehavior: Clip.antiAlias,
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -1041,17 +1073,25 @@ class _PillChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: selected ? p.text : Colors.transparent,
-      shape: const StadiumBorder(),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
+    // A 48 dp touch box around the 38 dp pill it draws.
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: TapTarget(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.muted),
+        child: Material(
+          color: selected ? p.text : Colors.transparent,
+          shape: const StadiumBorder(),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.muted),
+              ),
+            ),
           ),
         ),
       ),
@@ -1231,8 +1271,11 @@ class _SessionRow extends StatelessWidget {
 // Chats
 
 class _ChatsTab extends StatefulWidget {
-  const _ChatsTab({required this.agent});
+  const _ChatsTab({required this.agent, this.selecting});
   final AgentController agent;
+
+  /// Told whether chats are being picked, so Home's Back leaves that first.
+  final ValueNotifier<bool>? selecting;
 
   @override
   State<_ChatsTab> createState() => _ChatsTabState();
@@ -1241,6 +1284,15 @@ class _ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<_ChatsTab> {
   late Future<List<SessionSummary>> sessions = widget.agent.listSessions();
   String query = '';
+
+  /// Kept by the tab: the list builds its rows lazily, and a search field rebuilt from nothing would lose its text.
+  final _query = TextEditingController();
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
 
   /// Paths of chats picked for deleting; selection mode is on while it is not empty.
   final _selected = <String>{};
@@ -1252,7 +1304,7 @@ class _ChatsTabState extends State<_ChatsTab> {
   });
 
   Future<void> _menu(SessionSummary s) async {
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Padding(
@@ -1363,23 +1415,30 @@ class _ChatsTabState extends State<_ChatsTab> {
             groups.putIfAbsent(_bucket(s.modified), () => []).add(s);
           }
           final selecting = _selected.isNotEmpty;
+          final told = widget.selecting;
+          if (told != null && told.value != selecting) WidgetsBinding.instance.addPostFrameCallback((_) => told.value = selecting);
           return PopScope(
             // Back leaves selection mode first.
             canPop: !selecting,
             onPopInvokedWithResult: (didPop, _) {
               if (!didPop) setState(_selected.clear);
             },
-            child: RefreshIndicator(
-              onRefresh: () async => _reload(),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
-                children: [
-                  if (selecting)
-                    SizedBox(height: text.displaySmall!.fontSize! * 1.25, child: _selectionBar(all))
-                  else
-                    Text(tr('Chats'), style: text.displaySmall),
-                  const SizedBox(height: 16),
-                  TextField(
+            // Only what is on screen is built, and the rows are not rebuilt every time the agent reports (about 30 times
+            // a second while it streams): the list listens for the one thing a row shows from it, the chat being opened.
+            child: _OnSwitching(
+              agent: agent,
+              builder: (context, switchingTo) {
+                final rows = <Widget Function(BuildContext)>[
+                  (_) => selecting
+                      // At least the title's height (no jump between the two), and room for 48 dp buttons at any text size.
+                      ? ConstrainedBox(
+                          constraints: BoxConstraints(minHeight: text.displaySmall!.fontSize! * 1.25),
+                          child: _selectionBar(all),
+                        )
+                      : Text(tr('Chats'), style: text.displaySmall),
+                  (_) => const SizedBox(height: 16),
+                  (_) => TextField(
+                    controller: _query,
                     onChanged: (v) => setState(() {
                       query = v;
                     }),
@@ -1388,47 +1447,59 @@ class _ChatsTabState extends State<_ChatsTab> {
                       prefixIcon: const Icon(LucideIcons.search, size: 18),
                     ),
                   ),
-                  if (!snap.hasData)
-                    const Padding(
+                  // A list that could not be read says so, with a retry (it spun forever).
+                  if (snap.hasError)
+                    (_) => Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: ErrorNotice(error: snap.error, onRetry: _reload, center: true),
+                    )
+                  else if (!snap.hasData)
+                    (_) => const Padding(
                       padding: EdgeInsets.all(40),
                       child: Center(child: BusySpinner.page()),
                     )
                   else if (all.isEmpty)
-                    Padding(
+                    (_) => Padding(
                       padding: const EdgeInsets.only(top: 40),
                       child: Column(
                         children: [
                           if (q.isEmpty) const Illustration('chat', height: 200),
                           const SizedBox(height: 12),
                           Text(
-                            q.isEmpty ? 'No chats yet. Tap + to start one.' : 'Nothing matches.',
+                            tr(q.isEmpty ? 'No chats yet. Tap + to start one.' : 'Nothing matches.'),
                             style: text.bodySmall,
                           ),
                         ],
                       ),
                     ),
                   for (final e in groups.entries) ...[
-                    SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
+                    (_) => SectionLabel(tr(e.key), padding: const EdgeInsets.fromLTRB(2, 22, 2, 4)),
                     for (final s in e.value)
-                      ListenableBuilder(
-                        listenable: agent,
-                        builder: (context, _) => _SessionRow(
-                          session: s,
-                          workspace: ws,
-                          selected: selecting ? _selected.contains(s.path) : null,
-                          busy: agent.switchingTo == s.path,
-                          onLongPress: () => selecting ? _toggle(s) : _menu(s),
-                          onTap: () async {
-                            if (selecting) return _toggle(s);
-                            if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
-                            if (context.mounted) await openChat(context, agent);
-                            _reload();
-                          },
-                        ),
+                      (context) => _SessionRow(
+                        session: s,
+                        workspace: ws,
+                        selected: selecting ? _selected.contains(s.path) : null,
+                        busy: switchingTo == s.path,
+                        onLongPress: () => selecting ? _toggle(s) : _menu(s),
+                        onTap: () async {
+                          if (selecting) return _toggle(s);
+                          if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                          if (context.mounted) await openChat(context, agent);
+                          _reload();
+                        },
                       ),
                   ],
-                ],
-              ),
+                ];
+                return RefreshIndicator(
+                  onRefresh: () async => _reload(),
+                  child: ListView.builder(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
+                    itemCount: rows.length,
+                    itemBuilder: (context, i) => rows[i](context),
+                  ),
+                );
+              },
             ),
           );
         },
@@ -1494,7 +1565,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
   }
 
   Future<void> _projectMenu(ProjectInfo project) async {
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Padding(
@@ -1622,8 +1693,9 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 130),
                     sliver: SliverGrid.builder(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
+                      // Two tiles across on a phone, more on a wider screen, instead of two huge ones.
+                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 230,
                         mainAxisSpacing: 18,
                         crossAxisSpacing: 14,
                         childAspectRatio: 0.82,
@@ -1713,3 +1785,39 @@ class _ProjectsTabState extends State<_ProjectsTab> {
     );
   }
 }
+
+/// Rebuilds [builder] when the chat being opened changes, and not on the agent's other reports.
+class _OnSwitching extends StatefulWidget {
+  const _OnSwitching({required this.agent, required this.builder});
+  final AgentController agent;
+  final Widget Function(BuildContext context, String? switchingTo) builder;
+
+  @override
+  State<_OnSwitching> createState() => _OnSwitchingState();
+}
+
+class _OnSwitchingState extends State<_OnSwitching> {
+  late String? _switching = widget.agent.switchingTo;
+
+  void _changed() {
+    if (widget.agent.switchingTo != _switching) setState(() => _switching = widget.agent.switchingTo);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.agent.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    widget.agent.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _switching);
+}
+
+/// The connect card's fill on the dark theme: set apart from the page, with room for its white text.
+const connectCardDark = Color(0xFF26262C);

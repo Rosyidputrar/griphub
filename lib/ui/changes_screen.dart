@@ -539,7 +539,7 @@ class _UndoCheckpointDialogState extends State<UndoCheckpointDialog> {
         FilledButton(
           style: removes.isEmpty || deleting == 0
               ? null
-              : FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white),
+              : dangerButtonStyle(context),
           onPressed: () => Navigator.pop(context, _keep.toList()),
           child: Text(tr('Undo changes')),
         ),

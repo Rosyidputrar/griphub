@@ -75,12 +75,28 @@ export interface SubagentToolCall {
 	name: string;
 	/** One-line summary of the arguments (paths, commands, queries), never the full blob. */
 	args: string;
+	/**
+	 * The arguments themselves, for the detail view: the whole command, a file's content, an edit's old and new text.
+	 * Each string is capped (INPUT_STRING_CAP).
+	 */
+	input?: Record<string, unknown>;
 	/** Tool result, capped so one record cannot flood the JSONL stream. */
 	output: string;
+	/** Pictures in the result (a `read` of an image), as base64; a few, and small ones only (see keepImages). */
+	images?: { mimeType: string; data: string }[];
 	status: "running" | "done" | "failed";
 	startedAt: number;
 	finishedAt?: number;
 }
+
+/**
+ * One step of a subagent's work, in the order it happened, as the chat shows its own: what the model thought, what it
+ * wrote between tool calls, where each tool call came, and what the person sent it while it worked. Kept in the record
+ * so the detail view shows it after a reconnect too; capped (TIMELINE_CAP, TIMELINE_TEXT_CAP).
+ */
+export type SubagentTimelineEntry =
+	| { kind: "thinking" | "text" | "user"; text: string; at: number }
+	| { kind: "tool"; id: string; at: number };
 
 /**
  * Why a subagent stopped, as a stable code the app localizes. `stopReason`
@@ -108,6 +124,8 @@ export interface SubagentRecord {
 	/** English activity line, kept for older app builds; the app builds its own from currentTool/currentArgs. */
 	currentActivity?: string;
 	toolCalls: SubagentToolCall[];
+	/** What it thought, wrote, called and was sent, in order (see SubagentTimelineEntry). */
+	timeline: SubagentTimelineEntry[];
 	queue: QueuedMessage[];
 	inputTokens: number;
 	outputTokens: number;
@@ -141,7 +159,17 @@ export const MAX_RUNNING = 3;
 /** A parent brief longer than this is refused instead of truncated silently. */
 export const MAX_TASK_CHARS = 20_000;
 /** Characters of tool output kept per call in the record. */
-export const TOOL_OUTPUT_CAP = 4000;
+export const TOOL_OUTPUT_CAP = 16_000;
+/** Characters kept of each string in a tool call's arguments (a command, a file being written). */
+export const INPUT_STRING_CAP = 20_000;
+/** Steps kept in the timeline; older ones drop off the head. */
+export const TIMELINE_CAP = 400;
+/** Characters kept of one block of thinking or text. */
+export const TIMELINE_TEXT_CAP = 12_000;
+/** Pictures kept per tool call, the largest one kept (base64 characters), and all of a subagent's together. */
+export const IMAGES_PER_CALL = 2;
+export const IMAGE_MAX = 700_000;
+export const IMAGES_TOTAL = 3_000_000;
 /** Tool calls kept per subagent; older ones drop off the head. */
 export const TOOL_CALLS_CAP = 200;
 
@@ -170,6 +198,8 @@ export interface SubagentHooks {
 	wireEvent(event: AgentSessionEvent): object;
 	createSession: SubagentSessionFactory;
 	limits(): SubagentLimits;
+	/** Throws when the daily budget is used up: a subagent costs a full request before any limit of its own can stop it. */
+	checkBudget?(): void;
 }
 
 /**
@@ -281,6 +311,63 @@ function contentText(content: unknown): string {
 
 function capText(text: string): string {
 	return text.length > TOOL_OUTPUT_CAP ? `${text.slice(0, TOOL_OUTPUT_CAP)}… (truncated)` : text;
+}
+
+function capTimelineText(text: string): string {
+	return text.length > TIMELINE_TEXT_CAP ? `${text.slice(0, TIMELINE_TEXT_CAP)}… (truncated)` : text;
+}
+
+/** A tool call's arguments with each string capped, so a huge file being written does not flood the record. */
+export function capInput(args: unknown): Record<string, unknown> | undefined {
+	if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+	const cap = (v: unknown, depth: number): unknown => {
+		if (typeof v === "string") return v.length > INPUT_STRING_CAP ? `${v.slice(0, INPUT_STRING_CAP)}… (truncated)` : v;
+		if (depth > 4 || v === null || typeof v !== "object") return v;
+		if (Array.isArray(v)) return v.slice(0, 50).map((x) => cap(x, depth + 1));
+		return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, cap(x, depth + 1)]));
+	};
+	return cap(args, 0) as Record<string, unknown>;
+}
+
+export function pushTimeline(rec: SubagentRecord, entry: SubagentTimelineEntry) {
+	rec.timeline.push(entry);
+	if (rec.timeline.length > TIMELINE_CAP) rec.timeline.splice(0, rec.timeline.length - TIMELINE_CAP);
+}
+
+/** The thinking, text and tool-call places of one assistant message, appended in its order. */
+export function appendMessage(rec: SubagentRecord, m: any) {
+	const at = Date.now();
+	for (const c of Array.isArray(m?.content) ? m.content : []) {
+		if (c?.type === "thinking" && typeof c.thinking === "string" && c.thinking.trim()) {
+			pushTimeline(rec, { kind: "thinking", text: capTimelineText(c.thinking), at });
+		} else if (c?.type === "text" && typeof c.text === "string" && c.text.trim()) {
+			pushTimeline(rec, { kind: "text", text: capTimelineText(c.text), at });
+		} else if (c?.type === "toolCall" && c.id != null) {
+			pushTimeline(rec, { kind: "tool", id: String(c.id), at });
+		}
+	}
+}
+
+/**
+ * The pictures of a tool result worth keeping in the record: a few per call, none over IMAGE_MAX, and all of a
+ * subagent's together under IMAGES_TOTAL (the oldest give way). Base64, as the model got them.
+ */
+export function keepImages(rec: SubagentRecord, content: unknown): { mimeType: string; data: string }[] {
+	if (!Array.isArray(content)) return [];
+	const fresh = content
+		.filter((c: any) => c?.type === "image" && typeof c.data === "string" && c.data.length <= IMAGE_MAX)
+		.slice(0, IMAGES_PER_CALL)
+		.map((c: any) => ({ mimeType: String(c.mimeType ?? "image/png"), data: String(c.data) }));
+	if (!fresh.length) return [];
+	let total = fresh.reduce((n, i) => n + i.data.length, 0);
+	for (const call of rec.toolCalls) total += (call.images ?? []).reduce((n, i) => n + i.data.length, 0);
+	for (const call of rec.toolCalls) {
+		if (total <= IMAGES_TOTAL) break;
+		if (!call.images?.length) continue;
+		total -= call.images.reduce((n, i) => n + i.data.length, 0);
+		delete call.images;
+	}
+	return total <= IMAGES_TOTAL ? fresh : [];
 }
 
 function formatDuration(ms: number): string {
@@ -404,6 +491,7 @@ export class SubagentManager {
 	 */
 	start(parent: SubagentParent, brief: string, profile: SubagentProfile, toolCallId?: string): SubagentRecord {
 		if (this.closing) throw new Error("The agent is shutting down; the subagent was not started");
+		this.hooks.checkBudget?.();
 		const clean = brief.trim();
 		if (!clean) throw new Error("The subagent task is empty");
 		if (clean.length > MAX_TASK_CHARS) throw new Error(`The subagent task is longer than ${MAX_TASK_CHARS} characters`);
@@ -419,6 +507,7 @@ export class SubagentManager {
 			status: "queued",
 			createdAt: Date.now(),
 			toolCalls: [],
+			timeline: [],
 			queue: [],
 			inputTokens: 0,
 			outputTokens: 0,
@@ -663,10 +752,15 @@ export class SubagentManager {
 					id: String(e.toolCallId),
 					name: String(e.toolName),
 					args: argsSummary(e.toolName, e.args),
+					input: capInput(e.args),
 					output: "",
 					status: "running",
 					startedAt: Date.now(),
 				});
+				// A call the model's message did not list (it always does with pi) still gets its place.
+				if (!rec.timeline.some((t) => t.kind === "tool" && t.id === String(e.toolCallId))) {
+					pushTimeline(rec, { kind: "tool", id: String(e.toolCallId), at: Date.now() });
+				}
 				if (rec.toolCalls.length > TOOL_CALLS_CAP) {
 					rec.toolCalls.splice(0, rec.toolCalls.length - TOOL_CALLS_CAP);
 				}
@@ -681,6 +775,8 @@ export class SubagentManager {
 				const call = rec.toolCalls.find((c) => c.id === String(e.toolCallId));
 				if (call) {
 					call.output = capText(contentText(e.result?.content));
+					const images = keepImages(rec, e.result?.content);
+					if (images.length) call.images = images;
 					call.status = e.isError === true ? "failed" : "done";
 					call.finishedAt = Date.now();
 				}
@@ -692,6 +788,8 @@ export class SubagentManager {
 			}
 			case "message_end": {
 				const m = e.message;
+				// What the model thought and wrote, and where its tool calls came, in the order of the message.
+				if (m?.role === "assistant") appendMessage(rec, m);
 				if (m?.role === "assistant") {
 					// A later answer (pi's auto-retry succeeding) clears an earlier error.
 					rt.lastError = m.stopReason === "error" ? String(m.errorMessage ?? "Model error") : undefined;
@@ -725,6 +823,10 @@ export class SubagentManager {
 		if (over) return this.finish(rt, "stopped", over.reason, over.code);
 		if (rec.queue.length > 0) {
 			const next = rec.queue.shift()!;
+			// What the person sent stays in the timeline once it has gone (it used to vanish with the queue entry).
+			const at = Date.now();
+			pushTimeline(rec, { kind: "user", text: capTimelineText(next.text), at });
+			this.hooks.send({ type: "subagent_event", subagentId: rec.id, event: { type: "subagent_user_message", text: next.text, at } });
 			this.hooks.send({ type: "subagent_queued", subagentId: rec.id, queue: rec.queue });
 			rt.settling = false;
 			rt.session?.prompt(next.text).catch((e: unknown) => {

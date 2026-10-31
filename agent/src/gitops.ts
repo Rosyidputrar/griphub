@@ -3,10 +3,20 @@
 import { spawn } from "node:child_process";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
+import { assertRepoConfigSafe, gitEnv, SAFE_GIT_FLAGS } from "./gitsafe.js";
 
-function git(cwd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+/** For a diff: no external diff program and no text-conversion program, whatever the project's settings say. */
+const NO_PROGRAMS = ["--no-ext-diff", "--no-textconv"];
+
+/**
+ * Runs git in a project folder. The agent can write that folder's git settings, so every call here goes through
+ * gitsafe.ts: flags that turn off the programs git would take from them, a refusal when the settings name one the flags
+ * cannot turn off, and an environment with no tokens (see there).
+ */
+async function git(cwd: string, args: string[]): Promise<{ code: number; out: string; err: string }> {
+	await assertRepoConfigSafe(cwd);
 	return new Promise((resolve, reject) => {
-		const child = spawn("git", args, { cwd, env: process.env });
+		const child = spawn("git", [...SAFE_GIT_FLAGS, ...args], { cwd, env: gitEnv() });
 		let out = "";
 		let err = "";
 		child.stdout.on("data", (c) => (out += c));
@@ -93,13 +103,13 @@ export async function status(cwd: string) {
 export async function diff(cwd: string, file?: string, staged = false) {
 	// A file's path comes from the status: relative to the top. The whole diff stays the project folder's own.
 	if (file) cwd = await top(cwd);
-	const args = ["diff", "--no-color", "-U3"];
+	const args = ["diff", ...NO_PROGRAMS, "--no-color", "-U3"];
 	if (staged) args.push("--cached");
 	if (file) args.push("--", file);
 	let patch = await ok(cwd, args);
 	// Untracked files have no diff; show them as all-new.
 	if (!patch && file && !staged) {
-		const r = await git(cwd, ["diff", "--no-color", "--no-index", "/dev/null", file]);
+		const r = await git(cwd, ["diff", ...NO_PROGRAMS, "--no-color", "--no-index", "/dev/null", file]);
 		patch = r.out;
 	}
 	return { patch };
@@ -124,7 +134,20 @@ export async function discard(cwd: string, paths: string[]) {
 	}
 }
 
-export async function commit(cwd: string, message: string, all: boolean) {
+/**
+ * Commits. With [paths] (relative to the top of the repository, as the status lists them), exactly those files and
+ * nothing else: they are staged, and the commit is limited to them, so a file the agent left staged that the person did
+ * not pick stays out, and so does everything untracked that was not picked. [all] adds everything (`add -A`).
+ */
+export async function commit(cwd: string, message: string, all: boolean, paths?: string[]) {
+	if (paths) {
+		if (!paths.length) throw new Error("No files were selected to commit.");
+		const root = await top(cwd);
+		// Literal: a name such as `*.env` or `:(top)x` is that file, not a pattern.
+		await ok(root, ["--literal-pathspecs", "add", "-A", "--", ...paths]);
+		await ok(root, ["--literal-pathspecs", "commit", "-q", "-m", message, "--", ...paths]);
+		return (await ok(root, ["log", "-1", "--format=%h %s"])).trim();
+	}
 	if (all) await ok(cwd, ["add", "-A"]);
 	await ok(cwd, ["commit", "-q", "-m", message]);
 	return (await ok(cwd, ["log", "-1", "--format=%h %s"])).trim();
@@ -165,7 +188,7 @@ export async function review(cwd: string) {
 	if (!st.repo) return { ...st, stats: {} as Record<string, FileStat> };
 	const stats: Record<string, FileStat> = {};
 	const hasHead = (await git(st.root, ["rev-parse", "--verify", "-q", "HEAD"])).code === 0;
-	const numstat = await git(st.root, hasHead ? ["diff", "--numstat", "-z", "HEAD"] : ["diff", "--numstat", "-z", "--cached"]);
+	const numstat = await git(st.root, hasHead ? ["diff", ...NO_PROGRAMS, "--numstat", "-z", "HEAD"] : ["diff", ...NO_PROGRAMS, "--numstat", "-z", "--cached"]);
 	// "adds\tdels\tpath\0", or for a rename "adds\tdels\t\0from\0to\0".
 	const parts = numstat.out.split("\0");
 	for (let i = 0; i < parts.length; i++) {
@@ -188,8 +211,8 @@ export async function changeSummary(cwd: string, max = 16_000) {
 	if (!st.repo) return null;
 	const hasHead = (await git(st.root, ["rev-parse", "--verify", "-q", "HEAD"])).code === 0;
 	const base = hasHead ? ["HEAD"] : ["--cached"];
-	const stat = (await git(st.root, ["diff", "--stat=100", ...base])).out.trim();
-	let patch = (await git(st.root, ["diff", "--no-color", "-U1", ...base])).out;
+	const stat = (await git(st.root, ["diff", ...NO_PROGRAMS, "--stat=100", ...base])).out.trim();
+	let patch = (await git(st.root, ["diff", ...NO_PROGRAMS, "--no-color", "-U1", ...base])).out;
 	if (patch.length > max) patch = `${patch.slice(0, max)}\n[... the rest of the diff is cut]`;
 	const untracked = st.files.filter((f) => f.untracked).map((f) => f.path);
 	return { stat, patch, untracked, files: st.files.length };
@@ -238,9 +261,29 @@ export async function pull(cwd: string, log: (l: string) => void) {
 
 export async function push(cwd: string, log: (l: string) => void) {
 	const branch = (await ok(cwd, ["branch", "--show-current"])).trim();
+	await pushLfsObjects(cwd, log);
 	const r = await git(cwd, ["push", "-u", "origin", `HEAD:${branch}`]);
 	log((r.out + r.err).trim());
 	if (r.code !== 0) throw new Error((r.err || r.out).trim().split("\n").slice(-3).join("\n"));
+}
+
+/**
+ * A project that uses Git LFS keeps big files as small pointers in its commits and the files themselves on the LFS
+ * server. LFS uploads them from a `pre-push` hook, and the host runs git with hooks off (SAFE_GIT_FLAGS), so that hook
+ * never runs: the remote would get pointers whose files are nowhere. Upload them here, before the push, the way the
+ * hook would. `git lfs push` runs no hook and no program from the project's settings (lfs.extension.*, a custom
+ * transfer agent and filters other than git-lfs's own are refused by assertRepoConfigSafe).
+ */
+async function pushLfsObjects(cwd: string, log: (l: string) => void) {
+	// The filter is what `git lfs install` leaves in the repository's settings (or in the user's global ones).
+	const uses = (await git(cwd, ["config", "--get", "filter.lfs.clean"])).code === 0;
+	if (!uses) return;
+	const r = await git(cwd, ["lfs", "push", "origin", "HEAD"]);
+	log((r.out + r.err).trim());
+	if (r.code !== 0) {
+		const why = (r.err || r.out).trim().split("\n").slice(-3).join("\n");
+		throw new Error(`This project uses Git LFS, and its large files could not be uploaded, so nothing was pushed.\n${why}`);
+	}
 }
 
 export function githubSlug(remote: string | null) {

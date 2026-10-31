@@ -372,7 +372,7 @@ class _DnsOption extends StatelessWidget {
       subtitle: subtitle,
       onTap: onTap,
       trailing: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+        duration: Motion.of(context, const Duration(milliseconds: 150)),
         width: 22,
         height: 22,
         decoration: BoxDecoration(

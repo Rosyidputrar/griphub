@@ -194,7 +194,7 @@ int _fileSize(File file) {
 Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
   final clipboardImage = await client?.clipboardHasImage() ?? false;
   if (!context.mounted) return const [];
-  final choice = await showModalBottomSheet<String>(
+  final choice = await showAppSheet<String>(
     context: context,
     builder: (context) => SafeArea(
       child: Padding(
@@ -448,7 +448,6 @@ Future<bool?> showPastedSheet(BuildContext context, String text) => showModalBot
 /// The agent is mid-turn and the user picked another chat: stop it and
 /// switch, or stay. Switching without stopping would drop the reply.
 Future<bool> confirmStopToSwitch(BuildContext context) async {
-  final p = context.palette;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -459,7 +458,7 @@ Future<bool> confirmStopToSwitch(BuildContext context) async {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white),
+          style: dangerButtonStyle(context),
           onPressed: () => Navigator.pop(context, true),
           child: Text(tr('Stop and switch')),
         ),
@@ -545,10 +544,18 @@ Future<bool> confirmBypass(BuildContext context) async =>
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Bypass all permissions?')),
-        content: Text(tr('The agent will run every command, edit any file and use every tool without asking.')),
+        content: Text(
+          tr(
+            'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.',
+          ),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Bypass'))),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: dangerButtonStyle(context),
+            child: Text(tr('Bypass')),
+          ),
         ],
       ),
     ) ??
@@ -559,8 +566,11 @@ Future<bool> confirmBypass(BuildContext context) async =>
 /// this, the second half of a double-tap lands on the NEXT card's Allow
 /// button and approves an action the user never saw.
 class ApprovalCards extends StatefulWidget {
-  const ApprovalCards({super.key, required this.features});
+  const ApprovalCards({super.key, required this.features, this.agent});
   final Features features;
+
+  /// The chat's agent: "Bypass all permissions" on a card goes through it, so the chat shows at once that it is on.
+  final AgentController? agent;
 
   @override
   State<ApprovalCards> createState() => _ApprovalCardsState();
@@ -689,11 +699,21 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                 TextButton.icon(
                   onPressed: () async {
                     if (!await confirmBypass(context)) return;
-                    await widget.features.client.call('settings_set', {
-                      'settings': {'approvalMode': 'auto'},
-                    });
-                    for (final pending in [...widget.features.approvals]) {
-                      await widget.features.answer(pending, allow: true);
+                    try {
+                      final agent = widget.agent;
+                      if (agent != null) {
+                        await agent.setApprovalMode('auto');
+                      } else {
+                        await widget.features.client.call('settings_set', {
+                          'settings': {'approvalMode': 'auto'},
+                        });
+                      }
+                      for (final pending in [...widget.features.approvals]) {
+                        await widget.features.answer(pending, allow: true);
+                      }
+                    } catch (e) {
+                      // Offline, or the host did not take it: the cards that were not answered are still here.
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                     }
                   },
                   style: TextButton.styleFrom(foregroundColor: p.muted),
@@ -729,28 +749,44 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
     if (_responded) return;
     setState(() => _responded = true);
     widget.onAnswered?.call();
-    await widget.features.answer(widget.approval, allow: allow, always: always);
+    try {
+      await widget.features.answer(widget.approval, allow: allow, always: always);
+    } catch (e) {
+      // The answer did not get to the host, which is still waiting for it: the card is back, and can be answered again.
+      if (!mounted) return;
+      setState(() => _responded = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // A server agent keeps waiting while the link is down; an answer tapped now could only get lost.
+    return ValueListenableBuilder<Connection>(
+      valueListenable: widget.features.client.connection,
+      builder: (context, link, _) => _buttons(context, offline: !link.connected),
+    );
+  }
+
+  Widget _buttons(BuildContext context, {required bool offline}) {
     final p = context.palette;
+    final blocked = _responded || offline;
     final deny = OutlinedButton(
-      onPressed: _responded ? null : () => _answer(allow: false),
+      onPressed: blocked ? null : () => _answer(allow: false),
       style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
       child: Text(tr('Deny')),
     );
     final always = OutlinedButton(
-      onPressed: _responded ? null : () => _answer(allow: true, always: true),
+      onPressed: blocked ? null : () => _answer(allow: true, always: true),
       style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
       child: Text(tr('Always')),
     );
     final allow = FilledButton(
-      onPressed: _responded ? null : () => _answer(allow: true),
+      onPressed: blocked ? null : () => _answer(allow: true),
       style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
       child: Text(tr('Allow')),
     );
-    return LayoutBuilder(
+    final buttons = LayoutBuilder(
       builder: (context, constraints) {
         // Equal thirds must fit the widest label; on a narrow phone with large text "Izinkan" broke into "Izin/kan".
         final style = Theme.of(context).textTheme.labelLarge;
@@ -783,6 +819,63 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
           ],
         );
       },
+    );
+    if (!offline) return buttons;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        buttons,
+        const SizedBox(height: 8),
+        Text(
+          tr('Not connected. The agent is still waiting for your answer: reconnect to answer.'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bypass
+
+/// While approvals are bypassed (for every chat, until turned off) the chat says so: the agent acts without asking, and
+/// nothing else on the screen would remind anyone. One tap puts the question back.
+class BypassBar extends StatelessWidget {
+  const BypassBar({super.key, required this.agent});
+  final AgentController agent;
+
+  Future<void> _turnOff(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await agent.setApprovalMode('ask_risky');
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (agent.approvalMode != 'auto') return const SizedBox.shrink();
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+        decoration: BoxDecoration(color: p.danger.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.lg)),
+        child: Row(
+          children: [
+            Icon(LucideIcons.shieldOff, size: 16, color: p.danger),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                tr('Permissions bypassed: the agent acts without asking, in every chat.'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.text),
+              ),
+            ),
+            TextButton(onPressed: () => _turnOff(context), child: Text(tr('Turn off'))),
+          ],
+        ),
+      ),
     );
   }
 }

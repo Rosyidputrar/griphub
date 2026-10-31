@@ -3,7 +3,7 @@
 // phone puts where.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { bundle, tempDir } from "./helpers.mjs";
 
@@ -200,4 +200,113 @@ test("restored on the phone: chats moved to its workspace, secrets kept encrypte
 	write(to.home, ".ssh/id_ed25519", "PHONE KEY");
 	assert.equal(restoreBackup(zip, to).keptSshKey, true);
 	assert.equal(readFileSync(join(to.home, ".ssh/id_ed25519"), "utf8"), "PHONE KEY");
+});
+
+test("a store that cannot be read is left out of a backup (it used to be saved as `null`), and restoring a `null` store writes nothing", async (t) => {
+	const s = server(t);
+	const damaged = join(s.agentDir, "griphub", "custom-providers.json");
+	writeFileSync(damaged, readFileSync(damaged).subarray(0, 30)); // cut short
+	const b = backups(t, s);
+	b.configure(KEY);
+	const made = await b.tick();
+	const files = backupFiles(made.path, KEY, join(s.root, "plain.zip"));
+	assert.ok(!files.has("secure/griphub/custom-providers.json"), "not stored as null");
+	assert.ok(files.has("secure/griphub/integrations.json"), "the readable one is");
+	const zipPath = join(s.root, "again.zip");
+	decryptBackup(made.path, KEY, zipPath);
+	const skipped = readManifest(zipPath).skipped;
+	assert.ok(skipped.some((x) => x.name === "secure/griphub/custom-providers.json" && /could not be read/.test(x.why)), JSON.stringify(skipped));
+
+	// A backup made before this fix holds `null` for it; restoring must leave the phone's own store alone.
+	const phone = tempDir(t, "phone-");
+	const to = { agentDir: join(phone, "agent"), workspace: join(phone, "workspace"), home: join(phone, "home") };
+	mkdirSync(join(to.agentDir, "griphub"), { recursive: true });
+	const mine = join(to.agentDir, "griphub", "custom-providers.json");
+	writeSecureJson(mine, [{ id: "griphub", apiKey: "sk-phone" }]);
+	const { writeZip } = await bundle("workbench");
+	const zip = join(s.root, "nulls.zip");
+	writeFileSync(zip, writeZip([{ name: "secure/griphub/custom-providers.json", data: Buffer.from("null") }, { name: "manifest.json", data: Buffer.from("{}") }]));
+	restoreBackup(zip, to);
+	assert.equal(readSecureJson(mine, [])[0].apiKey, "sk-phone", "the phone's store is untouched");
+});
+
+test("the workspace's dot folders and build output stay out of a backup; project files, dot files and .git stay in", async (t) => {
+	const s = server(t);
+	// What grew a real server's backup from 88 MB to 719 MB: a toolchain in a dot folder, and build caches.
+	write(s.workspace, ".toolchains/jdk/lib/modules", "x".repeat(2000));
+	write(s.workspace, ".toolchains/android-tools.zip", "z");
+	write(s.workspace, "site/.next/cache/x.js", "cache");
+	write(s.workspace, "site/.idea/workspace.xml", "ide");
+	write(s.workspace, "griphub/build/test_cache/cache.dill", "dill");
+	write(s.workspace, "griphub/android/app/build/outputs/app.apk", "apk");
+	write(s.workspace, "tiksave/target/debug/deps/a.rlib", "rust");
+	write(s.workspace, "site/dist/bundle.js", "bundle");
+	// What belongs in it, including look-alikes: a file called build, a folder that only contains the word.
+	write(s.workspace, "site/src/build.ts", "export const a = 1;");
+	write(s.workspace, "site/src/builder/index.ts", "b");
+	write(s.workspace, "site/.gitignore", "dist\n");
+	write(s.workspace, "site/sub/.git/HEAD", "ref: refs/heads/dev\n");
+	write(s.workspace, "site/vendor/lib.go", "vendored");
+	// The agent's own tree is not filtered like this: a dot file or folder there is real data.
+	write(s.agentDir, ".state/keep.json", "{}");
+	write(s.agentDir, "sessions/build/chat.jsonl", "{}");
+
+	const b = backups(t, s);
+	b.configure(KEY);
+	const made = await b.tick();
+	const names = [...backupFiles(made.path, KEY, join(s.root, "plain.zip")).keys()];
+	for (const n of [
+		"workspace/site/index.html",
+		"workspace/site/.env",
+		"workspace/site/.git/HEAD",
+		"workspace/site/sub/.git/HEAD",
+		"workspace/site/.gitignore",
+		"workspace/site/src/build.ts",
+		"workspace/site/src/builder/index.ts",
+		"workspace/site/vendor/lib.go",
+		"agent/.state/keep.json",
+		"agent/sessions/build/chat.jsonl",
+	]) {
+		assert.ok(names.includes(n), `${n} is in it`);
+	}
+	for (const n of names) {
+		assert.ok(!/^workspace\/\.toolchains|\.next|\.idea|\/build\/|\/target\/|\/dist\//.test(n.replace(/^agent\/sessions\/build\//, "")), `${n} is left out`);
+	}
+});
+
+test("a backup that was cut short is cleaned away once it is old, never one being written or written to lately", async (t) => {
+	const s = server(t);
+	const b = backups(t, s);
+	b.configure(KEY);
+	const dir = join(s.home, ".griphub", "backups");
+	const hourAgo = (Date.now() - 3_600_000) / 1000;
+	const old = join(dir, ".auto-111.ghb.tmp");
+	const busy = join(dir, ".auto-222.ghb.tmp");
+	const fresh = join(dir, ".auto-333.ghb.tmp");
+	const other = join(dir, "notes.tmp");
+	for (const f of [old, busy, fresh, other]) write(dir, f.slice(dir.length + 1), "x".repeat(1000));
+	for (const f of [old, busy, other]) utimesSync(f, hourAgo, hourAgo);
+
+	b.writing = busy; // the file this process is writing, however still it looks
+	b.cleanTmp();
+	assert.equal(existsSync(old), false, "an old leftover is removed");
+	assert.equal(existsSync(busy), true, "the one being written stays");
+	b.writing = null;
+	write(dir, ".auto-111.ghb.tmp", "x");
+	utimesSync(old, hourAgo, hourAgo);
+
+	await b.tick();
+	assert.equal(existsSync(old), false, "an old leftover is removed after a backup");
+	assert.equal(existsSync(busy), false, "once nothing is writing it, an old one goes too");
+	assert.equal(existsSync(fresh), true, "one written to a moment ago may be another process's");
+	assert.equal(existsSync(other), true, "only unfinished backups, not any .tmp");
+	assert.equal(readdirSync(dir).filter((n) => /^auto-\d+\.ghb$/.test(n)).length, 1, "the backup itself is untouched");
+
+	// And at start, so a host that was killed mid-backup does not carry the leftover until its next backup.
+	write(dir, ".auto-444.ghb.tmp", "x");
+	utimesSync(join(dir, ".auto-444.ghb.tmp"), hourAgo, hourAgo);
+	b.start();
+	b.stop();
+	assert.equal(existsSync(join(dir, ".auto-444.ghb.tmp")), false);
+	assert.equal(existsSync(fresh), true);
 });

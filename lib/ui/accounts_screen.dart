@@ -621,7 +621,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                   ),
                   AnimatedRotation(
                     turns: _open ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
+                    duration: Motion.of(context, const Duration(milliseconds: 200)),
                     child: Padding(
                       padding: const EdgeInsets.all(10),
                       child: Icon(LucideIcons.chevronDown, size: 18, color: p.faint),

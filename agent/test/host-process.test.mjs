@@ -34,11 +34,38 @@ before(async () => {
 });
 after(() => rmSync(out, { recursive: true, force: true }));
 
+/** Every host this file starts, with the home it runs in, so a home is only removed once its hosts are gone. */
+const hosts = new Map();
+
+/** Starts a host (node with [args]) and remembers it under the home in [opts.env.HOME]. */
+function spawnHost(args, opts) {
+	const child = spawn(process.execPath, args, opts);
+	hosts.set(child, opts?.env?.HOME);
+	child.once("exit", () => hosts.delete(child));
+	return child;
+}
+
 /** A fresh phone-or-server home for one host. Short, because unix socket paths are limited to about 100 bytes. */
 function home(t) {
 	const dir = mkdtempSync(join(tmpdir(), "gh-"));
 	mkdirSync(join(dir, "workspace"));
-	t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+	// t.after hooks run in the order they were added, and this one is added before the host's own kill: removing the
+	// folder first raced a host still writing into it (installing the starter skills) and failed with ENOTEMPTY on a
+	// busy runner. The hosts living in this home are stopped, and waited for, first.
+	t.after(async () => {
+		const mine = [...hosts].filter(([, h]) => h === dir).map(([c]) => c);
+		await Promise.all(
+			mine.map((c) =>
+				c.exitCode !== null || c.signalCode !== null
+					? null
+					: new Promise((done) => {
+							c.once("exit", done);
+							c.kill("SIGKILL");
+						}),
+			),
+		);
+		rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+	});
 	return dir;
 }
 
@@ -54,6 +81,8 @@ function env(dir, extra = {}) {
 		// GRIPHUB_MODE=server would turn a phone-mode host into a server one (server mode is chosen with --listen).
 		PI_CODING_AGENT_DIR: join(dir, ".pi", "agent"),
 		GRIPHUB_MODE: undefined,
+		// The restart gate checks often, so waiting "for a few polls" is a short wait.
+		GRIPHUB_RESTART_POLL_MS: "50",
 		...extra,
 	};
 }
@@ -99,7 +128,7 @@ async function waitFor(check, ms = 60_000) {
 
 test("phone mode: ready, then commands; no hello_server and no seq; closing stdin ends it", async (t) => {
 	const dir = home(t);
-	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	let stderr = "";
 	child.stderr.on("data", (d) => (stderr += d));
@@ -135,7 +164,7 @@ test("a new chat rebuilt for a setting stays in its folder, not wherever the hos
 	// Started somewhere else than the workspace, as a server daemon is (systemd: / or home).
 	const elsewhere = mkdtempSync(join(tmpdir(), "gh-started-in-"));
 	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
-	const child = spawn(process.execPath, [hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -159,7 +188,7 @@ test("opening a chat that has no file yet keeps the folder the app says it was i
 	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
 	const project = join(dir, "workspace", "shop");
 	mkdirSync(project, { recursive: true });
-	const child = spawn(process.execPath, [hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -177,7 +206,7 @@ test("opening a chat that has no file yet keeps the folder the app says it was i
 
 test("GitHub sign-in settings: the saved Client ID reaches the app, and a build without one says so", async (t) => {
 	const dir = home(t);
-	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -203,7 +232,7 @@ test("phone mode: files_find gives the composer's @ list from the chat's folder,
 	mkdirSync(join(ws, "src", "ui"), { recursive: true });
 	mkdirSync(join(ws, "node_modules", "app"), { recursive: true });
 	for (const f of ["src/ui/app_bar.dart", "src/app.dart", "README.md", "node_modules/app/index.js"]) writeFileSync(join(ws, f), "");
-	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -219,7 +248,7 @@ test("phone mode: files_find gives the composer's @ list from the chat's folder,
 function daemon(t, dir, extra = {}, nodeArgs = []) {
 	const sock = join(dir, ".griphub", "host.sock");
 	// systemd gives a daemon /dev/null for stdin; its end must not stop the host.
-	const child = spawn(process.execPath, [...nodeArgs, hostFile, "--listen", sock], {
+	const child = spawnHost([...nodeArgs, hostFile, "--listen", sock], {
 		cwd: join(dir, "workspace"),
 		env: env(dir, extra),
 		stdio: ["ignore", "pipe", "pipe"],
@@ -299,10 +328,10 @@ test("server mode: a private socket, hello_server, resume, kick, and the daemon 
 
 	// Every client gone: the daemon keeps running, and a client can resume where it was.
 	two.socket.destroy();
-	await new Promise((r) => setTimeout(r, 300));
-	assert.equal(d.child.exitCode, null, "still running with nobody connected");
+	// (No sleep to "give it time to exit": the next client connecting is what shows it is still there.)
 	const three = await dial(d.sock);
 	const h3 = await three.until((r) => r.type === "hello_server");
+	assert.equal(d.child.exitCode, null, "still running with nobody connected");
 	assert.equal(h3.epoch, hello.epoch, "the same daemon");
 	const r3 = await three.call("resume", { since: h3.seq, epoch: h3.epoch });
 	assert.equal(r3.data.gap, false);
@@ -393,8 +422,8 @@ test("server mode: host_restart when idle waits for a working subagent, then res
 	const id = await startSubagent(m);
 	const r = await m.c.call("host_restart", { whenIdle: true });
 	assert.deepEqual(r.data, { restarting: false, pending: true });
-	// Longer than the gate's 2 s poll: still running, the subagent untouched.
-	await new Promise((res) => setTimeout(res, 2500));
+	// The gate polls every 50 ms here (GRIPHUB_RESTART_POLL_MS): after twenty polls it is still waiting, the subagent untouched.
+	await new Promise((res) => setTimeout(res, 1000));
 	assert.equal(m.d.child.exitCode, null, "the restart waits for the subagent");
 	assert.ok(!m.c.records.some((x) => x.type === "subagent_finished"));
 	// The subagent finishes its turn; the daemon then goes on its own, cleanly.
@@ -601,13 +630,17 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 	const first = await startSubagent(m);
 	writeFileSync(m.mock.MOCK_RELEASE, "");
 	await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === first);
-	await new Promise((r) => setTimeout(r, 300));
+	// "Nothing was pushed" has to be looked at after the host had its chance to push: a push is sent from the same place
+	// the finish is announced from, and a round trip on the same connection is answered after it.
+	await m.c.call("hello");
 	assert.deepEqual(pushes, []);
 
 	// The app goes away while a subagent works: its end is pushed, with nothing about the work in it.
 	rmSync(m.mock.MOCK_RELEASE);
 	await startSubagent(m);
 	m.c.socket.destroy();
+	// The host has to notice the closed connection before the subagent ends. (A fixed wait is safe here: if it were too
+	// short, the push below would not be sent and the test would fail, not pass.)
 	await new Promise((r) => setTimeout(r, 200));
 	writeFileSync(m.mock.MOCK_RELEASE, "");
 	await waitFor(() => pushes.length > 0, 15_000);
@@ -619,7 +652,7 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 test("phone mode: the notes are exactly as before, sync is offered, and files work the same way", async (t) => {
 	const dir = home(t);
 	const ws = join(dir, "workspace");
-	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready");
@@ -704,7 +737,9 @@ test("a background job's result calls its chat back with no user message, and tu
 });
 
 test("a background job can be stopped, and stops what it started; its chat is told it was stopped", async (t) => {
-	const tool = { name: "background_job", arguments: { command: "sleep 600 & sleep 600; wait" } };
+	// A duration no other test or process uses, so the check at the end looks at this job's sleeps only.
+	const mark = `600.${process.pid}`;
+	const tool = { name: "background_job", arguments: { command: `sleep ${mark} & sleep ${mark}; wait` } };
 	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool) });
 	await m.c.call("prompt", { text: "Jalankan" });
 	const started = await m.c.until((r) => r.type === "job" && r.job.status === "running", 30_000, "for the job");
@@ -715,8 +750,8 @@ test("a background job can be stopped, and stops what it started; its chat is to
 	assert.equal(ended.job.id, started.job.id);
 	const notice = await m.c.until((r) => r.type === "event" && r.event.type === "message_start" && r.event.message.role === "custom", 30_000, "for the message");
 	assert.match(JSON.stringify(notice.event.message.content), /stopped by the user/);
-	// Nothing of it is left running (the job's own sleeps; no other test starts "sleep 600").
-	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === "sleep 600"), 10_000);
+	// Nothing of it is left running (the job's own sleeps).
+	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === `sleep ${mark}`), 10_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -756,7 +791,7 @@ test("server mode: automatic backups are off until the phone gives its key, then
 test("phone mode: automatic backups into its own folder, no secrets in them, and the recovery code only here", async (t) => {
 	const dir = home(t);
 	const backupsDir = join(dir, "download", "GripHub", "auto");
-	const child = spawn(process.execPath, [hostFile], {
+	const child = spawnHost([hostFile], {
 		cwd: join(dir, "workspace"),
 		env: env(dir, { GRIPHUB_PHONE_BACKUP_DIR: backupsDir }),
 		stdio: ["pipe", "pipe", "pipe"],
@@ -795,7 +830,7 @@ test("phone mode: automatic backups into its own folder, no secrets in them, and
 
 	// The backup restores on a fresh "other phone" with the code alone: chats and files back, and no keys in it to leak.
 	const other = home(t);
-	const child2 = spawn(process.execPath, [hostFile], { cwd: join(other, "workspace"), env: env(other), stdio: ["pipe", "pipe", "pipe"] });
+	const child2 = spawnHost([hostFile], { cwd: join(other, "workspace"), env: env(other), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child2.kill("SIGKILL"));
 	const h2 = collect(child2.stdout);
 	await h2.until((r) => r.type === "ready", 60_000, "for ready");
@@ -836,7 +871,7 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 	const dir = home(t);
 	mkdirSync(join(dir, ".pi", "agent", "griphub"), { recursive: true });
 	writeFileSync(join(dir, ".pi", "agent", "griphub", "restore-123.zip"), "leftover");
-	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -874,7 +909,7 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 async function phoneWithModel(t, contextWindow, compactAt, extra = {}, model = "mock-model") {
 	const dir = home(t);
 	writeFileSync(join(dir, "release"), "");
-	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
+	const child = spawnHost(["--import", mockRouter, hostFile], {
 		cwd: join(dir, "workspace"),
 		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Oke.", ...extra }),
 		stdio: ["pipe", "pipe", "pipe"],
@@ -922,7 +957,7 @@ test("review before a commit: lines per file against the last commit, and a mess
 	writeFileSync(join(ws, "notes.md"), "one\ntwo\nthree");
 	writeFileSync(join(dir, "release"), "");
 	const bodies = join(dir, "bodies.jsonl");
-	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
+	const child = spawnHost(["--import", mockRouter, hostFile], {
 		cwd: ws,
 		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Trim the email before signing in", MOCK_BODIES: bodies }),
 		stdio: ["pipe", "pipe", "pipe"],
@@ -1013,7 +1048,9 @@ test("a summary that fails is not bought again after every turn, and gives up af
 	// Ten turns of about 10k tokens each: past the limit from the third. Without a brake that is a paid summary after
 	// each of the last eight; with it, a try only when the chat grew by a quarter, and none after three failures.
 	for (let i = 0; i < 10; i++) await h.say(i);
-	await new Promise((r) => setTimeout(r, 300));
+	// A summary is tried when a turn ends, before the next one starts: one more turn is the point after which the
+	// last try has been made (and by then the host has given up, so a late one cannot hide behind a fixed wait).
+	await h.say(10);
 	const tried = summaries();
 	assert.ok(tried >= 1, "it did try once the chat passed the limit");
 	assert.ok(tried <= 3, `tried ${tried} times over eight turns past the limit`);
@@ -1022,7 +1059,8 @@ test("a summary that fails is not bought again after every turn, and gives up af
 test("a context limit of 0 leaves it to the model's own limit", async (t) => {
 	const h = await phoneWithModel(t, 200_000, 0);
 	for (let i = 0; i < 4; i++) await h.say(i);
-	await new Promise((r) => setTimeout(r, 300));
+	// Compaction is decided when a turn ends, before the next starts: a fifth turn is the point after which "never" is proven.
+	await h.say(4);
 	assert.deepEqual(compactions(h.records), []);
 });
 
@@ -1031,6 +1069,44 @@ test("with no limit set, a model at the default's floor is left to its own limit
 	// earlier than pi would. Before the default followed the window, the flat 300k meant the same; this keeps it so.
 	const h = await phoneWithModel(t, 200_000, undefined);
 	for (let i = 0; i < 4; i++) await h.say(i);
-	await new Promise((r) => setTimeout(r, 300));
+	await h.say(4); // as above
 	assert.deepEqual(compactions(h.records), []);
+});
+
+// ---------------------------------------------------------------------------
+// The daily budget: every way of spending asks for it (BE-11). Only prompt and retry did; a plan being carried out, a
+// subagent and a picture started whatever was left. The spend is made up by the test hook (nothing is bought).
+
+test("server mode: with the daily budget used up, a plan, a retry, a subagent and a picture are refused before anything is sent", async (t) => {
+	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
+	const set = await m.c.call("settings_set", { settings: { dailyBudget: 5 } });
+	assert.equal(set.ok, true, set.error);
+	const refused = /Daily budget of 5 credits reached \(5\.02 credits spent today\)/;
+	for (const [type, args] of [
+		["prompt", { text: "Halo" }],
+		["plan_approve", {}],
+		["retry", {}],
+		["subagent_start", { task: "Periksa lima berkas", profile: "read" }],
+		["custom_provider_images_generate", { model: "gpt-image", prompt: "kucing", size: "1024x1024" }],
+	]) {
+		const r = await m.c.call(type, args);
+		assert.equal(r.ok, false, `${type} was not refused`);
+		assert.match(r.error, refused, type);
+	}
+	assert.equal(m.requests(), 0, "nothing reached the model");
+	assert.ok(!m.c.records.some((x) => x.type === "subagent_status"), "no subagent was created");
+});
+
+test("server mode: with no budget set (or room left) the same commands go ahead", async (t) => {
+	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
+	// No dailyBudget: off.
+	const off = await m.c.call("subagent_start", { task: "Periksa lima berkas", profile: "read" });
+	assert.equal(off.ok, true, off.error);
+	// Room left: a cap above the spend.
+	await m.c.call("settings_set", { settings: { dailyBudget: 6 } });
+	const room = await m.c.call("subagent_start", { task: "Periksa tiga berkas", profile: "read" });
+	assert.equal(room.ok, true, room.error);
+	// Let both finish, so the host is not writing into the folder while it is removed.
+	writeFileSync(m.mock.MOCK_RELEASE, "");
+	for (const id of [off.data.id, room.data.id]) await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === id, 30_000, "for a subagent to finish");
 });

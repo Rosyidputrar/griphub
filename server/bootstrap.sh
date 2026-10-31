@@ -31,6 +31,8 @@ USER_NAME=griphub
 NODE_VERSION=24.22.0
 NODE_MIN_MAJOR=22
 NODE_MIN_MINOR=19
+# Where the service (and anything else of ours that says `node`) finds Node. A test can point it elsewhere.
+NODE_LINK=${GRIPHUB_TEST_NODE_LINK:-/usr/local/bin/node}
 PUBKEY=""
 ADDRESS=""
 INSTALL_BOX=1
@@ -163,19 +165,47 @@ install_packages() {
 	fi
 }
 
-node_is_new_enough() {
-	command -v node >/dev/null 2>&1 || return 1
+# Whether the Node at [bin] (default: the first on PATH) is new enough for the host.
+node_ok() {
+	local bin=${1:-node}
+	command -v "$bin" >/dev/null 2>&1 || return 1
 	local v major minor
-	v=$(node -p 'process.versions.node' 2>/dev/null) || return 1
+	v=$("$bin" -p 'process.versions.node' 2>/dev/null) || return 1
 	major=${v%%.*}
 	minor=${v#*.}
 	minor=${minor%%.*}
 	[ "$major" -gt "$NODE_MIN_MAJOR" ] || { [ "$major" -eq "$NODE_MIN_MAJOR" ] && [ "$minor" -ge "$NODE_MIN_MINOR" ]; }
 }
 
+node_is_new_enough() { node_ok node; }
+
+# The service file runs /usr/local/bin/node, and griphub-attach is `env node`, found on an ssh session's PATH. This script
+# puts the link there when it installs Node itself. A Node that was already on the server (apt, NodeSource, `n`: so
+# /usr/bin/node) was "kept" with no link, and the service could not start (status 203/EXEC) on exactly those servers.
+# Nothing that is there is replaced: a link or file already at NODE_LINK has to be a Node the host can run, or this stops
+# and says so (it may be another version than the one that was found, and replacing it could break what depends on it).
+link_node() {
+	local found
+	if [ ! -e "$NODE_LINK" ] && [ ! -L "$NODE_LINK" ]; then
+		found=$(command -v node)
+		case "$found" in /*) ;; *) found=$(readlink -f "$found") ;; esac
+		say "linking $NODE_LINK to the Node at $found, which the service runs"
+		run ln -s "$found" "$NODE_LINK"
+		return
+	fi
+	node_ok "$NODE_LINK" || die "$NODE_LINK is there but is not a Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR or newer that can run, and the service runs that one. Replace it, or remove it and run this script again."
+}
+
+# The service runs as its own account: Node has to be somewhere that account can use, not in another user's home.
+check_node_for_service() {
+	[ "$DRY_RUN" = 1 ] && return
+	as_user "$NODE_LINK" -p 0 >/dev/null 2>&1 || die "the account $USER_NAME cannot run Node.js at $NODE_LINK (it leads to $(readlink -f "$NODE_LINK")). Node has to be somewhere every account can use, not in a home folder; install it there and run this script again."
+}
+
 install_node() {
 	if node_is_new_enough; then
 		say "node $(node -v) is new enough; keeping it"
+		link_node
 		return
 	fi
 	say "installing Node.js $NODE_VERSION"
@@ -194,6 +224,7 @@ install_node() {
 	run ln -sfn "/opt/node-v$NODE_VERSION-linux-$NODE_ARCH" /opt/node
 	for b in node npm npx; do run ln -sf "/opt/node/bin/$b" "/usr/local/bin/$b"; done
 	rm -rf "$tmp"
+	[ "$DRY_RUN" = 1 ] || [ -x "$NODE_LINK" ] || die "Node.js was installed but $NODE_LINK is not there"
 }
 
 # ---------------------------------------------------------------------------
@@ -433,6 +464,7 @@ setup_code() {
 install_packages
 install_node
 create_user
+check_node_for_service
 install_files
 authorize_key
 wait_for_user_manager

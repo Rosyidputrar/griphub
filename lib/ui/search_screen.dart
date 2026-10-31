@@ -153,7 +153,8 @@ class _SearchScreenState extends State<SearchScreen> {
             ),
           ),
           SizedBox(
-            height: 36,
+            // 48 dp touch boxes around 36 dp toggles.
+            height: 48,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -256,21 +257,29 @@ class _Toggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: on ? p.text : p.surface,
-      borderRadius: BorderRadius.circular(Radii.lg),
+    // 36 dp to look at, the row's full 48 dp to touch.
+    return Semantics(
+      toggled: on,
       child: InkWell(
-        borderRadius: BorderRadius.circular(Radii.lg),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 15, color: on ? p.inverse : p.muted),
-              const SizedBox(width: 6),
-              Text(label, style: TextStyle(fontSize: 12.5, color: on ? p.inverse : p.text)),
-            ],
+        child: Center(
+          child: Material(
+            color: on ? p.text : p.surface,
+            borderRadius: BorderRadius.circular(Radii.lg),
+            child: SizedBox(
+              height: 36,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 15, color: on ? p.inverse : p.muted),
+                    const SizedBox(width: 6),
+                    Text(label, style: TextStyle(fontSize: 12.5, color: on ? p.inverse : p.text)),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
