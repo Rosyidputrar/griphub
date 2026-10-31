@@ -33,6 +33,7 @@ import 'folder_picker.dart';
 import 'subagent_card.dart';
 import 'summarized_turns_screen.dart';
 import 'theme.dart';
+import 'usage_screen.dart';
 import 'transfer_dialog.dart';
 import 'todo_views.dart';
 
@@ -756,7 +757,10 @@ class _ChatScreenState extends State<ChatScreen> {
               },
               footer: footers[i],
             ),
-            NoticeEntry() => NoticeView(e),
+            NoticeEntry() => NoticeView(
+              e,
+              onRaiseBudget: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => UsageScreen(agent: agent))),
+            ),
             JobEntry() => JobNoticeView(e),
             CompactionEntry() => CompactionView(
               e,

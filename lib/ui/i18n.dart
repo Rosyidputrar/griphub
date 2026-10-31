@@ -1,10 +1,27 @@
 import '../agent/clock.dart';
+import '../agent/host_messages.dart';
 import '../agent/msg.dart';
 import 'theme.dart';
 
 /// Translates an English UI string into the chosen language. English text is the key, so a
 /// missing translation falls back to English instead of showing a placeholder.
 String tr(String en) => Appearance.instance.language == 'id' ? (_id[en] ?? en) : en;
+
+/// A message from the host: translated when it is one of the fixed ones, or one of the few with numbers in it
+/// ([limitStopOf]); anything else as it is.
+String trHost(String message) {
+  final stop = limitStopOf(message);
+  final numbers = limitNumbers(message);
+  if (stop == null || numbers == null) return tr(message);
+  switch (stop) {
+    case LimitStop.budget:
+      return tr('Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.')
+          .replaceAll('{cap}', localNumber(numbers[0]))
+          .replaceAll('{spent}', localNumber(numbers[1]));
+    case LimitStop.toolCalls:
+      return tr('Stopped after {n} tool calls in one request.').replaceAll('{n}', localNumber(numbers[0]));
+  }
+}
 
 /// A [Msg] from the agent side in the app's language.
 String trMsg(Msg m) => m.fill(tr(m.en));
@@ -113,6 +130,9 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.': 'Batas harian {cap} kredit tercapai (terpakai {spent} hari ini). Naikkan di Pengaturan → Pemakaian.',
+  'Stopped after {n} tool calls in one request.': 'Berhenti setelah {n} panggilan tool dalam satu permintaan.',
+  'Raise limit': 'Naikkan batas',
   'May contain secrets: not included unless you tick it': 'Mungkin berisi rahasia: tidak ikut kecuali kamu mencentangnya',
   'Commit and push to': 'Commit & push ke',
   'Background runs do not ask: risky actions (deleting files, force push, writing outside the project) are refused.': 'Tugas latar tidak bertanya: tindakan berisiko (menghapus file, force push, menulis di luar proyek) ditolak.',

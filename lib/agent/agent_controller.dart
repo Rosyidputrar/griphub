@@ -6,6 +6,7 @@ import 'agent_client.dart';
 import 'agent_fs.dart';
 import 'clock.dart';
 import 'features.dart';
+import 'host_messages.dart';
 import 'integrations.dart';
 import 'jobs.dart';
 import 'models.dart';
@@ -954,7 +955,8 @@ class AgentController extends ChangeNotifier {
         // Startup hints ("no models") are covered by the empty state; the rest
         // (model fallback, triggers) are worth showing.
         final message = record['message'] as String? ?? '';
-        if (!message.startsWith('No models available')) _addNotice(message);
+        // A request ended by a limit (the daily budget, the tool-call cap) is a stop the person has to act on, not a hint.
+        if (!message.startsWith('No models available')) _addNotice(message, error: limitStopOf(message) != null);
       // The host changed session state on its own (e.g. a fallback model).
       case 'prompt_queue':
         _applyQueue(record);

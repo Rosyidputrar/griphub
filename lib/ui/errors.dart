@@ -21,7 +21,7 @@ String friendlyError(Object? e) {
     case String():
       return e.trim().isEmpty ? fallback : tr(e);
     case AgentError():
-      return e.message.trim().isEmpty ? fallback : tr(e.message);
+      return e.message.trim().isEmpty ? fallback : trHost(e.message);
     case Cancelled():
       return tr('Cancelled');
     case TimeoutException():

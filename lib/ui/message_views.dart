@@ -9,6 +9,7 @@ import 'package:markdown/markdown.dart' as md;
 
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
+import '../agent/host_messages.dart';
 import '../agent/jobs.dart';
 import '../agent/models.dart';
 import '../agent/pricing.dart';
@@ -1604,21 +1605,28 @@ class _Section extends StatelessWidget {
 }
 
 class NoticeView extends StatelessWidget {
-  const NoticeView(this.entry, {super.key});
+  const NoticeView(this.entry, {super.key, this.onRaiseBudget});
   final NoticeEntry entry;
+
+  /// Opens where the daily budget is set; offered on the notice of a budget stop.
+  final VoidCallback? onRaiseBudget;
 
   @override
   Widget build(BuildContext context) {
-    // Notices from the app itself ("Not connected to the server.") have translations; the host's own text has none
-    // and stays as it is.
-    if (entry.error) return _ErrorNote(tr(entry.text));
-    return Text(tr(entry.text), style: Theme.of(context).textTheme.bodySmall);
+    // Notices from the app itself ("Not connected to the server.") have translations, and so do the host's limit
+    // messages (trHost); the host's other text stays as it is.
+    if (entry.error) {
+      final raise = limitStopOf(entry.text) == LimitStop.budget ? onRaiseBudget : null;
+      return _ErrorNote(trHost(entry.text), action: raise == null ? null : (label: tr('Raise limit'), onTap: raise));
+    }
+    return Text(trHost(entry.text), style: Theme.of(context).textTheme.bodySmall);
   }
 }
 
 class _ErrorNote extends StatelessWidget {
-  const _ErrorNote(this.text);
+  const _ErrorNote(this.text, {this.action});
   final String text;
+  final ({String label, VoidCallback onTap})? action;
 
   @override
   Widget build(BuildContext context) {
@@ -1629,7 +1637,13 @@ class _ErrorNote extends StatelessWidget {
         borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.danger.withValues(alpha: 0.4)),
       ),
-      child: SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),
+          if (action != null) TextButton(onPressed: action!.onTap, child: Text(action!.label)),
+        ],
+      ),
     );
   }
 }
