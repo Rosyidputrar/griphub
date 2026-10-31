@@ -495,7 +495,13 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
   late final _ticker = createTicker(_tick);
   late int _shown = widget.live ? 0 : widget.text.length;
   Duration _last = Duration.zero;
+  Duration _painted = Duration.zero;
   double _carry = 0;
+
+  /// The finished blocks of the reply, built once each: re-parsing the whole reply as markdown on every tick made each
+  /// frame cost more the longer the reply got (UI-11). Keyed by the block's text, so an identical widget comes back and
+  /// Flutter skips rebuilding it.
+  final _blocks = <String, Widget>{};
 
   bool get _behind => _shown < widget.text.length;
 
@@ -529,6 +535,9 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
     _carry += rate * dt;
     final step = _carry.floor();
     if (step == 0) return;
+    // About 30 updates a second is smooth to read; every frame only cost more work.
+    if (elapsed - _painted < const Duration(milliseconds: 33)) return;
+    _painted = elapsed;
     _carry -= step;
     setState(() => _shown = (_shown + step).clamp(0, widget.text.length));
     const TranscriptGrew().dispatch(context);
@@ -543,10 +552,45 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
   @override
   Widget build(BuildContext context) {
     final typing = widget.live || _behind;
+    if (!typing) {
+      _blocks.clear();
+      return MarkdownText(widget.text);
+    }
     // U+258D left block as the caret; markdown renders it inline with the text.
     final visible = widget.text.substring(0, _shown);
-    return MarkdownText(typing ? '$visible▍' : widget.text);
+    final (done, rest) = splitFinishedBlocks(visible);
+    if (done.isEmpty) return MarkdownText('$visible▍');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final b in done) ...[_blocks.putIfAbsent(b, () => MarkdownText(b)), const SizedBox(height: 10)],
+        MarkdownText('$rest▍'),
+      ],
+    );
   }
+}
+
+/// [text] as the top-level markdown blocks that are finished (followed by a blank line, outside a code fence) and what
+/// comes after them, still being written. Only the last part changes as a reply streams in.
+(List<String>, String) splitFinishedBlocks(String text) {
+  final done = <String>[];
+  var start = 0;
+  var fence = false;
+  var lineStart = 0;
+  for (var i = 0; i <= text.length; i++) {
+    if (i < text.length && text.codeUnitAt(i) != 10) continue;
+    final line = text.substring(lineStart, i);
+    final trimmed = line.trimLeft();
+    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) fence = !fence;
+    // A blank line outside a fence ends the block before it (only once something follows it).
+    if (!fence && line.trim().isEmpty && i < text.length && lineStart > start) {
+      final block = text.substring(start, lineStart).trimRight();
+      if (block.isNotEmpty) done.add(block);
+      start = i + 1;
+    }
+    lineStart = i + 1;
+  }
+  return (done, text.substring(start > text.length ? text.length : start));
 }
 
 /// The subagents a turn started: how many, and what they cost together (null when any is unknown).
