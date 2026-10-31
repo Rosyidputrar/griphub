@@ -38,6 +38,7 @@ void main() {
   group('UI-17: announcements', announcementTests);
   group('UI-18: switch rows', switchRowTests);
   group('UI-19: wide screens', wideScreenTests);
+  group('UI-20: Back', backTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -464,5 +465,41 @@ void wideScreenTests() {
     FakeHost();
     await pumpLook(tester, const Look(width: 390), const ContentWidth(child: SizedBox.expand(key: ValueKey('c'))));
     expect(tester.getSize(find.byKey(const ValueKey('c'))).width, 390);
+  });
+}
+
+void backTests() {
+  testWidgets('UI-20: Back on Chats, Skills or Projects goes to Home instead of leaving the app', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(), HomeShell(agent: newAgent()), height: 1600);
+    await frames(tester);
+    for (final tab in ['Chats', 'Skills', 'Projects']) {
+      await tester.tap(find.bySemanticsLabel(RegExp('^$tab')).first);
+      await frames(tester, 12);
+      final handled = await tester.binding.handlePopRoute();
+      await frames(tester, 12);
+      expect(handled, isTrue, reason: 'Back on $tab was handled by the app');
+      expect(find.text('Recent'), findsOneWidget, reason: 'and Home is showing again');
+    }
+  });
+
+  testWidgets('UI-20: picking chats, Back leaves the picking first and stays on Chats', (tester) async {
+    final host = FakeHost();
+    host.answers['sessions'] = (_) => [
+      {'path': '/s/a.jsonl', 'id': 'a', 'name': 'Nota toko', 'cwd': '/w', 'messageCount': 3, 'modified': 1761900000000},
+    ];
+    await pumpLook(tester, const Look(), HomeShell(agent: newAgent()), height: 1600);
+    await frames(tester);
+    await tester.tap(find.bySemanticsLabel(RegExp('^Chats')).first);
+    await frames(tester, 12);
+    await tester.longPress(find.text('Nota toko'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Select'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 selected'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await frames(tester, 12);
+    expect(find.text('1 selected'), findsNothing, reason: 'the picking ended');
+    expect(find.text('Nota toko'), findsOneWidget, reason: 'still on Chats');
   });
 }

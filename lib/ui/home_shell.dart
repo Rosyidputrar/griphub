@@ -57,6 +57,9 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int tab = 0;
+
+  /// The Chats tab is picking chats: Back leaves that first, and only then the tab.
+  final _chatsSelecting = ValueNotifier(false);
   final subs = <StreamSubscription<Object?>>[];
   AppLifecycleState lifecycle = AppLifecycleState.resumed;
   int approvalsSeen = 0;
@@ -148,6 +151,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _chatsSelecting.dispose();
     agent.confirmStopToSwitch = null;
     WidgetsBinding.instance.removeObserver(this);
     agent.features.removeListener(_onFeatures);
@@ -328,11 +332,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final tabs = [
       _HomeTab(agent: agent, onSeeAll: () => setState(() => tab = 1), onNewChat: _newChat),
-      _ChatsTab(agent: agent),
+      _ChatsTab(agent: agent, selecting: _chatsSelecting),
       SkillsScreen(agent: agent, embedded: true),
       _ProjectsTab(agent: agent),
     ];
-    return Scaffold(
+    // Back from Chats, Skills or Projects goes to Home, as in other apps; only Back from Home leaves the app.
+    return PopScope(
+      canPop: tab == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_chatsSelecting.value) setState(() => tab = 0);
+      },
+      child: Scaffold(
       extendBody: true,
       // Every tab stays built (scroll positions survive); the active one fades
       // and drifts in, the others fade out and stop ticking.
@@ -343,6 +353,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ],
       ),
       bottomNavigationBar: _NavBar(index: tab, onTap: (i) => setState(() => tab = i), onCreate: _newChat),
+      ),
     );
   }
 }
@@ -1253,8 +1264,11 @@ class _SessionRow extends StatelessWidget {
 // Chats
 
 class _ChatsTab extends StatefulWidget {
-  const _ChatsTab({required this.agent});
+  const _ChatsTab({required this.agent, this.selecting});
   final AgentController agent;
+
+  /// Told whether chats are being picked, so Home's Back leaves that first.
+  final ValueNotifier<bool>? selecting;
 
   @override
   State<_ChatsTab> createState() => _ChatsTabState();
@@ -1394,6 +1408,8 @@ class _ChatsTabState extends State<_ChatsTab> {
             groups.putIfAbsent(_bucket(s.modified), () => []).add(s);
           }
           final selecting = _selected.isNotEmpty;
+          final told = widget.selecting;
+          if (told != null && told.value != selecting) WidgetsBinding.instance.addPostFrameCallback((_) => told.value = selecting);
           return PopScope(
             // Back leaves selection mode first.
             canPop: !selecting,
