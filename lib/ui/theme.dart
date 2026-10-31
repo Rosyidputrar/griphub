@@ -407,7 +407,7 @@ ThemeData buildTheme(Brightness brightness) {
     onSecondaryContainer: p.text,
   );
 
-  final overlay = brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light;
+  final overlay = systemOverlayFor(brightness, p);
   final radius = BorderRadius.circular(Radii.lg);
 
   OutlineInputBorder field(Color c, [double w = 1]) => OutlineInputBorder(
@@ -432,7 +432,7 @@ ThemeData buildTheme(Brightness brightness) {
       titleTextStyle: text.titleLarge,
       iconTheme: IconThemeData(color: p.text, size: 20),
       actionsIconTheme: IconThemeData(color: p.text, size: 20),
-      systemOverlayStyle: overlay.copyWith(statusBarColor: Colors.transparent, systemNavigationBarColor: p.bg),
+      systemOverlayStyle: overlay,
     ),
     dividerTheme: DividerThemeData(color: p.border, thickness: 1, space: 1),
     iconTheme: IconThemeData(color: p.text, size: 20),
@@ -561,3 +561,12 @@ ThemeData buildTheme(Brightness brightness) {
     pageTransitionsTheme: const PageTransitionsTheme(builders: {TargetPlatform.android: SmoothPageTransitions()}),
   );
 }
+
+/// The status and navigation bars for a theme: dark icons on the light theme, light ones on the dark, over the app's own
+/// background. Set for every screen (main.dart), not only those with an AppBar: Home, onboarding and the boot screens
+/// have none, so a phone in dark mode could show white icons on the light Home.
+SystemUiOverlayStyle systemOverlayFor(Brightness brightness, Palette p) =>
+    (brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light).copyWith(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: p.bg,
+    );

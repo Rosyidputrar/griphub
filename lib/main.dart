@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'agent/agent_client.dart';
 import 'agent/agent_controller.dart';
@@ -42,11 +43,14 @@ class GripHubApp extends StatelessWidget {
         themeMode: appearance.value,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
-        builder: (context, child) => MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(appearance.textScale * MediaQuery.textScalerOf(context).scale(14) / 14),
+        builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+          value: systemOverlayFor(Theme.of(context).brightness, context.palette),
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(appearance.textScale * MediaQuery.textScalerOf(context).scale(14) / 14),
+            ),
+            child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
           ),
-          child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
         ),
         home: ListenableBuilder(
           listenable: agent,

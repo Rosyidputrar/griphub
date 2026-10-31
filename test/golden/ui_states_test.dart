@@ -1,9 +1,12 @@
 // Second half of the UI audit (UI-10 to UI-24): states, motion, semantics and touch targets.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/main.dart';
 import 'package:griphub_agent/ui/diff_view.dart';
 import 'package:griphub_agent/ui/home_shell.dart';
 import 'package:griphub_agent/ui/message_views.dart';
+import 'package:griphub_agent/ui/theme.dart';
 
 import 'harness.dart';
 
@@ -22,6 +25,7 @@ void main() {
 
   group('UI-11: a streaming reply', streamingTests);
   group('UI-12: long diffs', diffTests);
+  group('UI-13: status bar', statusBarTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -175,4 +179,21 @@ void diffTests() {
     expect(find.textContaining(RegExp(r'^line \d+ of')).evaluate().length, 50);
     expect(find.byType(ListView), findsNothing);
   });
+}
+
+void statusBarTests() {
+  for (final (mode, icons) in [(ThemeMode.light, Brightness.dark), (ThemeMode.dark, Brightness.light)]) {
+    testWidgets('UI-13: the status bar icons follow the theme on every screen ($mode), not only under an AppBar', (tester) async {
+      FakeHost();
+      final before = Appearance.instance.value;
+      addTearDown(() => Appearance.instance.value = before);
+      Appearance.instance.value = mode;
+      await tester.pumpWidget(GripHubApp(agent: newAgent()));
+      await tester.pump(const Duration(milliseconds: 300));
+      // The app's own region, above every screen (onboarding and the boot screens have no AppBar).
+      final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(find.byType(AnnotatedRegion<SystemUiOverlayStyle>).first);
+      expect(region.value.statusBarIconBrightness, icons);
+      expect(region.value.statusBarColor, Colors.transparent);
+    });
+  }
 }
