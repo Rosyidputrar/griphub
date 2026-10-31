@@ -325,7 +325,7 @@ class SectionAction extends StatelessWidget {
   Widget build(BuildContext context) => TextButtonTheme(
     data: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: context.palette.accent,
+        foregroundColor: context.palette.accentText,
         textStyle: Theme.of(context).textTheme.labelMedium,
         // Small to look at, 48 dp to touch.
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -754,3 +754,7 @@ Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilde
   useSafeArea: true,
   builder: (context) => SingleChildScrollView(child: builder(context)),
 );
+
+/// A filled button that deletes or stops something: the danger colour, with text that reads on it in either theme.
+ButtonStyle dangerButtonStyle(BuildContext context) =>
+    FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: context.palette.onDanger);

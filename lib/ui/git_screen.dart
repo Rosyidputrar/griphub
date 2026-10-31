@@ -650,7 +650,7 @@ class _GitScreenState extends State<GitScreen> {
                           decoration: BoxDecoration(color: p.raised, borderRadius: BorderRadius.circular(Radii.sm)),
                           child: Text(
                             c.hash.length > 7 ? c.hash.substring(0, 7) : c.hash,
-                            style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.accent),
+                            style: TextStyle(fontFamily: mono, fontSize: 11.5, color: p.accentText),
                           ),
                         ),
                         const SizedBox(width: 12),

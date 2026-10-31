@@ -585,7 +585,7 @@ class _ServerScreenState extends State<ServerScreen> {
               TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
               FilledButton(
                 style: working
-                    ? FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white)
+                    ? dangerButtonStyle(context)
                     : null,
                 onPressed: () => Navigator.pop(context, true),
                 child: Text(tr(working ? 'Stop and switch' : 'Use the server')),

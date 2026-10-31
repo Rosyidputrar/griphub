@@ -57,6 +57,37 @@ class Palette extends ThemeExtension<Palette> {
     return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
   }
 
+  /// The accent as a colour for text (a link, "See all", a section's action): the accent itself where it reads at 4.5:1
+  /// on both the page and a card, and otherwise made darker (lighter in the dark theme) until it does. In the light theme
+  /// green, orange, pink and teal were 2.7 to 4.1:1 as text; their fills stay as chosen.
+  Color get accentText {
+    double worst(Color c) {
+      double ratio(Color b) {
+        final a = c.computeLuminance(), l = b.computeLuminance();
+        return (a > l ? a + 0.05 : l + 0.05) / (a > l ? l + 0.05 : a + 0.05);
+      }
+
+      final x = ratio(bg), y = ratio(surface);
+      return x < y ? x : y;
+    }
+
+    final darken = bg.computeLuminance() > 0.5;
+    var hsl = HSLColor.fromColor(accent);
+    var c = accent;
+    for (var i = 0; i < 60 && worst(c) < 4.5; i++) {
+      hsl = hsl.withLightness((hsl.lightness + (darken ? -0.01 : 0.01)).clamp(0.0, 1.0));
+      c = hsl.toColor();
+    }
+    return c;
+  }
+
+  /// Text and icons on a danger fill, chosen the same way: white was 2.9:1 on the dark theme's light red.
+  Color get onDanger {
+    final l = danger.computeLuminance();
+    const ink = Color(0xFF111113);
+    return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
+  }
+
   static const light = Palette(
     bg: Color(0xFFFFFFFF),
     surface: Color(0xFFF5F5F7),

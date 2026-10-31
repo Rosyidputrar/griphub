@@ -973,7 +973,6 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
 /// The destructive confirm for a force stop, styled like the app's other
 /// destructive dialogs (danger-filled confirm).
 Future<bool> confirmSubagentForceStop(BuildContext context) async {
-  final p = context.palette;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -982,7 +981,7 @@ Future<bool> confirmSubagentForceStop(BuildContext context) async {
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(false), child: Text(tr('Cancel'))),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white),
+          style: dangerButtonStyle(context),
           onPressed: () => Navigator.of(context).pop(true),
           child: Text(tr('Force stop')),
         ),

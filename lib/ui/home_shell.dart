@@ -903,7 +903,7 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                     Expanded(child: Text(tr('Recent'), style: text.titleLarge)),
                     TextButton(
                       onPressed: widget.onSeeAll,
-                      style: TextButton.styleFrom(foregroundColor: context.palette.accent),
+                      style: TextButton.styleFrom(foregroundColor: context.palette.accentText),
                       child: Text(tr('See all')),
                     ),
                   ],

@@ -448,7 +448,6 @@ Future<bool?> showPastedSheet(BuildContext context, String text) => showModalBot
 /// The agent is mid-turn and the user picked another chat: stop it and
 /// switch, or stay. Switching without stopping would drop the reply.
 Future<bool> confirmStopToSwitch(BuildContext context) async {
-  final p = context.palette;
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -459,7 +458,7 @@ Future<bool> confirmStopToSwitch(BuildContext context) async {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: p.danger, foregroundColor: Colors.white),
+          style: dangerButtonStyle(context),
           onPressed: () => Navigator.pop(context, true),
           child: Text(tr('Stop and switch')),
         ),
@@ -554,7 +553,7 @@ Future<bool> confirmBypass(BuildContext context) async =>
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white),
+            style: dangerButtonStyle(context),
             child: Text(tr('Bypass')),
           ),
         ],

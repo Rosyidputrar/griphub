@@ -96,7 +96,7 @@ class _ContainerScreenState extends State<ContainerScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white),
+            style: dangerButtonStyle(context),
             onPressed: () => Navigator.pop(context, true),
             child: Text(tr('Remove')),
           ),
