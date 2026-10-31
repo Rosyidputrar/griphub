@@ -86,6 +86,8 @@ function whyUnsafe(key: string, value: string): string | null {
 	if (key === "include.path" || /^includeif\..+\.path$/.test(key)) return "include another file, which could say anything";
 	const filter = /^filter\.(.+)\.(clean|smudge|process)$/.exec(key);
 	if (filter) return filter[1] === "lfs" && value === LFS_FILTER[filter[2]] ? null : "run a program on every file git adds or checks out";
+	// git-lfs runs these on every file it tracks (`lfs.extension.<name>.clean` / `.smudge`), and `git lfs install` never writes them.
+	if (/^lfs\.extension\..+\.(clean|smudge)$/.test(key)) return "run a program on every large file git adds or checks out";
 	if (/^diff\..+\.(command|textconv)$/.test(key) || key === "diff.external") return "run a program to compare files";
 	if (/^merge\..+\.(driver|recursive)$/.test(key)) return "run a program to merge files";
 	if (/^credential\..+\.helper$/.test(key)) return "run a program to look up a password";

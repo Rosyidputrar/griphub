@@ -305,3 +305,45 @@ test("ordinary git work is as it was: status, diff, commit, branches and a fetch
 	const summary = await gitops.review(dir);
 	assert.ok(summary, "the review reads");
 });
+
+// ---------------------------------------------------------------------------
+// Git LFS: its upload is a pre-push hook, and the host runs git with hooks off.
+
+const hasLfs = (() => {
+	try {
+		execFileSync("git", ["lfs", "version"], { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
+})();
+
+test("a push of a project that uses Git LFS uploads its large files too; one that does not is pushed as before", { skip: !hasLfs && "git-lfs is not installed" }, async () => {
+	const remote = join(root, "remote.git");
+	mkdirSync(remote);
+	raw(remote, "init", "-q", "--bare", "-b", "main");
+	const dir = repo();
+	raw(dir, "lfs", "install", "--local");
+	raw(dir, "lfs", "track", "*.bin");
+	raw(dir, "remote", "add", "origin", remote);
+	writeFileSync(join(dir, "big.bin"), Buffer.alloc(4096, 7));
+	await gitops.stage(dir, "all");
+	await gitops.commit(dir, "with a large file", false);
+	assert.match(raw(dir, "cat-file", "-p", "HEAD:big.bin"), /^version https:\/\/git-lfs/, "the commit holds a pointer");
+	await gitops.push(dir, () => {});
+	assert.equal(raw(remote, "rev-parse", "main").trim(), raw(dir, "rev-parse", "HEAD").trim(), "the branch arrived");
+	const stored = execFileSync("find", [join(remote, "lfs", "objects"), "-type", "f"], { encoding: "utf8" }).trim().split("\n");
+	assert.equal(stored.length, 1, "and the file the pointer names is on the remote too");
+});
+
+test("a project's lfs.extension settings (a program git-lfs would run on every large file) are refused", { skip: !hasLfs && "git-lfs is not installed" }, async () => {
+	const dir = repo();
+	raw(dir, "lfs", "install", "--local");
+	raw(dir, "lfs", "track", "*.bin");
+	await assertRepoConfigSafe(dir); // the settings `git lfs install` writes are fine
+	raw(dir, "config", "lfs.extension.x.clean", `${boom} %f`);
+	raw(dir, "config", "lfs.extension.x.smudge", `${boom} %f`);
+	writeFileSync(join(dir, "a.bin"), "data");
+	await assert.rejects(gitRun(["add", "-A"], { cwd: dir }), /lfs\.extension\.x\.(clean|smudge)/);
+	assert.equal(existsSync(marker), false, "the program never ran");
+});

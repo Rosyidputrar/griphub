@@ -248,9 +248,29 @@ export async function pull(cwd: string, log: (l: string) => void) {
 
 export async function push(cwd: string, log: (l: string) => void) {
 	const branch = (await ok(cwd, ["branch", "--show-current"])).trim();
+	await pushLfsObjects(cwd, log);
 	const r = await git(cwd, ["push", "-u", "origin", `HEAD:${branch}`]);
 	log((r.out + r.err).trim());
 	if (r.code !== 0) throw new Error((r.err || r.out).trim().split("\n").slice(-3).join("\n"));
+}
+
+/**
+ * A project that uses Git LFS keeps big files as small pointers in its commits and the files themselves on the LFS
+ * server. LFS uploads them from a `pre-push` hook, and the host runs git with hooks off (SAFE_GIT_FLAGS), so that hook
+ * never runs: the remote would get pointers whose files are nowhere. Upload them here, before the push, the way the
+ * hook would. `git lfs push` runs no hook and no program from the project's settings (lfs.extension.* is refused by
+ * assertRepoConfigSafe).
+ */
+async function pushLfsObjects(cwd: string, log: (l: string) => void) {
+	// The filter is what `git lfs install` leaves in the repository's settings (or in the user's global ones).
+	const uses = (await git(cwd, ["config", "--get", "filter.lfs.clean"])).code === 0;
+	if (!uses) return;
+	const r = await git(cwd, ["lfs", "push", "origin", "HEAD"]);
+	log((r.out + r.err).trim());
+	if (r.code !== 0) {
+		const why = (r.err || r.out).trim().split("\n").slice(-3).join("\n");
+		throw new Error(`This project uses Git LFS, and its large files could not be uploaded, so nothing was pushed.\n${why}`);
+	}
 }
 
 export function githubSlug(remote: string | null) {
