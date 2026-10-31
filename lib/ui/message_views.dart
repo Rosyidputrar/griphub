@@ -59,7 +59,7 @@ class UserMessageView extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 AnimatedOpacity(
-                  duration: const Duration(milliseconds: 150),
+                  duration: Motion.of(context, const Duration(milliseconds: 150)),
                   opacity: working != null ? 0.5 : 1,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,

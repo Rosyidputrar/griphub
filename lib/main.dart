@@ -55,7 +55,7 @@ class GripHubApp extends StatelessWidget {
         home: ListenableBuilder(
           listenable: agent,
           builder: (context, _) => AnimatedSwitcher(
-            duration: const Duration(milliseconds: 250),
+            duration: Motion.of(context, const Duration(milliseconds: 250)),
             child: !appearance.onboarded
                 ? OnboardingScreen(agent: agent)
                 : switch (agent.status) {

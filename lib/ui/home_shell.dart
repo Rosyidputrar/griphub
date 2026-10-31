@@ -378,14 +378,14 @@ class _TabLayerState extends State<_TabLayer> {
           ignoring: !active,
           child: AnimatedOpacity(
             opacity: active ? 1 : 0,
-            duration: const Duration(milliseconds: 240),
+            duration: Motion.of(context, const Duration(milliseconds: 240)),
             curve: Curves.easeOutCubic,
             onEnd: () {
               if (!widget.active && mounted) setState(() => hidden = true);
             },
             child: AnimatedSlide(
               offset: active ? Offset.zero : Offset(widget.forward ? 0.04 : -0.04, 0),
-              duration: const Duration(milliseconds: 300),
+              duration: Motion.of(context, const Duration(milliseconds: 300)),
               curve: Curves.easeOutCubic,
               child: widget.child,
             ),
@@ -517,7 +517,7 @@ class _NavItemState extends State<_NavItem> {
                 // The white disc grows in with a little overshoot.
                 AnimatedScale(
                   scale: selected ? 1 : 0,
-                  duration: const Duration(milliseconds: 380),
+                  duration: Motion.of(context, const Duration(milliseconds: 380)),
                   curve: selected ? Curves.easeOutBack : Curves.easeInCubic,
                   child: Container(
                     width: 48,
@@ -527,11 +527,11 @@ class _NavItemState extends State<_NavItem> {
                 ),
                 AnimatedScale(
                   scale: pressed ? 0.8 : (selected ? 1.08 : 1),
-                  duration: const Duration(milliseconds: 220),
+                  duration: Motion.of(context, const Duration(milliseconds: 220)),
                   curve: Curves.easeOutBack,
                   child: TweenAnimationBuilder<Color?>(
                     tween: ColorTween(end: selected ? ink : Colors.white.withValues(alpha: 0.78)),
-                    duration: const Duration(milliseconds: 220),
+                    duration: Motion.of(context, const Duration(milliseconds: 220)),
                     builder: (context, color, _) => Icon(widget.icon, size: 21, color: color),
                   ),
                 ),
@@ -576,7 +576,7 @@ class _CreateButtonState extends State<_CreateButton> {
         },
         child: AnimatedScale(
           scale: pressed ? 0.9 : 1,
-          duration: const Duration(milliseconds: 160),
+          duration: Motion.of(context, const Duration(milliseconds: 160)),
           curve: Curves.easeOutBack,
           child: Container(
             width: 66,
@@ -591,7 +591,7 @@ class _CreateButtonState extends State<_CreateButton> {
             ),
             child: AnimatedRotation(
               turns: turns,
-              duration: const Duration(milliseconds: 420),
+              duration: Motion.of(context, const Duration(milliseconds: 420)),
               curve: Curves.easeOutBack,
               child: Icon(LucideIcons.plus, size: 28, color: p.onAccent),
             ),

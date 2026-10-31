@@ -40,7 +40,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   // Home takes over from here and offers to connect a model if none is set.
   void _start() => Appearance.instance.finishOnboarding();
 
-  void _next() => pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
+  void _next() => Motion.reduced(context)
+      ? pages.jumpToPage((pages.page ?? 0).round() + 1)
+      : pages.nextPage(duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
 
   /// Push the GripHub key screen; a saved key finishes onboarding straight
   /// into Home (no connect card — the key is already there). Backing out
@@ -149,7 +151,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   children: [
                     for (var i = 0; i < _slides.length; i++)
                       AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
+                        duration: Motion.of(context, const Duration(milliseconds: 220)),
                         margin: const EdgeInsets.symmetric(horizontal: 4),
                         width: 9,
                         height: 9,

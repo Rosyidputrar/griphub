@@ -292,7 +292,7 @@ class _CopyButtonState extends State<CopyButton> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 150),
+                duration: Motion.of(context, const Duration(milliseconds: 150)),
                 child: Icon(copied ? LucideIcons.check : LucideIcons.copy, key: ValueKey(copied), size: 14, color: color),
               ),
               if (widget.showLabel) ...[

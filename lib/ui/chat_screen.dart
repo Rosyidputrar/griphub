@@ -225,7 +225,11 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!scroll.hasClients || dragging) return;
       final target = scroll.position.maxScrollExtent;
       if (animate) {
-        scroll.animateTo(target, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        if (Motion.reduced(context)) {
+          scroll.jumpTo(target);
+        } else {
+          scroll.animateTo(target, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        }
         return;
       }
       scroll.jumpTo(target);
@@ -1143,7 +1147,7 @@ class _Composer extends StatelessWidget {
         child: ListenableBuilder(
           listenable: focus,
           builder: (context, child) => AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
+            duration: Motion.of(context, const Duration(milliseconds: 180)),
             decoration: BoxDecoration(
               color: p.surface,
               borderRadius: BorderRadius.circular(Radii.xl),
@@ -1415,7 +1419,7 @@ class _RoundButton extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: Motion.of(context, const Duration(milliseconds: 180)),
           width: 38,
           height: 38,
           decoration: BoxDecoration(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/main.dart';
+import 'package:griphub_agent/ui/code_view.dart';
 import 'package:griphub_agent/ui/diff_view.dart';
 import 'package:griphub_agent/ui/home_shell.dart';
 import 'package:griphub_agent/ui/kit.dart';
@@ -29,6 +30,7 @@ void main() {
   group('UI-12: long diffs', diffTests);
   group('UI-13: status bar', statusBarTests);
   group('UI-14: touch targets', touchTargetTests);
+  group('UI-15: reduced motion', motionTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -245,4 +247,33 @@ void touchTargetTests() {
     atLeast48(tester, find.ancestor(of: find.byTooltip('Cancel'), matching: find.byType(IconButton)).first, 'Cancel');
     atLeast48(tester, find.ancestor(of: find.byTooltip('Delete'), matching: find.byType(IconButton)).first, 'Delete');
   });
+}
+
+void motionTests() {
+  for (final reduced in [false, true]) {
+    testWidgets('UI-15: animations take no time when the system says to remove them (reduced: $reduced)', (tester) async {
+      FakeHost();
+      await pumpLook(
+        tester,
+        const Look(),
+        Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: reduced),
+            child: Scaffold(
+              body: Column(
+                children: [
+                  PrimaryButton(label: 'Go', onPressed: () {}),
+                  const CopyButton(text: 'x'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      final opacity = tester.widget<AnimatedOpacity>(find.descendant(of: find.byType(PrimaryButton), matching: find.byType(AnimatedOpacity)));
+      final swap = tester.widget<AnimatedSwitcher>(find.descendant(of: find.byType(CopyButton), matching: find.byType(AnimatedSwitcher)));
+      expect(opacity.duration, reduced ? Duration.zero : const Duration(milliseconds: 150));
+      expect(swap.duration, reduced ? Duration.zero : const Duration(milliseconds: 150));
+    });
+  }
 }

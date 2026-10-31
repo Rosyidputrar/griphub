@@ -295,7 +295,7 @@ class _DistroCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
+            duration: Motion.of(context, const Duration(milliseconds: 150)),
             width: 22,
             height: 22,
             decoration: BoxDecoration(

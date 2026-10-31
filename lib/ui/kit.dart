@@ -38,7 +38,7 @@ class PrimaryButton extends StatelessWidget {
     final p = context.palette;
     final enabled = onPressed != null && !busy;
     return AnimatedOpacity(
-      duration: const Duration(milliseconds: 150),
+      duration: Motion.of(context, const Duration(milliseconds: 150)),
       opacity: enabled ? 1 : 0.45,
       child: Material(
         color: p.text,
@@ -167,7 +167,7 @@ class PillSegments<T> extends StatelessWidget {
       }
 
       final pill = AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: Motion.of(context, const Duration(milliseconds: 180)),
         curve: Curves.easeOut,
         decoration: BoxDecoration(
           color: on ? p.text : Colors.transparent,
