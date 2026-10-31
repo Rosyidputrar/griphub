@@ -79,6 +79,7 @@
 - Detail subagent mengikuti langkah terbaru setelah kamu menggulir ke bawah, dan berhenti mengikuti saat kamu menggulir ke atas untuk membaca. Tombol Gulir ke bawah membawamu kembali.
 - Subagent bisa dibagikan sebagai Markdown (tugas, langkah, dan laporannya): sebagai teks, file, disalin, atau disimpan ke Download.
 - Pembaca layar kini menyebut status setiap tool subagent (selesai, gagal, berjalan) dan apakah kartunya terbuka.
+- Cadangan otomatis server tidak lagi membengkak: folder berawalan titik di workspace (misalnya `.toolchains` berisi JDK dan Android SDK) dan folder hasil build (`build`, `target`, `dist`) tidak ikut dicadangkan, sedangkan `.git`, `.env`, dan file proyek tetap ikut. Sisa cadangan yang terputus di tengah jalan juga dibersihkan otomatis, tidak lagi menumpuk di folder cadangan.
 
 ## English
 
@@ -159,3 +160,4 @@
 - A subagent's details follow the newest step once you scroll to the bottom, and stop following when you scroll up to read. A Scroll to bottom button takes you back.
 - A subagent can be shared as Markdown (its task, steps and report): as text, as a file, copied, or saved to Downloads.
 - Screen readers now say each subagent tool's status (done, failed, running) and whether its card is open.
+- The server's automatic backups no longer balloon: dot folders in the workspace (for example `.toolchains`, holding a JDK and the Android SDK) and build output folders (`build`, `target`, `dist`) are left out, while `.git`, `.env` and project files stay in. Leftovers of a backup that was cut short are also cleaned away instead of piling up in the backups folder.

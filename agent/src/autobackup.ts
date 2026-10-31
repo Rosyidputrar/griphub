@@ -62,6 +62,15 @@ export const DEPENDENCY_DIRS = new Set([
 	".cache",
 ]);
 
+/**
+ * Build output, left out of the workspace wherever it is: a build brings it back, and it can dwarf the project (a
+ * Flutter test cache alone was 80 MB). Only the workspace: nothing the agent keeps for itself is named like this.
+ */
+export const BUILD_DIRS = new Set(["build", "target", "dist"]);
+
+/** A `.tmp` that a backup left behind is removed once it has not been written to for this long. */
+export const STALE_TMP_MS = 15 * 60_000;
+
 /** What a store file keeps beside itself: its last good copy, a damaged file set aside, an unfinished write. */
 const STORE_SIDECAR = /[\\/](integrations|custom-providers|mcp|auto-backup|runs|sync)\.json\.(bak|corrupt-\d+|tmp-\d+)$/;
 
@@ -123,6 +132,8 @@ export class AutoBackup {
 	private config: Config;
 	private timer?: NodeJS.Timeout;
 	private making: Promise<BackupInfo | null> | null = null;
+	/** The unfinished file this process is writing right now, never cleaned away. */
+	private writing: string | null = null;
 
 	constructor(private readonly o: AutoBackupOptions) {
 		this.config = readSecureJson<Config>(o.configFile, {}, isObject);
@@ -188,6 +199,7 @@ export class AutoBackup {
 
 	/** Checks every interval (the first time a minute after start, so a restart does not wait an hour). */
 	start() {
+		this.cleanTmp();
 		const every = this.o.intervalMs ?? BACKUP_INTERVAL_MS;
 		const first = setTimeout(() => void this.tick(), Math.min(60_000, every));
 		first.unref();
@@ -237,6 +249,33 @@ export class AutoBackup {
 
 	private prune() {
 		for (const b of this.list().slice(this.o.keep ?? 3)) rmSync(b.path, { force: true });
+		this.cleanTmp();
+	}
+
+	/**
+	 * Removes what a backup that was cut short (the host stopped, the disk filled) left in the folder: nobody renames
+	 * it, and one such file was 492 MB. Not the file this process is writing, and not one written to lately (another
+	 * host process may still be making it); only a leftover that has been still for [STALE_TMP_MS].
+	 */
+	cleanTmp() {
+		let names: string[];
+		try {
+			names = readdirSync(this.o.dir);
+		} catch {
+			return;
+		}
+		for (const name of names) {
+			if (!/^\.auto-\d+\.ghb\.tmp$/.test(name)) continue;
+			const path = join(this.o.dir, name);
+			if (path === this.writing) continue;
+			try {
+				if (this.now() - statSync(path).mtimeMs < STALE_TMP_MS) continue;
+				rmSync(path, { force: true });
+				this.o.log?.(`removed unfinished backup ${name}`);
+			} catch {
+				// gone already, or not ours to remove: leave it
+			}
+		}
 	}
 
 	/** What goes in: the agent's data, the workspace, and the deploy key; never the backups themselves. */
@@ -255,9 +294,14 @@ export class AutoBackup {
 			if (secure && this.o.noSecrets) return;
 			out.push({ abs, name: `${secure ? "secure" : "agent"}/${rel}`, size: st.size, mtimeMs: st.mtimeMs, secure });
 		});
-		walk(this.o.workspace, wsSkip, (abs, st) => {
-			out.push({ abs, name: `workspace/${relative(this.o.workspace, abs).split(sep).join("/")}`, size: st.size, mtimeMs: st.mtimeMs, secure: false });
-		});
+		walk(
+			this.o.workspace,
+			wsSkip,
+			(abs, st) => {
+				out.push({ abs, name: `workspace/${relative(this.o.workspace, abs).split(sep).join("/")}`, size: st.size, mtimeMs: st.mtimeMs, secure: false });
+			},
+			true,
+		);
 		for (const f of ["id_ed25519", "id_ed25519.pub"]) {
 			const abs = join(this.o.home, ".ssh", f);
 			if (existsSync(abs)) {
@@ -277,6 +321,7 @@ export class AutoBackup {
 		const final = join(this.o.dir, name);
 		const tmp = join(this.o.dir, `.${name}.tmp`);
 		const fd = openSync(tmp, "w", 0o600);
+		this.writing = tmp;
 		const skipped: { name: string; why: string }[] = [];
 		try {
 			const iv = randomBytes(12);
@@ -324,16 +369,18 @@ export class AutoBackup {
 		} catch (e) {
 			closeSync(fd);
 			rmSync(tmp, { force: true });
+			this.writing = null;
 			throw e;
 		}
 		closeSync(fd);
 		renameSync(tmp, final);
+		this.writing = null;
 		return { name, path: final, at, size: statSync(final).size };
 	}
 }
 
 /** Calls [fn] for every regular file under [dir], skipping dependency folders, [skip] paths and links. */
-function walk(dir: string, skip: Set<string>, fn: (abs: string, st: { size: number; mtimeMs: number }) => void) {
+function walk(dir: string, skip: Set<string>, fn: (abs: string, st: { size: number; mtimeMs: number }) => void, workspace = false) {
 	if (!existsSync(dir) || skip.has(dir)) return;
 	let names: string[];
 	try {
@@ -351,9 +398,20 @@ function walk(dir: string, skip: Set<string>, fn: (abs: string, st: { size: numb
 		} catch {
 			continue;
 		}
-		if (st.isDirectory()) walk(abs, skip, fn);
-		else if (st.isFile()) fn(abs, st);
+		if (st.isDirectory()) {
+			if (workspace && skipInWorkspace(name)) continue;
+			walk(abs, skip, fn, workspace);
+		} else if (st.isFile()) fn(abs, st);
 	}
+}
+
+/**
+ * Folders of the workspace that stay out: build output, and every folder whose name starts with a dot (a toolchain
+ * the agent downloaded into ~/workspace/.toolchains was 590 MB of a 719 MB backup), except a project's `.git`. Dot
+ * *files* stay in (a project's .env, .gitignore): they are small, and a restore without them loses real settings.
+ */
+function skipInWorkspace(name: string) {
+	return BUILD_DIRS.has(name) || (name.startsWith(".") && name !== ".git");
 }
 
 /** A file secure.ts wrote encrypted with this machine's store key. */
