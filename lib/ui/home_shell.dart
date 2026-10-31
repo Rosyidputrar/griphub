@@ -981,8 +981,15 @@ class _ConnectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A near-black card on the light theme; on the dark one that was the page's own colour (0xFF111113 on 0xFF0B0B0D),
+    // so it gets a lighter fill and an edge there.
+    final dark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      decoration: BoxDecoration(color: const Color(0xFF111113), borderRadius: BorderRadius.circular(Radii.xl)),
+      decoration: BoxDecoration(
+        color: dark ? connectCardDark : const Color(0xFF111113),
+        borderRadius: BorderRadius.circular(Radii.xl),
+        border: dark ? Border.all(color: Colors.white.withValues(alpha: 0.14)) : null,
+      ),
       clipBehavior: Clip.antiAlias,
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -1811,3 +1818,6 @@ class _OnSwitchingState extends State<_OnSwitching> {
   @override
   Widget build(BuildContext context) => widget.builder(context, _switching);
 }
+
+/// The connect card's fill on the dark theme: set apart from the page, with room for its white text.
+const connectCardDark = Color(0xFF26262C);

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/ui/code_view.dart';
+import 'package:griphub_agent/ui/home_shell.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
 double contrast(Color a, Color b) {
@@ -15,6 +16,7 @@ double contrast(Color a, Color b) {
 }
 
 void main() {
+  group('UI-23: fixed colours', fixedColourTests);
   group('UI-21: small contrast shortfalls', smallContrastTests);
   group('accent as text', accentTextTests);
   test('UI-08: text on a danger fill reads in both themes (white on the dark red was 2.9:1)', () {
@@ -94,5 +96,20 @@ void smallContrastTests() {
   test('UI-21: the light theme\'s code comments read on a card', () {
     final comment = syntaxColors(Brightness.light)['comment']!;
     expect(contrast(comment, Palette.light.surface), greaterThanOrEqualTo(4.5));
+  });
+}
+
+void fixedColourTests() {
+  test('UI-23: the connect card stands apart from the dark page, and its white text reads on it', () {
+    expect(contrast(connectCardDark, Palette.dark.bg), greaterThanOrEqualTo(1.3), reason: 'it was 1.04:1, the page\'s own colour');
+    expect(contrast(Colors.white, connectCardDark), greaterThanOrEqualTo(4.5));
+    expect(contrast(const Color(0xFF111113), Palette.dark.bg), lessThan(1.1), reason: 'the old fill really vanished');
+  });
+
+  test('UI-23: the running CI spinner stands out from the page in both themes (the fixed amber was 1.95:1)', () {
+    for (final p in [Palette.light, Palette.dark]) {
+      expect(contrast(readableOn(p.warning, p.bg, target: 3), p.bg), greaterThanOrEqualTo(3));
+    }
+    expect(contrast(const Color(0xFFE3B341), Palette.light.bg), lessThan(3));
   });
 }

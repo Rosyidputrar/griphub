@@ -29,7 +29,8 @@ Widget ciStatusIcon(BuildContext context, String? status, String? conclusion, {d
   final p = context.palette;
   if (status != 'completed') {
     if (status == 'in_progress') {
-      return BusySpinner(size: size - 3, color: const Color(0xFFE3B341));
+      // The theme's warning colour, made to stand out from the page (the fixed amber was 1.95:1 on white).
+      return BusySpinner(size: size - 3, color: readableOn(p.warning, p.bg, target: 3));
     }
     return Icon(LucideIcons.circle, size: size, color: p.faint);
   }
