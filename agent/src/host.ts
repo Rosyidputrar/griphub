@@ -26,6 +26,7 @@ import {
 	ModelRuntime,
 	SessionManager,
 	SettingsManager,
+	sessionEntryToContextMessages,
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { agentsFileText, isManaged } from "./agents-file.js";
@@ -289,9 +290,21 @@ function withCost(m: any) {
 	return m?.role === "assistant" ? { ...m, griphubCost: messageCost(m) } : m;
 }
 
+/**
+ * What a summary of older turns cost (it is a model request too), as `griphubCost` on its result. Its request has
+ * no model of its own on record: it ran on the chat's model ([model]).
+ */
+function summaryCost(usage: any, model: { provider?: string; id?: string } | undefined) {
+	return usage && model ? messageCost({ role: "assistant", usage, provider: model.provider, model: model.id }) : null;
+}
+
 /** Drop cumulative snapshots from streaming updates, like pi's JSON mode. */
 function wireEvent(event: AgentSessionEvent): object {
 	if (event.type === "message_end") return { ...event, message: withCost((event as any).message) };
+	if (event.type === "compaction_end" && (event as any).result?.usage) {
+		const result = (event as any).result;
+		event = { ...event, result: { ...result, griphubCost: summaryCost(result.usage, session?.model) } } as AgentSessionEvent;
+	}
 	// A summary the host started for the context limit (capContext) says so, with the limit, rather than "manual".
 	if ((event.type === "compaction_start" || event.type === "compaction_end") && capping) {
 		return { ...event, reason: "limit", limit: compactAt() };
@@ -581,6 +594,21 @@ function compactAt(): number {
 }
 
 /**
+ * Summaries that left the chat over the limit (they failed, or the router refused them): which chat, at how many
+ * tokens the last one was, and how many in a row. Each try is a paid request, and a chat whose summary keeps failing
+ * used to buy one after every turn until the daily budget was gone. Now it is tried again only once the chat has grown
+ * by a quarter since, and not at all after CAP_MAX_FAILURES in a row (pi's own summary near the model's limit still
+ * stands behind it).
+ */
+let capFailed: { chat: string; tokens: number; count: number } | null = null;
+
+/** How much a chat must grow after a failed summary before it is tried again. */
+const CAP_RETRY_GROWTH = 1.25;
+
+/** Failed summaries in a row after which the chat is left to pi's own. */
+const CAP_MAX_FAILURES = 3;
+
+/**
  * Summarizes the open chat when its context passed the limit and the model allows more than that (pi itself only
  * compacts near the model's limit). Between turns only, never past the daily budget (a summary is a request too); a
  * failure is said by the compaction_end the app gets, and pi's own compaction stays as the safety net.
@@ -591,6 +619,8 @@ async function capContext() {
 	if (!s || !limit || s.isStreaming || s.isCompacting || fallbackPending || capping) return;
 	const usage = s.getContextUsage();
 	if (!usage?.tokens || usage.contextWindow <= limit || usage.tokens <= limit) return;
+	const chat = s.sessionFile ?? s.sessionId;
+	if (capFailed?.chat === chat && (capFailed.count >= CAP_MAX_FAILURES || usage.tokens < capFailed.tokens * CAP_RETRY_GROWTH)) return;
 	// pi keeps the newest turns as they are (keepRecentTokens); with no more than that in the chat (the rest is the
 	// system prompt) there is nothing to summarize, and trying would only report a failure.
 	const keep = settingsManager.getCompactionSettings(s.model).keepRecentTokens;
@@ -602,6 +632,11 @@ async function capContext() {
 		.then(() => {})
 		.catch((e) => log("compact:", (e as Error).message))
 		.finally(() => {
+			// Judged by the outcome, not by whether compact() threw: a summary pi reports as failed or aborted leaves the
+			// chat as big as it was.
+			const after = s.getContextUsage()?.tokens;
+			const failedBefore = capFailed?.chat === chat ? capFailed.count : 0;
+			capFailed = after == null || after > limit ? { chat, tokens: usage.tokens!, count: failedBefore + 1 } : null;
 			capping = null;
 		});
 	await capping;
@@ -632,6 +667,34 @@ function recordTurnTime(ms: number) {
 	} catch (e) {
 		log("turn time:", (e as Error).message);
 	}
+}
+
+/**
+ * The open chat's turns that the latest summary replaced, oldest first. pi keeps them in the chat's file but no longer
+ * sends them to the model, and `messages` (the model's context) has only the summary in their place: without this
+ * they could not be read again, in the app or in an export. Empty for a chat never summarized.
+ */
+function summarizedMessages(s: AgentSession): any[] {
+	const branch = s.sessionManager.getBranch() as any[];
+	const last = branch.findLastIndex((e) => e.type === "compaction");
+	if (last < 0) return [];
+	const out: any[] = [];
+	for (const e of branch.slice(0, last)) {
+		if (e.id === branch[last].firstKeptEntryId) break;
+		// Earlier summaries are left out: the turns they stood for are in the list themselves.
+		if (e.type === "message" || e.type === "custom_message") out.push(...sessionEntryToContextMessages(e));
+	}
+	return out.filter((m) => m.role !== "system");
+}
+
+/** What the latest summary of the open chat cost, for the line that stands for it when the chat is opened again. */
+function latestSummaryCost(s: AgentSession) {
+	const branch = s.sessionManager.getBranch() as any[];
+	const at = branch.findLastIndex((e) => e.type === "compaction");
+	if (at < 0 || !branch[at].usage) return null;
+	// The model it ran on: the chat's, as of the last reply before it.
+	const reply = branch.slice(0, at).findLast((e) => e.type === "message" && e.message?.role === "assistant")?.message;
+	return summaryCost(branch[at].usage, reply ? { provider: reply.provider, id: reply.model } : s.model);
 }
 
 /** Turn durations of the open chat, by the timestamp of each turn's last reply. */
@@ -1048,6 +1111,8 @@ async function deleteSessions(paths: string[], cwd?: string) {
 	const gone = new Set(files);
 	for (const file of new Set(jobs.list().map((j) => j.sessionFile))) if (gone.has(resolve(file))) jobs.forgetSession(file);
 	for (let i = finishedJobs.length - 1; i >= 0; i--) if (gone.has(resolve(finishedJobs[i].sessionFile))) finishedJobs.splice(i, 1);
+	// And its subagents stop: their report would reach no one, and one still at work would go on changing files.
+	subagents.stopForChats(gone, resolve);
 	return { deleted, ...state() };
 }
 
@@ -1474,7 +1539,11 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "open_session":
 			if (s.sessionFile && resolve(cmd.path) === resolve(s.sessionFile)) return state();
 			assertIdle();
-			return openSession(SessionManager.open(cmd.path));
+			// A chat with no message has no file yet, and opening a file that isn't there takes the process's own folder:
+			// the app says which folder the chat was in (cmd.cwd), and a file that exists keeps the one in its header.
+			return openSession(
+				SessionManager.open(cmd.path, undefined, existsSync(cmd.path) ? undefined : (cmd.cwd as string | undefined) ?? workspace),
+			);
 		case "rename_session": {
 			const name = String(cmd.name ?? "").trim();
 			if (!name) throw new Error("Name is empty");
@@ -1495,10 +1564,13 @@ async function handle(cmd: Command): Promise<unknown> {
 			const times = turnTimes(s);
 			return s.messages.map((m: any) => {
 				const out = withCost(m);
+				if (m.role === "compactionSummary") return { ...out, griphubCost: latestSummaryCost(s) };
 				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
 				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
 			});
 		}
+		case "summarized_messages":
+			return summarizedMessages(s).map(withCost);
 
 		// Accounts, repositories, SSH and deploys (integrations.ts).
 		case "integrations":

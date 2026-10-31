@@ -21,6 +21,12 @@ export const JOB_LIMIT_MINUTES = 60;
 /** How many jobs one chat may run at a time (like subagent's MAX_RUNNING): a runaway loop cannot fork endlessly. */
 export const MAX_RUNNING_PER_CHAT = 3;
 
+/**
+ * How many jobs the host runs at once across all chats. The per-chat cap alone let five busy chats run fifteen heavy
+ * commands together on one small server, slowing every chat on it.
+ */
+export const MAX_RUNNING_TOTAL = 6;
+
 /** How many finished jobs are remembered per chat; older records go when a new job starts. */
 export const KEPT_PER_CHAT = 20;
 
@@ -110,6 +116,11 @@ export class Jobs {
 		const mine = [...this.running.values()].filter((r) => r.job.sessionFile === o.sessionFile).length;
 		if (mine >= MAX_RUNNING_PER_CHAT) {
 			throw new Error(`This chat already runs ${mine} background jobs; wait for one to end or stop one first`);
+		}
+		if (this.running.size >= MAX_RUNNING_TOTAL) {
+			throw new Error(
+				`${this.running.size} background jobs are already running across all chats; wait for one to end or stop one first`,
+			);
 		}
 		this.prune(o.sessionFile);
 		const minutes = Math.min(JOB_LIMIT_MINUTES, Math.max(1, Math.round(o.minutes ?? JOB_LIMIT_MINUTES)));

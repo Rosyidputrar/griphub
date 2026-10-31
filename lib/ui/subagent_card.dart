@@ -265,7 +265,7 @@ class _SubagentCardState extends State<SubagentCard> with _Ticking, SingleTicker
         style: text.bodyMedium,
       ),
       SubagentStatus.failed => Text(
-        s.error ?? tr('Failed'),
+        s.error == null ? tr('Failed') : tr(s.error!),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: text.bodyMedium?.copyWith(color: p.danger),
@@ -789,7 +789,7 @@ class _SubagentSheetState extends State<SubagentSheet> with _Ticking {
               if (s.isTerminal) ...[
                 const SizedBox(height: 14),
                 switch (s.status) {
-                  SubagentStatus.failed => _Note(icon: LucideIcons.circleX, color: p.danger, text: s.error ?? tr('Failed')),
+                  SubagentStatus.failed => _Note(icon: LucideIcons.circleX, color: p.danger, text: s.error == null ? tr('Failed') : tr(s.error!)),
                   SubagentStatus.stopped => _Note(icon: LucideIcons.circleStop, color: p.muted, text: subagentStopText(s)),
                   _ => _Note(icon: LucideIcons.circleCheck, color: p.success, text: tr('Finished; the report went back to the parent chat.')),
                 },

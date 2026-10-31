@@ -20,6 +20,16 @@
 - Review & commit: setelah agent selesai dan ada file yang berubah, chat menawarkan "Review & commit". Satu layar menampilkan semua file yang berubah beserta diff-nya, pesan commit yang ditulis agent (bisa diubah), serta tombol Commit atau Commit dan push. Membatalkan perubahan agent juga bisa dari layar yang sama. Tersedia juga di menu Project.
 - Mode server: pesan yang dikirim saat koneksi ke server putus kini disimpan dan dikirim otomatis begitu tersambung lagi, berurutan, alih-alih gagal. Pesan ini tetap tersimpan walau aplikasi ditutup. Bila server menolaknya (misalnya budget habis), alasannya ditampilkan dengan tombol Kirim lagi, dan pesan sesudahnya, termasuk yang baru diketik, menunggu di belakangnya. Pesan yang koneksinya putus saat sedang dikirim tidak dikirim ulang otomatis, karena server mungkin sudah menerimanya. Kamu diminta mengecek dulu, supaya tugas tidak jalan dua kali. Membatalkannya mengembalikan teksnya ke kolom chat.
 - Files bisa diurutkan menurut nama, terakhir diedit, terbesar, atau jenis, dengan pilihan folder tetap di atas. Chip di bawah judul menyaring satu jenis file: folder, kode, gambar, dokumen, data, arsip, atau media. Hanya jenis yang ada di folder itu yang muncul.
+- Baris "Konteks diringkas" kini juga menampilkan biaya ringkasan itu (misalnya ~0,42 kredit), karena meringkas juga satu permintaan ke model.
+- Giliran lama yang sudah diringkas bisa dibaca lagi: ketuk baris "Konteks diringkas" lalu "Baca giliran sebelumnya". Pesan, jawaban agent, dan tool-nya tampil apa adanya dan bisa disalin sebagai Markdown.
+- Ringkasan yang gagal tidak lagi dicoba ulang setiap giliran sampai budget harian habis: dicoba lagi hanya setelah chat bertambah seperempat, dan berhenti setelah tiga kali gagal berturut-turut.
+- Mode server: bila agent di server dimulai ulang saat kamu sedang di sebuah chat, chat itu dibuka lagi, tidak lagi berganti ke chat kosong bertuliskan "Hubungkan model". Subagent yang sedang bekerja saat itu ditandai hilang, tidak lagi tampil berjalan selamanya.
+- Subagent yang menunggu persetujuan kini berhenti menunggu saat batas waktunya habis. Menghapus chat juga menghentikan subagent-nya.
+- Tugas: bagian baru "Pekerjaan latar" menampilkan pekerjaan latar dari semua chat (yang berjalan di atas), beserta durasinya dan tombol Berhenti. Ketuk untuk membuka chat-nya.
+- Paling banyak 6 pekerjaan latar berjalan bersamaan di semua chat, agar server tidak kewalahan.
+- Akun → GitHub kini jujur soal masuk dengan kode: bila aplikasi tidak punya Client ID bawaan dan kamu belum mengisinya, tertulis bahwa cara itu mati dan sebaiknya masuk dengan token. Client ID yang sudah disimpan kini benar-benar ditampilkan.
+- Panduan server: entri baru untuk perintah yang macet saat box menyala (box-nya yang macet, bukan agent-nya), dengan langkah menghentikan box atau mematikannya.
+- Animasi selesai (centang hijau) kini berganti warna dulu, baru bergerak, sesuai desain yang disetujui.
 
 ## English
 
@@ -41,3 +51,13 @@
 - Review & commit: when the agent finishes and files changed, the chat offers "Review & commit". One screen shows every changed file with its diff, a commit message the agent writes (yours to edit), and Commit or Commit and push. Undoing the agent's changes is on the same screen. Also in the Project menu.
 - Server mode: a message sent while the connection to the server is down is now kept and sent by itself, in order, once it is back, instead of failing. It is kept even if the app is closed. If the server refuses it (no budget left, for example), it says why with Send again, and the messages after it, new ones included, wait behind it. A message whose connection dropped while it was being sent is not sent again by itself: the server may already have it, so you are asked to check first and the task doesn't run twice. Cancelling it puts its text back in the chat box.
 - Files can be sorted by name, recently edited, largest or type, with folders kept on top or not. Chips under the title show one kind of file: folders, code, images, documents, data, archives or media. Only the kinds the folder has appear.
+- The "Context summarized" line now also says what the summary cost (for example ~0.42 credits): a summary is a model request too.
+- Turns that were summarized can be read again: tap the "Context summarized" line, then "Read the earlier turns". The messages, the agent's answers and its tools show as they were, and can be copied as Markdown.
+- A summary that fails is no longer tried again after every turn until the daily budget is gone: it is tried again only once the chat has grown by a quarter, and not after three failures in a row.
+- Server mode: when the agent on the server restarts while you are in a chat, that chat opens again instead of switching to an empty one that says "Connect a model". Subagents that were working then show as lost, not as running for good.
+- A subagent waiting for an approval now stops waiting when its time limit is up. Deleting a chat also stops its subagents.
+- Tasks: a new "Background jobs" section shows every chat's background jobs (running ones first), how long they have run, and Stop. Tap one to open its chat.
+- At most 6 background jobs run at once across all chats, so the server is not overwhelmed.
+- Accounts → GitHub is honest about signing in with a code: when the app has no built-in Client ID and you have not entered one, it says that way is off and to sign in with a token. A saved Client ID now actually shows.
+- Server guide: a new entry for commands that hang while the box is on (the box is stuck, not the agent), with how to stop the box or turn it off.
+- The done animation (the green check) now changes colour first, then moves, as in the approved design.

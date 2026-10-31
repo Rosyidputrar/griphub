@@ -18,6 +18,7 @@ import 'package:griphub_agent/ui/git_screen.dart';
 import 'package:griphub_agent/ui/live_clock.dart';
 import 'package:griphub_agent/ui/message_views.dart';
 import 'package:griphub_agent/ui/server_guide.dart';
+import 'package:griphub_agent/ui/tasks_screen.dart';
 
 import 'harness.dart';
 
@@ -405,6 +406,59 @@ void main() {
       });
     }
 
+    testWidgets('Tasks lists every chat\'s background jobs, running first, with Stop and a way to the chat', (tester) async {
+      final host = FakeHost();
+      Map<String, dynamic> job(String id, String chat, String status, {required int ms, String label = 'Build the app'}) => {
+        'id': id,
+        'sessionFile': chat,
+        'command': 'npm run build',
+        'label': label,
+        'cwd': '/w/shop',
+        'status': status,
+        'elapsedMs': ms,
+        'limitMinutes': 60,
+        if (status != 'running') 'exitCode': status == 'done' ? 0 : 1,
+      };
+      host.answers['job_list'] = (_) => [
+        job('j1', 'here.jsonl', 'done', ms: 30000, label: 'Run the tests'),
+        job('j2', 'other.jsonl', 'running', ms: 95000),
+      ];
+      host.answers['job_stop'] = (cmd) => job(cmd['jobId'] as String, 'other.jsonl', 'stopped', ms: 96000);
+      host.answers['runs'] = (_) => {'runs': const [], 'schedules': const [], 'concurrency': 1};
+      final agent = newAgent()..sessionFile = 'here.jsonl';
+      await pumpLook(tester, const Look(), TasksScreen(agent: agent), height: 900);
+      await frames(tester);
+      expect(host.sent('job_list'), hasLength(1), reason: 'read afresh when Tasks opens');
+      await tester.scrollUntilVisible(find.text('Run the tests'), 200, scrollable: find.byType(Scrollable).first);
+      expect(find.text('BACKGROUND JOBS'), findsOneWidget);
+      final build = tester.getTopLeft(find.text('Build the app')).dy;
+      final tests = tester.getTopLeft(find.text('Run the tests')).dy;
+      expect(build, lessThan(tests), reason: 'the running one first');
+      expect(find.text('shop · another chat'), findsOneWidget);
+      expect(find.text('shop · this chat'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(layoutErrors, isEmpty);
+      await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('tasks_jobs_light_en')));
+
+      expect(find.text('Stop'), findsOneWidget, reason: 'only the running one can be stopped');
+      await tester.tap(find.text('Stop'));
+      await frames(tester);
+      expect(host.sent('job_stop').single['jobId'], 'j2');
+      expect(find.text('Stop'), findsNothing);
+      expect(find.textContaining('stopped'), findsOneWidget);
+
+      await tester.tap(find.text('Build the app'));
+      await frames(tester);
+      expect(host.opened, ['other.jsonl'], reason: 'its chat opens');
+    });
+
+    testWidgets('Tasks without background jobs has no section for them', (tester) async {
+      FakeHost();
+      await pumpLook(tester, const Look(), TasksScreen(agent: newAgent()), height: 1400);
+      await frames(tester);
+      expect(find.text('BACKGROUND JOBS'), findsNothing);
+    });
+
     testWidgets('a job card the host no longer knows says so, but only once the host\'s list was read', (tester) async {
       final host = FakeHost();
       host.answers['job_list'] = (_) => const [];
@@ -620,6 +674,16 @@ void main() {
       for (final (title, _) in serverTroubleshooting()) {
         expect(find.text(title), findsOneWidget, reason: title);
       }
+    });
+
+    testWidgets('commands that hang with the box on: the guide says it is the box, and how to go on without it', (tester) async {
+      final (_, body) = serverTroubleshooting().firstWhere((t) => t.$1 == 'Commands hang and never answer');
+      expect(body, contains('the box is stuck, not the agent'));
+      expect(body, contains('turn the box off'));
+      FakeHost();
+      await pumpLook(tester, const Look(), const ServerGuideScreen(), height: 6000);
+      await frames(tester, 2);
+      expect(find.textContaining('or its commands hang'), findsOneWidget, reason: 'the box switch says when to turn it off');
     });
   });
 }

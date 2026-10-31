@@ -502,6 +502,7 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
 
   /// What the agent uses now; the field may hold an unsaved edit.
   String get _saved => widget.agent.integrations.settings?.githubClientId?.trim() ?? '';
+  bool get _builtIn => widget.agent.integrations.settings?.githubClientIdBuiltIn ?? false;
 
   @override
   void initState() {
@@ -556,7 +557,9 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                         Text(tr('GitHub OAuth client ID'), style: text.titleSmall),
                         const SizedBox(height: 2),
                         Text(
-                          _saved.isEmpty ? tr('Built-in GripHub app') : _saved,
+                          _saved.isNotEmpty
+                              ? _saved
+                              : (_builtIn ? tr('Built-in GripHub app') : tr('Not set: sign-in with a code is off')),
                           style: text.bodySmall,
                         ),
                       ],
@@ -581,7 +584,9 @@ class _GithubClientIdFieldState extends State<_GithubClientIdField> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    tr('Only for a build with its own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.'),
+                    _builtIn
+                        ? tr('Only for your own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.')
+                        : tr('Sign-in with a code needs the Client ID of a GitHub OAuth App with Device Flow enabled: paste it here (it is public, not a secret). Without one, sign in with a token instead.'),
                     style: text.bodySmall,
                   ),
                   const SizedBox(height: 10),

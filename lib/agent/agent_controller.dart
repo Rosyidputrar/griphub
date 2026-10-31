@@ -176,22 +176,55 @@ class AgentController extends ChangeNotifier {
   /// Re-reads the host's live subagents (after a reconnect or restart of the app side).
   Future<void> refreshSubagents() async {
     final list = await client.call<List>('subagent_list');
+    final known = <String>{};
     for (final r in list.whereType<Map>()) {
       final rec = r.cast<String, dynamic>();
+      known.add(rec['id'] as String? ?? '');
       subagentStore.applyRecord({'type': 'subagent_started', 'subagent': rec});
       if (rec['status'] != 'queued' && rec['status'] != 'running' && rec['status'] != 'waiting_approval' && rec['status'] != 'stopping') {
         subagentStore.applyRecord({'type': 'subagent_finished', 'subagent': rec});
       }
     }
+    // One the app saw at work that the host no longer has went with a host that was restarted (the host keeps its
+    // subagents in memory only). Shown as lost, as a lost background job is: never "running" for good.
+    for (final s in subagentStore.all) {
+      if (!s.isActive || known.contains(s.id)) continue;
+      subagentStore.applyRecord({
+        'type': 'subagent_finished',
+        'subagent': {
+          'id': s.id,
+          'status': 'failed',
+          'error': lostSubagent,
+          'finishedAt': clock().millisecondsSinceEpoch,
+        },
+      });
+    }
     notifyListeners();
   }
+
+  /// Why a subagent the app saw at work is gone from the host.
+  static const lostSubagent = "Lost: the server's agent was restarted while this subagent was at work.";
 
   /// Reloads everything after a server link came back without being able to replay what it missed (the buffer had
   /// moved on, or the server's host was restarted): the chat, subagents, approvals still waiting, and background runs.
   /// On the phone this never happens.
   Future<void> resync() async {
     try {
-      _applyState(await client.call<Map<String, dynamic>>('state'));
+      // The chat on screen stays on screen. A server host that was restarted comes back in another chat (its most
+      // recent, or a new empty one); adopting that put an empty "Connect a model" screen in place of the chat the user
+      // was in, with its work out of sight. Open the chat again instead (its file is on the server); only a chat that
+      // is gone (deleted elsewhere) gives way to the host's.
+      final open = sessionFile;
+      final openCwd = cwd;
+      var state = await client.call<Map<String, dynamic>>('state');
+      if (open != null && state['sessionFile'] != open) {
+        try {
+          state = await client.call<Map<String, dynamic>>('open_session', {'path': open, 'cwd': openCwd});
+        } on AgentError catch (_) {
+          // Gone, or the host is busy in another chat: show what it has.
+        }
+      }
+      _applyState(state);
       _streaming = null;
       await loadHistory();
       await refreshSubagents();
@@ -992,7 +1025,8 @@ class AgentController extends ChangeNotifier {
             ..aborted = e['aborted'] == true
             ..error = e['errorMessage'] as String?
             ..tokensBefore = (result?['tokensBefore'] as num?)?.toInt()
-            ..tokensAfter = (result?['estimatedTokensAfter'] as num?)?.toInt();
+            ..tokensAfter = (result?['estimatedTokensAfter'] as num?)?.toInt()
+            ..credits = _credits(result?['griphubCost']);
         }
       case 'session_info_changed':
         sessionName = e['name'] as String?;
@@ -1032,26 +1066,45 @@ class AgentController extends ChangeNotifier {
 
   void _addMessage(Map<String, dynamic> m, {bool fromHistory = false}) {
     switch (m['role']) {
-      case 'user':
+      case 'user' when fromHistory:
         // The ordinal among user messages is assigned here, at append time,
         // so it always matches the transcript order — including history
         // reloads and rewind-and-resend (which reuses the index).
         final ordinal = entries.whereType<UserEntry>().length;
-        final attached = fromHistory
-            ? SentAttachments.instance.forMessage(sessionId, ordinal)
-            : (_pendingAttachments.isNotEmpty ? _pendingAttachments.removeAt(0) : const <SentAttachment>[]);
-        if (!fromHistory && attached.isNotEmpty) {
-          SentAttachments.instance.record(sessionId, ordinal, attached);
-        }
-        entries.add(
-          UserEntry(contentText(m['content']), images: contentImages(m['content']), attachments: attached),
-        );
-      case 'assistant':
+        addSavedMessage(m, entries, tools, attached: SentAttachments.instance.forMessage(sessionId, ordinal));
+      case 'user':
+        final ordinal = entries.whereType<UserEntry>().length;
+        final attached = _pendingAttachments.isNotEmpty ? _pendingAttachments.removeAt(0) : const <SentAttachment>[];
+        if (attached.isNotEmpty) SentAttachments.instance.record(sessionId, ordinal, attached);
+        addSavedMessage(m, entries, tools, attached: attached);
+      case 'assistant' when !fromHistory:
         final entry = AssistantEntry();
-        if (fromHistory || (m['content'] as List?)?.isNotEmpty == true) entry.applyMessage(m);
-        entry.streaming = !fromHistory;
+        if ((m['content'] as List?)?.isNotEmpty == true) entry.applyMessage(m);
+        entry.streaming = true;
         entries.add(entry);
-        if (!fromHistory) _streaming = entry;
+        _streaming = entry;
+      default:
+        addSavedMessage(m, entries, tools);
+    }
+  }
+
+  /// Adds a message as the chat's file keeps it to [entries] (and a tool's result to [tools]): history, or the turns
+  /// a summary replaced ([summarizedTurns]). [attached]: the files sent with a user message.
+  static void addSavedMessage(
+    Map<String, dynamic> m,
+    List<ChatEntry> entries,
+    Map<String, ToolRun> tools, {
+    List<SentAttachment> attached = const [],
+  }) {
+    switch (m['role']) {
+      case 'user':
+        entries.add(UserEntry(contentText(m['content']), images: contentImages(m['content']), attachments: attached));
+      case 'assistant':
+        entries.add(
+          AssistantEntry()
+            ..applyMessage(m)
+            ..streaming = false,
+        );
       case 'toolResult':
         final run = tools.putIfAbsent(m['toolCallId'] as String, () => ToolRun(m['toolCallId'] as String));
         run.output = contentText(m['content']);
@@ -1060,13 +1113,31 @@ class AgentController extends ChangeNotifier {
       case 'bashExecution':
         entries.add(NoticeEntry('\$ ${m['command']}\n${m['output']}'));
       case 'compactionSummary':
-        entries.add(CompactionEntry(running: false, tokensBefore: (m['tokensBefore'] as num?)?.toInt()));
+        entries.add(
+          CompactionEntry(running: false, tokensBefore: (m['tokensBefore'] as num?)?.toInt())
+            ..credits = _credits(m['griphubCost']),
+        );
       // A background job's result: the host's message to the agent, shown as a notice of the job's end.
       case 'custom' when m['customType'] == 'griphub_job':
         final job = (m['details'] as Map?)?['job'];
         if (job is Map) entries.add(JobEntry(job.cast<String, dynamic>()));
     }
   }
+
+  /// The open chat's older turns that a summary replaced: the model no longer gets them, but the chat's file keeps
+  /// them, so they can still be read. Empty for a chat never summarized.
+  Future<({List<ChatEntry> entries, Map<String, ToolRun> tools})> summarizedTurns() async {
+    final messages = await client.call<List>('summarized_messages');
+    final entries = <ChatEntry>[];
+    final tools = <String, ToolRun>{};
+    for (final m in messages.cast<Map>()) {
+      addSavedMessage(m.cast<String, dynamic>(), entries, tools);
+    }
+    return (entries: entries, tools: tools);
+  }
+
+  /// The credits of a host cost estimate (`griphubCost`), or null.
+  static double? _credits(Object? cost) => cost is Map ? (cost['credits'] as num?)?.toDouble() : null;
 
   void _applyDelta(Map<String, dynamic> d) {
     final entry = _streaming ??= _lastAssistant();

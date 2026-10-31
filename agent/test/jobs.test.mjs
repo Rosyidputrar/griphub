@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { bundle, tempDir, waitFor } from "./helpers.mjs";
 
-const { Jobs, jobReport, jobWire, OUTPUT_CAP, REPORT_CAP, JOB_LIMIT_MINUTES, MAX_RUNNING_PER_CHAT, KEPT_PER_CHAT } =
+const { Jobs, jobReport, jobWire, OUTPUT_CAP, REPORT_CAP, JOB_LIMIT_MINUTES, MAX_RUNNING_PER_CHAT, MAX_RUNNING_TOTAL, KEPT_PER_CHAT } =
 	await bundle("jobs");
 
 function jobsFor(t, extra = {}) {
@@ -85,6 +85,23 @@ test("one chat runs a few jobs at most; another chat is not held back by them", 
 	assert.throws(() => jobs.start({ sessionFile: "a", cwd, command: "sleep 30" }), /already runs \d+ background jobs/);
 	const other = jobs.start({ sessionFile: "b", cwd, command: "true" });
 	assert.equal(other.status, "running");
+});
+
+test("the host runs a few jobs at most across all chats: busy chats together cannot swamp a small server", async (t) => {
+	const { jobs } = jobsFor(t);
+	const cwd = tempDir(t);
+	let chat = 0;
+	while (jobs.list().filter((j) => j.status === "running").length < MAX_RUNNING_TOTAL) {
+		const file = `chat-${chat++}`;
+		for (let i = 0; i < MAX_RUNNING_PER_CHAT && jobs.list().filter((j) => j.status === "running").length < MAX_RUNNING_TOTAL; i++) {
+			jobs.start({ sessionFile: file, cwd, command: "sleep 30" });
+		}
+	}
+	assert.throws(() => jobs.start({ sessionFile: "fresh-chat", cwd, command: "true" }), /already running across all chats/);
+	const one = jobs.list().find((j) => j.status === "running");
+	jobs.stop(one.id);
+	for (let i = 0; i < 50 && jobs.list().filter((j) => j.status === "running").length >= MAX_RUNNING_TOTAL; i++) await new Promise((r) => setTimeout(r, 20));
+	assert.equal(jobs.start({ sessionFile: "fresh-chat", cwd, command: "true" }).status, "running", "a slot freed is a slot to use");
 });
 
 test("old finished records are dropped per chat, so job_list never grows with the host's age", async (t) => {

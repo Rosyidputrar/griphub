@@ -1332,10 +1332,13 @@ class _ToolCallViewState extends State<ToolCallView> {
 }
 
 /// The chat's older turns being summarized (pi's compaction), with the live clock: running, then how much it saved, or
-/// why it failed. A tap explains what it means.
+/// why it failed. A tap explains what it means, and offers the turns it replaced ([onShowEarlier]).
 class CompactionView extends StatelessWidget {
-  const CompactionView(this.entry, {super.key});
+  const CompactionView(this.entry, {super.key, this.onShowEarlier});
   final CompactionEntry entry;
+
+  /// Opens the turns the summary replaced; null offers none (it failed, or the screen is that list already).
+  final VoidCallback? onShowEarlier;
 
   @override
   Widget build(BuildContext context) {
@@ -1346,6 +1349,8 @@ class CompactionView extends StatelessWidget {
         : e.tokensAfter == null
         ? tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(e.tokensBefore!)))
         : '${localNumber(formatTokens(e.tokensBefore!))} → ${tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(e.tokensAfter!)))}';
+    // The summary is a paid request too: what it cost goes with what it saved.
+    final detail = [?tokens, if (e.credits case final c?) _creditsText(c)].join(' · ');
     final clock = LiveClock(
       label: e.running
           ? tr('Summarizing the context')
@@ -1360,7 +1365,7 @@ class CompactionView extends StatelessWidget {
           : failed
           ? (e.aborted ? ClockState.stopped : ClockState.failed)
           : ClockState.done,
-      detail: failed ? null : tokens,
+      detail: failed || detail.isEmpty ? null : detail,
       wrap: true,
     );
     return Semantics(
@@ -1384,7 +1389,17 @@ class CompactionView extends StatelessWidget {
                 if (e.error != null) e.error!,
               ].join('\n\n'),
             ),
-            actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('OK')))],
+            actions: [
+              if (onShowEarlier != null && !failed && !e.running)
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    onShowEarlier!();
+                  },
+                  child: Text(tr('Read the earlier turns')),
+                ),
+              TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('OK'))),
+            ],
           ),
         ),
         child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: clock),

@@ -133,6 +133,49 @@ test("a subagent's waiting approval is listed as the subagent_approval_request t
 	assert.equal(m.busy(), false);
 });
 
+test("a subagent waiting for an approval nobody answers stops waiting at its time limit, not never", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+	const turn = () => new Promise((r) => setImmediate(r));
+	let answered;
+	const sent = [];
+	const m = new SubagentManager({
+		send: (r) => sent.push(r),
+		wireEvent: (e) => e,
+		createSession: async (opts) => {
+			const s = session(async (o, finish) => {
+				answered = await o.guard.askApproval("bash", "rm -rf build", "deletes files");
+				finish("stopped at the limit");
+			});
+			s.opts = opts;
+			return s;
+		},
+		limits: () => ({ creditLimit: 0, minutesLimit: 1, approvalMode: "ask_risky" }),
+	});
+	const rec = m.start(parent, "Bersihkan build", "full");
+	for (let i = 0; i < 10; i++) await turn();
+	assert.equal(m.pendingApprovals().length, 1, "it asked");
+	t.mock.timers.tick(30_000);
+	for (let i = 0; i < 5; i++) await turn();
+	assert.equal(m.pendingApprovals().length, 1, "still asking before the limit");
+	t.mock.timers.tick(31_000);
+	for (let i = 0; i < 10; i++) await turn();
+	assert.equal(answered, false, "withdrawn at the limit, as a no");
+	assert.deepEqual(m.pendingApprovals(), []);
+	assert.ok(sent.some((r) => r.type === "subagent_approval_dismiss" && r.subagentId === rec.id), "the app drops the card");
+});
+
+test("deleting a chat stops its subagents; another chat's go on", async () => {
+	const { m } = manager(() => session(() => new Promise(() => {})));
+	const mine = m.start(parent, "Kerja panjang", "full");
+	const other = m.start({ ...parent, sessionFile: "other.jsonl" }, "Kerja lain", "full");
+	for (let i = 0; i < 5; i++) await tick();
+	const n = m.stopForChats(new Set(["/s/chat.jsonl"]), (p) => `/s/${p}`);
+	assert.equal(n, 1);
+	assert.ok(["stopping", "stopped"].includes(m.get(mine.id).status));
+	assert.equal(m.get(other.id).status, "running");
+	m.stop(other.id, true);
+});
+
 test("busy() covers queued, running, waiting and stopping subagents; finished ones are not busy", async () => {
 	let made = 0;
 	const { m } = manager(() => {

@@ -136,7 +136,7 @@ class FakeHost {
         return [
           for (final path in sessions) {'path': path, 'id': path, 'name': path, 'modified': 0, 'messageCount': 1, 'firstMessage': ''},
         ];
-      case 'subagent_list':
+      case 'subagent_list' || 'job_list':
         return const [];
       case 'new_session':
         return {'sessionFile': 'new.jsonl', 'sessionId': 'new', 'cwd': cmd['cwd'] ?? '/workspace'};
