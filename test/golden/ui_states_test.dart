@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/main.dart';
 import 'package:griphub_agent/ui/code_view.dart';
 import 'package:griphub_agent/ui/diff_view.dart';
@@ -32,6 +33,7 @@ void main() {
   group('UI-14: touch targets', touchTargetTests);
   group('UI-15: reduced motion', motionTests);
   group('UI-16: the chat list', chatsListTests);
+  group('UI-17: announcements', announcementTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -315,5 +317,48 @@ void chatsListTests() {
     await frames(tester);
     expect(find.text('Chat nomor 39'), findsOneWidget);
     expect(find.text('Chat nomor 1'), findsNothing);
+  });
+}
+
+void announcementTests() {
+  testWidgets('UI-17: what the agent is doing is read out as it changes', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(tester, const Look(), const Scaffold(body: AgentActivity(label: 'Running bash…')));
+    expect(tester.getSemantics(find.bySemanticsLabel('Running bash…')), isSemantics(isLiveRegion: true));
+    await pumpLook(tester, const Look(), const Scaffold(body: AgentActivity()));
+    expect(find.bySemanticsLabel('Working…'), findsOneWidget, reason: 'no label: still says something');
+    handle.dispose();
+  });
+
+  testWidgets('UI-17: a tool card says how it went in words, and whether it is open', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    final block = Block(BlockKind.toolCall)
+      ..toolCallId = 't1'
+      ..toolName = 'bash'
+      ..args = {'command': 'npm test'};
+    final run = ToolRun('t1')..status = ToolStatus.failed;
+    await pumpLook(tester, const Look(), Scaffold(body: ToolCallView(block: block, run: run)));
+    // The header is one button to a screen reader: its label now starts with how the call went.
+    final header = find.bySemanticsLabel(RegExp(r'^Failed\b'));
+    expect(header, findsOneWidget, reason: 'the red x, in words');
+    expect(tester.getSemantics(header), isSemantics(hasExpandedState: true, isExpanded: false));
+    await tester.tap(find.text('npm test'));
+    await tester.pump();
+    expect(tester.getSemantics(find.bySemanticsLabel(RegExp(r'^Failed\b'))), isSemantics(hasExpandedState: true, isExpanded: true));
+    handle.dispose();
+  });
+
+  testWidgets('UI-17: the thinking panel says whether it is open', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(tester, const Look(), const Scaffold(body: ThinkingView(text: 'Langkah satu.\nLangkah dua.', live: false)));
+    final header = find.bySemanticsLabel(RegExp('Thought process'));
+    expect(tester.getSemantics(header), isSemantics(hasExpandedState: true, isExpanded: false));
+    await tester.tap(find.text('Thought process'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(tester.getSemantics(find.bySemanticsLabel(RegExp('Thought process'))), isSemantics(hasExpandedState: true, isExpanded: true));
+    handle.dispose();
   });
 }

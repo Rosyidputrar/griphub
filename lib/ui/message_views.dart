@@ -1032,7 +1032,9 @@ class _ThinkingViewState extends State<ThinkingView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
+        Semantics(
+          expanded: body.isEmpty ? null : open,
+          child: InkWell(
           onTap: body.isEmpty ? null : _toggle,
           borderRadius: BorderRadius.circular(Radii.sm),
           child: Padding(
@@ -1054,6 +1056,7 @@ class _ThinkingViewState extends State<ThinkingView> {
               ],
             ),
           ),
+        ),
         ),
         AnimatedSize(
           duration: Motion.of(context, Motion.normal),
@@ -1218,6 +1221,12 @@ class _ToolCallViewState extends State<ToolCallView> {
       ToolStatus.failed => Icon(LucideIcons.x, size: 15, color: p.danger),
       _ => BusySpinner(size: 12),
     };
+    // The icon says it to the eye; a screen reader is told in words.
+    final statusWord = tr(switch (status) {
+      ToolStatus.done => 'Done',
+      ToolStatus.failed => 'Failed',
+      _ => 'Running',
+    });
 
     return Container(
       decoration: BoxDecoration(
@@ -1227,14 +1236,20 @@ class _ToolCallViewState extends State<ToolCallView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
+          Semantics(
+            expanded: open,
+            child: InkWell(
             borderRadius: BorderRadius.circular(Radii.md),
             onTap: () => setState(() => open = !open),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
               child: Row(
                 children: [
-                  SizedBox.square(dimension: 16, child: Center(child: indicator)),
+                  Semantics(
+                    label: statusWord,
+                    liveRegion: status != null,
+                    child: ExcludeSemantics(child: SizedBox.square(dimension: 16, child: Center(child: indicator))),
+                  ),
                   const SizedBox(width: 10),
                   Icon(toolIcon(b.toolName), size: 15, color: p.accent),
                   const SizedBox(width: 6),
@@ -1274,6 +1289,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                 ],
               ),
             ),
+          ),
           ),
           // A background job runs on after its call: its clock (and Stop) stay on the card until it ends.
           if (job != null)
@@ -1739,7 +1755,12 @@ class _AgentActivityState extends State<AgentActivity> with SingleTickerProvider
     final p = context.palette;
     final label = widget.label;
     final style = Theme.of(context).textTheme.labelMedium?.copyWith(color: p.muted);
-    return Align(
+    // Read out as it changes ("Thinking…", "Running bash…"): the dots and the sweep are for the eye.
+    return Semantics(
+      liveRegion: true,
+      label: label ?? tr('Working…'),
+      child: ExcludeSemantics(
+        child: Align(
       alignment: Alignment.centerLeft,
       child: AnimatedBuilder(
         animation: controller,
@@ -1780,6 +1801,8 @@ class _AgentActivityState extends State<AgentActivity> with SingleTickerProvider
               ),
             ],
           ],
+        ),
+      ),
         ),
       ),
     );
