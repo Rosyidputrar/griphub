@@ -12,10 +12,12 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSyn
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { Cloudflare, type CloudflareAccount } from "./cloudflare.js";
+import { assertRepoConfigSafe, gitEnv, SAFE_GIT_FLAGS } from "./gitsafe.js";
 import { configureDns, validateCustomDohUrl, type DnsMode } from "./dns.js";
 import { maskKey, parseKeys } from "./keyring.js";
 import { checkConfig, type NotifyConfig } from "./notify.js";
 import { readSecureJson, writeSecureJson } from "./secure.js";
+import { isObject } from "./state.js";
 
 export interface SshHost {
 	id: string;
@@ -259,7 +261,7 @@ export class Integrations {
 		this.file = join(dir, "integrations.json");
 		this.home = process.env.HOME ?? agentDir;
 		// Encrypted at rest when the Keystore key is available (see secure.ts).
-		this.store = { sshHosts: [], ...readSecureJson<Partial<Store>>(this.file, {}) };
+		this.store = { sshHosts: [], ...readSecureJson<Partial<Store>>(this.file, {}, (v) => isObject(v) && (v.sshHosts === undefined || Array.isArray(v.sshHosts))) };
 		this.exportEnv();
 		this.applySettings();
 	}
@@ -865,7 +867,7 @@ export class Integrations {
 				const dir = join(this.workspace, name);
 				if (name.startsWith(".") || !existsSync(join(dir, ".git"))) return;
 				// The URL as configured; `remote get-url` would apply url.insteadOf rewrites.
-				const origin = (await run("git", ["config", "--get", "remote.origin.url"], { cwd: dir }).catch(() => "")).trim();
+				const origin = (await gitRun(["config", "--get", "remote.origin.url"], { cwd: dir }).catch(() => "")).trim();
 				const slug = parseGithubSlug(origin)?.toLowerCase();
 				// Two folders with the same origin: the one named after the repo wins, as before.
 				if (slug && (!out.has(slug) || name.toLowerCase() === slug.split("/")[1])) out.set(slug, dir);
@@ -904,7 +906,8 @@ export class Integrations {
 		}
 		mkdirSync(this.workspace, { recursive: true });
 		const dest = this.cloneDest(fullName);
-		await run("git", ["clone", "--progress", `https://github.com/${fullName}.git`, dest], {
+		// From the workspace folder: a `.git` there (the agent can make one) would be read as the settings of this clone.
+		await gitRun(["clone", "--progress", `https://github.com/${fullName}.git`, dest], {
 			cwd: this.workspace,
 			log,
 		});
@@ -924,9 +927,9 @@ export class Integrations {
 			let remote: string | null = null;
 			let dirty = false;
 			if (git) {
-				branch = (await run("git", ["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
-				remote = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim() || null;
-				dirty = (await run("git", ["status", "--porcelain"], { cwd: dir }).catch(() => "")).trim().length > 0;
+				branch = (await gitRun(["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
+				remote = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim() || null;
+				dirty = (await gitRun(["status", "--porcelain"], { cwd: dir }).catch(() => "")).trim().length > 0;
 			}
 			out.push({ name, path: dir, git, branch, remote, dirty, modified: statSync(dir).mtimeMs });
 		}
@@ -1336,10 +1339,10 @@ export class Integrations {
 
 	/** CI for the latest commit of a project folder with a GitHub remote. */
 	async watchProject(dir: string, log: Log) {
-		const remote = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+		const remote = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
 		const slug = parseGithubSlug(remote);
 		if (!slug) throw new Error("This folder has no GitHub remote");
-		const sha = (await run("git", ["rev-parse", "HEAD"], { cwd: dir })).trim();
+		const sha = (await gitRun(["rev-parse", "HEAD"], { cwd: dir })).trim();
 		log(`CI for ${slug}@${sha.slice(0, 7)}`);
 		await this.watchActions(slug, sha, log);
 		return { url: null };
@@ -1373,7 +1376,7 @@ export class Integrations {
 		if (target === "github_pages") {
 			const gh = this.store.github;
 			if (!gh) throw new Error("Sign in to GitHub first");
-			const origin = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+			const origin = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
 			const slug = parseGithubSlug(origin);
 			if (slug) {
 				const repo = await this.github(`/repos/${slug}`).catch(() => null);
@@ -1436,7 +1439,7 @@ export class Integrations {
 		if (!gh) throw new Error("Sign in to GitHub first");
 		if (options.confirmed !== true) throw new Error("Confirm the deploy target (repository + visibility) before deploying.");
 		// Resolve the target repo read-only: the user's local repo is never modified.
-		const origin = (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
+		const origin = (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim();
 		let slug = parseGithubSlug(origin);
 		if (!slug) {
 			const name = sanitizeRepo(options.repo || basename(dir));
@@ -1556,9 +1559,9 @@ export class Integrations {
  * block forever (no timeout anywhere); every call now dies after
  * `timeoutMs` (default 10 minutes) with a clear error instead.
  */
-export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log; timeoutMs?: number }): Promise<string> {
+export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log; timeoutMs?: number; env?: NodeJS.ProcessEnv }): Promise<string> {
 	return new Promise((resolve, reject) => {
-		const child = spawn(cmd, args, { cwd: opts.cwd, env: process.env });
+		const child = spawn(cmd, args, { cwd: opts.cwd, env: opts.env ?? process.env });
 		let stdout = "";
 		const tail: string[] = [];
 		let done = false;
@@ -1596,6 +1599,15 @@ export function run(cmd: string, args: string[], opts: { cwd: string; log?: Log;
 			});
 		});
 	});
+}
+
+/**
+ * git in a project folder, which the agent can write the git settings of: see gitsafe.ts for what that means and what is
+ * done about it. Everything that runs git in a folder the agent worked in goes through here (or gitops.ts), not `run`.
+ */
+export async function gitRun(args: string[], opts: { cwd: string; log?: Log; timeoutMs?: number }): Promise<string> {
+	await assertRepoConfigSafe(opts.cwd);
+	return run("git", [...SAFE_GIT_FLAGS, ...args], { ...opts, env: gitEnv() });
 }
 
 const SKIP_DIRS = new Set([".git", "node_modules", ".vercel", ".next", ".DS_Store"]);

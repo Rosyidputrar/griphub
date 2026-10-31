@@ -170,6 +170,8 @@ export interface SubagentHooks {
 	wireEvent(event: AgentSessionEvent): object;
 	createSession: SubagentSessionFactory;
 	limits(): SubagentLimits;
+	/** Throws when the daily budget is used up: a subagent costs a full request before any limit of its own can stop it. */
+	checkBudget?(): void;
 }
 
 /**
@@ -404,6 +406,7 @@ export class SubagentManager {
 	 */
 	start(parent: SubagentParent, brief: string, profile: SubagentProfile, toolCallId?: string): SubagentRecord {
 		if (this.closing) throw new Error("The agent is shutting down; the subagent was not started");
+		this.hooks.checkBudget?.();
 		const clean = brief.trim();
 		if (!clean) throw new Error("The subagent task is empty");
 		if (clean.length > MAX_TASK_CHARS) throw new Error(`The subagent task is longer than ${MAX_TASK_CHARS} characters`);

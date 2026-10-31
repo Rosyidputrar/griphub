@@ -71,7 +71,7 @@ class RingBadge extends StatelessWidget {
         boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.45, color: Colors.white),
+      child: Icon(icon, size: size * 0.45, color: onFill(color)),
     );
   }
 }
@@ -88,12 +88,27 @@ class Avatar extends StatelessWidget {
     final initials = name.trim().isEmpty
         ? '?'
         : name.trim().split(RegExp(r'\s+')).take(2).map((w) => w[0].toUpperCase()).join();
-    return SizedBox.square(
-      dimension: size,
-      child: ClipOval(
-        child: url != null
-            ? Image.network(url!, fit: BoxFit.cover, errorBuilder: (_, _, _) => _initials(initials))
-            : _initials(initials),
+    // Decoded at the size it is drawn (not the photo's full size), with the initials while it loads and a name for a
+    // screen reader.
+    final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    return Semantics(
+      image: true,
+      label: name,
+      child: SizedBox.square(
+        dimension: size,
+        child: ClipOval(
+          child: url != null
+              ? Image.network(
+                  url!,
+                  fit: BoxFit.cover,
+                  cacheWidth: px,
+                  cacheHeight: px,
+                  excludeFromSemantics: true,
+                  loadingBuilder: (context, child, progress) => progress == null ? child : _initials(initials),
+                  errorBuilder: (_, _, _) => _initials(initials),
+                )
+              : ExcludeSemantics(child: _initials(initials)),
+        ),
       ),
     );
   }

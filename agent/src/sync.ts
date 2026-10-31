@@ -27,8 +27,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { type Integrations, run } from "./integrations.js";
+import { gitRun, type Integrations, run } from "./integrations.js";
 import type { CustomProviders } from "./providers.js";
+import { atomicWrite, isObject, keepBackup, loadStore, readJsonFile } from "./state.js";
 
 const REPO = "griphub-sync";
 /** GitHub rejects files over 100 MB. */
@@ -185,11 +186,8 @@ export class GitHubSync {
 			repo: null,
 			pendingDelete: [],
 		};
-		try {
-			this.state = { ...empty, ...JSON.parse(readFileSync(this.file, "utf8")) };
-		} catch {
-			this.state = empty;
-		}
+		// Unreadable: set aside and reported, not taken for a first run that then overwrites it (state.ts).
+		this.state = { ...empty, ...loadStore<object | null>(this.file, readJsonFile, null, isObject) };
 	}
 
 	status(): SyncStatus {
@@ -199,7 +197,8 @@ export class GitHubSync {
 	}
 
 	private save() {
-		writeFileSync(this.file, JSON.stringify(this.state));
+		keepBackup(this.file, readJsonFile, isObject);
+		atomicWrite(this.file, JSON.stringify(this.state));
 		this.deps.notify(this.status());
 	}
 
@@ -464,7 +463,7 @@ export class GitHubSync {
 			const to = join(workspace, p.name);
 			if (!isNew(`git/${p.name}`, to)) continue;
 			const args = ["clone", "-q", ...(safeBranch(p.branch) ? ["-b", p.branch] : []), "--", p.remote, to];
-			await run("git", args, { cwd: workspace }).then(
+			await gitRun(args, { cwd: workspace }).then(
 				() => imported.projects++,
 				() => {},
 			);
@@ -513,11 +512,11 @@ export class GitHubSync {
 			if (!safeName(name) || name === "backups" || !lstatSync(dir).isDirectory()) continue;
 			if (this.state.localOnly.includes(name)) continue;
 			const origin = exists(join(dir, ".git"))
-				? (await run("git", ["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim()
+				? (await gitRun(["remote", "get-url", "origin"], { cwd: dir }).catch(() => "")).trim()
 				: "";
 			const remote = withoutCredentials(origin);
 			if (safeRemote(remote)) {
-				const branch = (await run("git", ["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
+				const branch = (await gitRun(["branch", "--show-current"], { cwd: dir }).catch(() => "")).trim() || null;
 				gitProjects.push({ name, remote, branch });
 				items.push(`git/${name}`);
 			} else {

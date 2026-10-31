@@ -8,6 +8,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { atomicWrite } from "./state.js";
 
 // ---------------------------------------------------------------------------
 // Search (ripgrep)
@@ -428,7 +429,7 @@ export class Templates {
 			seeded.push(name);
 		}
 		mkdirSync(dirname(seededFile), { recursive: true });
-		writeFileSync(seededFile, JSON.stringify(seeded));
+		atomicWrite(seededFile, JSON.stringify(seeded));
 	}
 
 	list() {

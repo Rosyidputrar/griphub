@@ -117,6 +117,38 @@ test("LineBuffer splits on LF only, trims CR, skips blanks and keeps partial lin
   assert.deepEqual(b.push("no newline yet"), []);
   assert.deepEqual(b.push("\n"), ["no newline yet"]);
 });
+test("LineBuffer takes a message of tens of megabytes without stopping the host: its cost is the message's size, not its square", () => {
+  // 48 MB in 64 KB chunks, as a socket gives it: the old splitter took 28 s, and 8 s for half of that.
+  const chunk = "x".repeat(64 * 1024);
+  const chunks = (48 * 1024 * 1024) / chunk.length;
+  const b = new LineBuffer();
+  const t0 = Date.now();
+  for (let i = 0; i < chunks; i++) assert.deepEqual(b.push(chunk), []);
+  const lines = b.push("\n");
+  const took = Date.now() - t0;
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].length, 48 * 1024 * 1024);
+  assert.ok(took < 5000, `took ${took} ms`);
+});
+test("LineBuffer puts a line back together from any chunking, CR and LF split apart included", () => {
+  const whole = ['{"a":1}', "", '{"text":"' + "é€😀".repeat(5000) + '"}', "   ", '{"c":3}'];
+  const stream = whole.map((l) => l + "\r\n").join("") + "partial";
+  for (const size of [1, 2, 3, 7, 64, 1000, stream.length]) {
+    const b = new LineBuffer();
+    const got = [];
+    for (let i = 0; i < stream.length; i += size) got.push(...b.push(stream.slice(i, i + size)));
+    assert.deepEqual(got, whole.filter((l) => l.trim()), `chunks of ${size}`);
+    assert.deepEqual(b.push("\n"), ["partial"], `the unfinished line is kept (chunks of ${size})`);
+  }
+});
+test("LineBuffer keeps counting an unfinished line across chunks, and starts again after a line ends", () => {
+  const b = new LineBuffer(100);
+  assert.deepEqual(b.push("x".repeat(60)), []);
+  assert.throws(() => b.push("y".repeat(41)), /too long/, "60 + 41 pending bytes is over 100");
+  const c = new LineBuffer(100);
+  assert.deepEqual(c.push("x".repeat(90) + "\n"), ["x".repeat(90)]);
+  assert.deepEqual(c.push("y".repeat(90)), [], "the count began again with the new line");
+});
 test("LineBuffer refuses a line that never ends", () => {
   const b = new LineBuffer(100);
   assert.throws(() => b.push("x".repeat(101)), /too long/);

@@ -197,7 +197,7 @@ class _DbScreenState extends State<DbScreen> {
                 color: t.type == 'view' ? p.accentAlt : p.accent,
                 title: t.name,
                 subtitle: t.type,
-                trailing: t.rows == null ? null : Pill('${t.rows} rows'),
+                trailing: t.rows == null ? null : Pill(tr('{n} rows').replaceAll('{n}', '${t.rows}')),
                 onTap: () => _openTable(t.name),
               ),
           ],

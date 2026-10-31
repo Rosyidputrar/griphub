@@ -12,7 +12,8 @@
 #   - the workspace, at the same path as outside (read-write), so files are shared both ways;
 #   - its own home folder at the same path as the real home (~/.griphub/box-home, kept between runs), with copies of
 #     the git and ssh settings the app configured. authorized_keys is never copied: it would let a command in the box
-#     plant access to the server.
+#     plant access to the server. The copies go in through `podman exec` and the host never writes into that folder
+#     itself: a command in the box can put links there, and a host that follows them writes the server's own files.
 # Memory and CPU are capped (BOX_MEMORY, BOX_SWAP, BOX_CPUS in the environment or in ~/.griphub/box.conf).
 #
 # The container shares the server's network (--network=host) so a dev server started in it is reachable on
@@ -40,10 +41,12 @@ START_SECS=${BOX_START_SECS:-120}
 # How long an answer to the probe counts, so a burst of commands does not probe each time.
 ALIVE_SECS=${BOX_ALIVE_SECS:-30}
 ALIVE="$GRIPHUB_DIR/box.alive"
+# When the git and ssh settings were last put in the box, and what they looked like then.
+SYNCED="$GRIPHUB_DIR/box.synced"
 
 if [ "${1:-}" = "--reset" ]; then
 	podman rm -f "$NAME" >/dev/null 2>&1 || true
-	rm -f "$ALIVE"
+	rm -f "$ALIVE" "$SYNCED"
 	exit 0
 fi
 
@@ -119,8 +122,8 @@ ensure_running() {
 	if timed_out "$rc"; then stuck "podman did not answer in ${PROBE_SECS}s"; fi
 	case "$status" in
 		running) ;;
-		"") rm -f "$ALIVE"; create ;;
-		*) rm -f "$ALIVE"; start_box ;;
+		"") rm -f "$ALIVE" "$SYNCED"; create ;;
+		*) rm -f "$ALIVE" "$SYNCED"; start_box ;;
 	esac
 	exec 9>&-
 }
@@ -137,27 +140,81 @@ probe() {
 	return 0
 }
 
-# The app keeps the git and ssh settings in the server's real home; the container's home is a separate folder, so
-# copy what it needs. Files are replaced each time (git rewrites its config by renaming, which a single-file bind mount
-# would not follow); known_hosts is left alone once the container has its own, so hosts it learns are not lost.
-sync_settings() {
-	( umask 077
-	mkdir -p "$BOXHOME/.ssh"
-	for f in .gitconfig .ssh/config .ssh/id_ed25519 .ssh/id_ed25519.pub; do
+# The git and ssh settings the app keeps in the server's real home, and the container's home is a separate folder, so
+# what it needs is copied in. Files are replaced (git rewrites its config by renaming, which a single-file bind mount
+# would not follow); known_hosts is only put in when the container has none, so hosts it learns are not lost.
+#
+# The host never writes into the container's home (BOXHOME) itself. Any command in the box can change that folder: it
+# used to be copied into from here, and `ln -s ~/.ssh/authorized_keys ~/.gitconfig.tmp` (or `.ssh` made a link) sent
+# those copies over the server's own files, the phone's key and the store key among them; a fresh link made while the
+# copy ran got past any check made before it. The files are sent through `podman exec` instead and installed by a
+# script that runs in the container, where an absolute link leads only to what the container itself holds.
+SYNC_FILES=(.gitconfig .ssh/config .ssh/id_ed25519 .ssh/id_ed25519.pub)
+
+# What runs in the container: reads "put|del|seed <name> <base64>" lines. Only the names above are accepted. Each file
+# is written beside its place and moved onto it, which replaces what is there (a link included) and follows nothing.
+# shellcheck disable=SC2016 # the container's shell expands these, not this one
+INSTALL='umask 077
+cd "$HOME" || exit 1
+mkdir -p .ssh && chmod 700 .ssh || exit 1
+while read -r mode name data; do
+	case "$name" in
+		.gitconfig | .ssh/config | .ssh/id_ed25519 | .ssh/id_ed25519.pub | .ssh/known_hosts) ;;
+		*) exit 2 ;;
+	esac
+	case "$mode" in
+		del) rm -f "$name" ;;
+		put) rm -f "$name.new" && printf %s "$data" | base64 -d > "$name.new" && mv -fT "$name.new" "$name" ;;
+		seed) [ -e "$name" ] || [ -L "$name" ] || { rm -f "$name.new" && printf %s "$data" | base64 -d > "$name.new" && mv -fT "$name.new" "$name"; } ;;
+		*) exit 2 ;;
+	esac || exit 3
+done'
+
+# The files as the lines above, or nothing and a failure when one that exists cannot be read: a key that could not be
+# read must not be put in as an empty file.
+settings_payload() {
+	local f data
+	for f in "${SYNC_FILES[@]}"; do
 		if [ -f "$HOME_DIR/$f" ]; then
-			cp -f "$HOME_DIR/$f" "$BOXHOME/$f.tmp" && mv -f "$BOXHOME/$f.tmp" "$BOXHOME/$f"
+			data=$(base64 -w0 "$HOME_DIR/$f") || return 1
+			printf 'put %s %s\n' "$f" "$data"
 		else
-			rm -f "$BOXHOME/$f"
+			printf 'del %s\n' "$f"
 		fi
 	done
-	if [ -f "$HOME_DIR/.ssh/known_hosts" ] && [ ! -f "$BOXHOME/.ssh/known_hosts" ]; then
-		cp "$HOME_DIR/.ssh/known_hosts" "$BOXHOME/.ssh/known_hosts"
-	fi )
+	if [ -f "$HOME_DIR/.ssh/known_hosts" ]; then
+		data=$(base64 -w0 "$HOME_DIR/.ssh/known_hosts") || return 1
+		printf 'seed %s %s\n' .ssh/known_hosts "$data"
+	fi
+}
+
+# What the files look like now (names, sizes and times), so a change is seen without reading them.
+settings_fingerprint() {
+	local f
+	for f in "${SYNC_FILES[@]}" .ssh/known_hosts; do
+		stat -c '%n %s %Y' "$HOME_DIR/$f" 2>/dev/null || echo "$f -"
+	done | cksum
+}
+
+# Puts the settings in the box when they changed since the last time, and again after ALIVE_SECS, so what a command in
+# the box did to them does not last. A failure other than a timeout is said and the command goes on: they are
+# conveniences (git's identity, an ssh key), not what the command needs to run.
+sync_settings() {
+	local fp at now payload rc=0
+	fp=$(settings_fingerprint)
+	if [ "$(cat "$SYNCED" 2>/dev/null)" = "$fp" ] && at=$(stat -c %Y "$SYNCED" 2>/dev/null) && now=$(date +%s) && [ $((now - at)) -lt "$ALIVE_SECS" ]; then
+		return 0
+	fi
+	payload=$(settings_payload) || { echo "box: could not read the git and ssh settings to put in the box; the command runs without them" >&2; return 0; }
+	printf '%s\n' "$payload" | timeout -k 5 "$PROBE_SECS" podman exec -i -e "HOME=$HOME_DIR" "$NAME" /bin/sh -c "$INSTALL" || rc=$?
+	if timed_out "$rc"; then stuck "putting its git and ssh settings in took more than ${PROBE_SECS}s"; fi
+	if [ "$rc" -ne 0 ]; then echo "box: could not put the git and ssh settings in the box (exit code $rc); the command runs without them" >&2; fi
+	( umask 077; printf '%s\n' "$fp" > "$SYNCED" )
 }
 
 ensure_running
-sync_settings
 probe
+sync_settings
 
 # Run where the caller is when that is inside the workspace; anywhere else the container has nothing to show.
 cwd=$WS

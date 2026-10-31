@@ -4,7 +4,7 @@
  * its own pi session, so the result can be opened later as a normal chat.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { atomicWrite, isObject, keepBackup, loadStore, readJsonFile } from "./state.js";
 
 /** Nobody watches a background run, so one that never settles is stopped after this long. */
 export const RUN_TIME_LIMIT_MS = 60 * 60_000;
@@ -76,22 +76,24 @@ export class Runner {
 		 */
 		private readonly requestApproval?: (summary: string, reason: string) => Promise<boolean>,
 	) {
-		if (existsSync(file)) {
-			try {
-				this.store = { runs: [], schedules: [], concurrency: 1, ...JSON.parse(readFileSync(file, "utf8")) };
-			} catch {}
-		}
+		// A file that cannot be read is set aside and reported, not taken for "no runs and no schedules" and written over.
+		const saved = loadStore<Record<string, unknown> | null>(file, readJsonFile, null, (v) => isObject(v) && (v.runs === undefined || Array.isArray(v.runs)) && (v.schedules === undefined || Array.isArray(v.schedules)));
+		if (saved) this.store = { runs: [], schedules: [], concurrency: 1, ...saved } as typeof this.store;
 		// Runs interrupted by an app restart cannot resume.
 		for (const r of this.store.runs) if (r.status === "running") r.status = "error";
+		// Neither keeps a process alive by itself: the host has its connections for that, and a test that forgets dispose() ends.
 		this.timer = setInterval(() => void this.tick(), 60_000);
+		this.timer.unref();
 		this.firstTick = setTimeout(() => void this.tick(), 5_000);
+		this.firstTick.unref();
 	}
 
 	private save() {
 		// Cutting the list at a fixed length used to drop the oldest runs even while they were still queued.
 		let finished = 0;
 		this.store.runs = this.store.runs.filter((r) => r.status === "queued" || r.status === "running" || ++finished <= KEEP_FINISHED);
-		writeFileSync(this.file, JSON.stringify(this.store, null, 1));
+		keepBackup(this.file, readJsonFile, isObject);
+		atomicWrite(this.file, JSON.stringify(this.store, null, 1));
 	}
 
 	summary() {

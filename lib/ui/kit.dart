@@ -38,7 +38,7 @@ class PrimaryButton extends StatelessWidget {
     final p = context.palette;
     final enabled = onPressed != null && !busy;
     return AnimatedOpacity(
-      duration: const Duration(milliseconds: 150),
+      duration: Motion.of(context, const Duration(milliseconds: 150)),
       opacity: enabled ? 1 : 0.45,
       child: Material(
         color: p.text,
@@ -46,21 +46,30 @@ class PrimaryButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(Radii.lg),
           onTap: enabled ? onPressed : null,
-          child: SizedBox(
-            height: 54,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (busy)
-                  BusySpinner(color: p.inverse)
-                else if (icon != null)
-                  Icon(icon, size: 18, color: p.inverse),
-                if (busy || icon != null) const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: TextStyle(color: p.inverse, fontWeight: FontWeight.w600, fontSize: 15),
-                ),
-              ],
+          // 54 dp tall, and taller when a long label with large text needs a second line (it ran off the side).
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 54),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (busy)
+                    BusySpinner(color: p.inverse)
+                  else if (icon != null)
+                    Icon(icon, size: 18, color: p.inverse),
+                  if (busy || icon != null) const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: p.inverse, fontWeight: FontWeight.w600, fontSize: 15),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -158,7 +167,7 @@ class PillSegments<T> extends StatelessWidget {
       }
 
       final pill = AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: Motion.of(context, const Duration(milliseconds: 180)),
         curve: Curves.easeOut,
         decoration: BoxDecoration(
           color: on ? p.text : Colors.transparent,
@@ -282,7 +291,7 @@ class IconTile extends StatelessWidget {
         border: solid ? null : Border.all(color: c.withValues(alpha: 0.22)),
       ),
       alignment: Alignment.center,
-      child: Icon(icon, size: size * 0.5, color: solid ? Colors.white : c),
+      child: Icon(icon, size: size * 0.5, color: solid ? onFill(c) : c),
     );
   }
 }
@@ -316,7 +325,7 @@ class SectionAction extends StatelessWidget {
   Widget build(BuildContext context) => TextButtonTheme(
     data: TextButtonThemeData(
       style: TextButton.styleFrom(
-        foregroundColor: context.palette.accent,
+        foregroundColor: context.palette.accentText,
         textStyle: Theme.of(context).textTheme.labelMedium,
         // Small to look at, 48 dp to touch.
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -373,8 +382,23 @@ class SettingsRow extends StatelessWidget {
   final VoidCallback? onTap;
   final bool destructive;
 
+  /// The row's switch, with nothing else to tap beside it (a menu would be lost in one merged node).
+  bool get _onlySwitch {
+    final t = trailing;
+    if (t is LabeledSwitch) return true;
+    if (t is Row) {
+      return t.children.any((c) => c is LabeledSwitch) && t.children.every((c) => c is LabeledSwitch || c is BusySpinner || c is SizedBox);
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final row = _build(context);
+    return _onlySwitch ? TitledSwitchRow(child: row) : row;
+  }
+
+  Widget _build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return InkWell(
@@ -425,6 +449,8 @@ class Pill extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final c = color ?? p.muted;
+    // The pill's own colour as its text, made dark enough to read on its tint over a card (danger and warning were 4:1).
+    final ink = readableOn(c, Color.alphaBlend(c.withValues(alpha: 0.12), p.surface));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
@@ -443,12 +469,12 @@ class Pill extends StatelessWidget {
             ),
             const SizedBox(width: 6),
           ] else if (icon != null) ...[
-            Icon(icon, size: 12, color: c),
+            Icon(icon, size: 12, color: ink),
             const SizedBox(width: 5),
           ],
           Text(
             label,
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c),
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: ink),
           ),
         ],
       ),
@@ -607,10 +633,29 @@ class LabeledSwitch extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: label,
-    child: Switch(value: value, onChanged: onChanged),
-  );
+  Widget build(BuildContext context) {
+    // Beside a title that already says what it switches (TitledSwitchRow) it adds nothing: the row is read once, as
+    // "<title>, switch, on", instead of the title and then the same words again for the switch.
+    if (context.dependOnInheritedWidgetOfExactType<_SwitchTitled>() != null) return Switch(value: value, onChanged: onChanged);
+    return Semantics(label: label, child: Switch(value: value, onChanged: onChanged));
+  }
+}
+
+/// A row whose visible title says what its [LabeledSwitch] switches: one thing to a screen reader (the title, the
+/// switch's state and its tap), not the title and then the switch's label repeating it.
+class TitledSwitchRow extends StatelessWidget {
+  const TitledSwitchRow({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => MergeSemantics(child: _SwitchTitled(child: child));
+}
+
+class _SwitchTitled extends InheritedWidget {
+  const _SwitchTitled({required super.child});
+
+  @override
+  bool updateShouldNotify(_SwitchTitled oldWidget) => false;
 }
 
 /// Something that failed to load, in the user's words ([friendlyError]), with a way to try again: an error alone in
@@ -735,4 +780,32 @@ Future<T?> runWithProgress<T>(
   } finally {
     if (route.isActive) nav.removeRoute(route);
   }
+}
+
+/// A bottom sheet that is never cut off: as tall as its content, up to the whole screen, and it scrolls past that. A plain
+/// sheet stops at 9/16 of the screen's height, which in landscape left a menu's last rows (Delete) out of reach.
+Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showModalBottomSheet<T>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  builder: (context) => SingleChildScrollView(child: builder(context)),
+);
+
+/// A filled button that deletes or stops something: the danger colour, with text that reads on it in either theme.
+ButtonStyle dangerButtonStyle(BuildContext context) =>
+    FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: context.palette.onDanger);
+
+/// Keeps content to a readable width on a tablet, a foldable or a phone on its side (lists and the chat used the whole
+/// width: an 880 dp line of text, 430 dp project tiles). Below [max] it changes nothing.
+class ContentWidth extends StatelessWidget {
+  const ContentWidth({super.key, required this.child, this.max = 720});
+  final Widget child;
+  final double max;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => box.maxWidth.isFinite && box.maxWidth > max
+        ? Padding(padding: EdgeInsets.symmetric(horizontal: (box.maxWidth - max) / 2), child: child)
+        : child,
+  );
 }

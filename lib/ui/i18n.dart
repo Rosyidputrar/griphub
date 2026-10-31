@@ -1,10 +1,27 @@
 import '../agent/clock.dart';
+import '../agent/host_messages.dart';
 import '../agent/msg.dart';
 import 'theme.dart';
 
 /// Translates an English UI string into the chosen language. English text is the key, so a
 /// missing translation falls back to English instead of showing a placeholder.
 String tr(String en) => Appearance.instance.language == 'id' ? (_id[en] ?? en) : en;
+
+/// A message from the host: translated when it is one of the fixed ones, or one of the few with numbers in it
+/// ([limitStopOf]); anything else as it is.
+String trHost(String message) {
+  final stop = limitStopOf(message);
+  final numbers = limitNumbers(message);
+  if (stop == null || numbers == null) return tr(message);
+  switch (stop) {
+    case LimitStop.budget:
+      return tr('Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.')
+          .replaceAll('{cap}', localNumber(numbers[0]))
+          .replaceAll('{spent}', localNumber(numbers[1]));
+    case LimitStop.toolCalls:
+      return tr('Stopped after {n} tool calls in one request.').replaceAll('{n}', localNumber(numbers[0]));
+  }
+}
 
 /// A [Msg] from the agent side in the app's language.
 String trMsg(Msg m) => m.fill(tr(m.en));
@@ -113,6 +130,41 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'Open photo': 'Buka foto',
+  'Open file': 'Buka file',
+  'Violet': 'Ungu',
+  'Blue': 'Biru',
+  'Green': 'Hijau',
+  'Orange': 'Oranye',
+  'Pink': 'Merah muda',
+  'Teal': 'Hijau toska',
+  'More': 'Lainnya',
+  'Invalid name': 'Nama tidak valid',
+  '{name} already exists': '{name} sudah ada',
+  'name': 'nama',
+  'No chats yet. Tap + to start one.': 'Belum ada chat. Ketuk + untuk memulai.',
+  'Nothing matches.': 'Tidak ada yang cocok.',
+  'preparing…': 'menyiapkan…',
+  '1 server': '1 server',
+  '{n} servers': '{n} server',
+  '{n} steps': '{n} langkah',
+  '{n} rows': '{n} baris',
+  'Page {n} of {total}': 'Halaman {n} dari {total}',
+  'Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.': 'Persetujuan adalah pertanyaan sebelum tindakan berisiko yang umum, bukan batas keamanan: model masih bisa menjangkau hal yang tidak ada di daftarnya. Buka hanya yang kamu percaya.',
+  'Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.': 'Batas harian {cap} kredit tercapai (terpakai {spent} hari ini). Naikkan di Pengaturan → Pemakaian.',
+  'Stopped after {n} tool calls in one request.': 'Berhenti setelah {n} panggilan tool dalam satu permintaan.',
+  'Raise limit': 'Naikkan batas',
+  'May contain secrets: not included unless you tick it': 'Mungkin berisi rahasia: tidak ikut kecuali kamu mencentangnya',
+  'Commit and push to': 'Commit & push ke',
+  'Background runs do not ask: risky actions (deleting files, force push, writing outside the project) are refused.': 'Tugas latar tidak bertanya: tindakan berisiko (menghapus file, force push, menulis di luar proyek) ditolak.',
+  'Background runs do not ask before acting: commands, edits and pushes run on their own, whatever the Approvals setting is.': 'Tugas latar tidak meminta persetujuan: perintah, edit, dan push berjalan sendiri, apa pun pengaturan Persetujuan.',
+  'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.': 'Agent akan menjalankan setiap perintah, mengedit file apa pun, dan memakai semua tool tanpa bertanya. Tetap aktif untuk semua chat sampai kamu mematikannya di Pengaturan > Persetujuan.',
+  'Permissions bypassed: the agent acts without asking, in every chat.': 'Izin dilewati: agent bertindak tanpa bertanya, di semua chat.',
+  'The key was not accepted. Check that you copied all of it, with no spaces.': 'Key ditolak. Pastikan tersalin utuh, tanpa spasi.',
+  'GripHub did not answer. Check your connection and try again.': 'GripHub tidak menjawab. Periksa koneksi lalu coba lagi.',
+  'GripHub could not load the models. Try again in a moment.': 'GripHub belum bisa memuat model. Coba lagi sebentar lagi.',
+  "Offline: can't stop it from here. It stops by itself when it finishes; reconnect to stop it now.": 'Offline: tidak bisa dihentikan dari sini. Agent berhenti sendiri saat selesai; sambungkan lagi untuk menghentikannya sekarang.',
+  'Not connected. The agent is still waiting for your answer: reconnect to answer.': 'Tidak tersambung. Agent masih menunggu jawabanmu: sambungkan lagi untuk menjawab.',
   'models available': 'model tersedia',
   'GripHub connected': 'GripHub terhubung',
   'Save & load models': 'Simpan & muat model',
@@ -916,6 +968,7 @@ const _id = <String, String>{
   'Look around the workspace and give me a short tour of what is there.': 'Lihat-lihat isi workspace dan jelaskan singkat apa saja yang ada.',
   'This command can delete data, publish or reach other machines': 'Perintah ini bisa menghapus data, memublikasikan, atau mengakses mesin lain',
   'Writes outside the project folder': 'Menulis di luar folder proyek',
+  'Writes inside a .git folder: git runs what is written there': 'Menulis di dalam folder .git: git menjalankan apa yang tertulis di sana',
   'External tool from an MCP server': 'Tool eksternal dari server MCP',
   'Approval required for every change': 'Setiap perubahan butuh persetujuan',
   'Enter a number, like 2 or 1.5': 'Masukkan angka, misalnya 2 atau 1,5',

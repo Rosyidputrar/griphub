@@ -1,7 +1,7 @@
 // Removing one finished run from the Tasks list (swipe), with Undo.
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
@@ -80,4 +80,32 @@ test("Undo can't sneak a queued run back in", () => {
 	const { r } = runner([]);
 	r.restore({ id: "z", status: "queued", title: "z" }, 0);
 	assert.deepEqual(ids(r), []);
+});
+
+test("runs.json cut short does not wipe the schedules: the last good copy is loaded and the damaged file is kept", () => {
+	const { r, file } = runner([{ id: "a", status: "done" }]);
+	r.store.schedules = [{ id: "s1", name: "nightly" }];
+	r.save();
+	r.store.runs.push({ id: "b", title: "b", prompt: "p", cwd: "/w", source: "queue", createdAt: 2, status: "done" });
+	r.save(); // the copy now holds the first save
+	truncateSync(file, 15);
+	const again = new Runner(file, async () => ({}), () => {}, async () => []);
+	runners.push(again);
+	assert.deepEqual(again.summary().schedules.map((x) => x.id), ["s1"], "not an empty list");
+	assert.equal(readdirSync(dirname(file)).filter((f) => f.startsWith("runs.json.corrupt-")).length, 1, "the damaged file is kept");
+});
+
+test("runs.json that cannot be read and has no copy starts empty, sets the file aside, and a save keeps it", () => {
+	const { r, file } = runner([]);
+	writeFileSync(file, "{ not json");
+	const before = readFileSync(file);
+	const again = new Runner(file, async () => ({}), () => {}, async () => []);
+	runners.push(again);
+	assert.deepEqual(again.summary().schedules, []);
+	assert.ok(!existsSync(file));
+	again.save();
+	const kept = readdirSync(dirname(file)).filter((f) => f.startsWith("runs.json.corrupt-"));
+	assert.equal(kept.length, 1);
+	assert.deepEqual(readFileSync(join(dirname(file), kept[0])), before);
+	void r;
 });

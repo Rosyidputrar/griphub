@@ -139,7 +139,7 @@ Future<void> showChatExport(BuildContext context, AgentController agent) async {
     }
   }
 
-  await showModalBottomSheet<void>(
+  await showAppSheet<void>(
     context: context,
     builder: (sheet) => SafeArea(
       child: Padding(

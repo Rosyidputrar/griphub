@@ -49,7 +49,7 @@ export class Mcp {
 		 */
 		private readonly shells: { shell: string; box: () => string } = { shell: "/system/bin/sh", box: () => "box" },
 	) {
-		this.servers = readSecureJson<McpServerConfig[]>(file, []);
+		this.servers = readSecureJson<McpServerConfig[]>(file, [], Array.isArray);
 	}
 
 	private save() {

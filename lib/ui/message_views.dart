@@ -9,6 +9,7 @@ import 'package:markdown/markdown.dart' as md;
 
 import '../agent/agent_controller.dart';
 import '../agent/agent_fs.dart';
+import '../agent/host_messages.dart';
 import '../agent/jobs.dart';
 import '../agent/models.dart';
 import '../agent/pricing.dart';
@@ -49,7 +50,7 @@ class UserMessageView extends StatelessWidget {
     return Align(
       alignment: Alignment.centerRight,
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+        constraints: BoxConstraints(maxWidth: bubbleWidth(context)),
         child: Builder(
           builder: (bubbleContext) => GestureDetector(
             onLongPress: onLongPress == null || working != null ? null : () => onLongPress!(bubbleContext),
@@ -58,7 +59,7 @@ class UserMessageView extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 AnimatedOpacity(
-                  duration: const Duration(milliseconds: 150),
+                  duration: Motion.of(context, const Duration(milliseconds: 150)),
                   opacity: working != null ? 0.5 : 1,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -116,7 +117,13 @@ class MessageAttachments extends StatelessWidget {
             alignment: WrapAlignment.end,
             children: [
               for (final a in photos)
-                GestureDetector(
+                // A picture, and a way to open it: said to a screen reader by its name.
+                Semantics(
+                  button: true,
+                  image: true,
+                  label: '${tr('Open photo')} ${a.name}',
+                  child: GestureDetector(
+                  excludeFromSemantics: true,
                   onTap: () => openAttachmentViewer(context, a, fs: fs),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(Radii.md),
@@ -135,6 +142,7 @@ class MessageAttachments extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
                 ),
             ],
           ),
@@ -161,10 +169,16 @@ class _AttachmentFileChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final a = attachment;
-    return GestureDetector(
+    // Said by its name, and 48 dp to touch.
+    return Semantics(
+      button: true,
+      label: '${tr('Open file')} ${a.name}',
+      onTap: () => openAttachmentViewer(context, a, fs: fs),
+      excludeSemantics: true,
+      child: GestureDetector(
       onTap: () => openAttachmentViewer(context, a, fs: fs),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 240),
+        constraints: const BoxConstraints(maxWidth: 240, minHeight: 48),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: p.raised,
@@ -194,6 +208,7 @@ class _AttachmentFileChip extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }
@@ -277,7 +292,7 @@ class _QueuedMessageViewState extends State<QueuedMessageView> with SingleTicker
         child: Align(
           alignment: Alignment.centerRight,
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+            constraints: BoxConstraints(maxWidth: bubbleWidth(context)),
             child: Semantics(
               label: widget.error ?? widget.status ?? tr('Waiting for its turn'),
               child: Column(
@@ -494,7 +509,13 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
   late final _ticker = createTicker(_tick);
   late int _shown = widget.live ? 0 : widget.text.length;
   Duration _last = Duration.zero;
+  Duration _painted = Duration.zero;
   double _carry = 0;
+
+  /// The finished blocks of the reply, built once each: re-parsing the whole reply as markdown on every tick made each
+  /// frame cost more the longer the reply got (UI-11). Keyed by the block's text, so an identical widget comes back and
+  /// Flutter skips rebuilding it.
+  final _blocks = <String, Widget>{};
 
   bool get _behind => _shown < widget.text.length;
 
@@ -528,6 +549,9 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
     _carry += rate * dt;
     final step = _carry.floor();
     if (step == 0) return;
+    // About 30 updates a second is smooth to read; every frame only cost more work.
+    if (elapsed - _painted < const Duration(milliseconds: 33)) return;
+    _painted = elapsed;
     _carry -= step;
     setState(() => _shown = (_shown + step).clamp(0, widget.text.length));
     const TranscriptGrew().dispatch(context);
@@ -542,10 +566,45 @@ class _TypewriterMarkdownState extends State<TypewriterMarkdown> with SingleTick
   @override
   Widget build(BuildContext context) {
     final typing = widget.live || _behind;
+    if (!typing) {
+      _blocks.clear();
+      return MarkdownText(widget.text);
+    }
     // U+258D left block as the caret; markdown renders it inline with the text.
     final visible = widget.text.substring(0, _shown);
-    return MarkdownText(typing ? '$visible▍' : widget.text);
+    final (done, rest) = splitFinishedBlocks(visible);
+    if (done.isEmpty) return MarkdownText('$visible▍');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final b in done) ...[_blocks.putIfAbsent(b, () => MarkdownText(b)), const SizedBox(height: 10)],
+        MarkdownText('$rest▍'),
+      ],
+    );
   }
+}
+
+/// [text] as the top-level markdown blocks that are finished (followed by a blank line, outside a code fence) and what
+/// comes after them, still being written. Only the last part changes as a reply streams in.
+(List<String>, String) splitFinishedBlocks(String text) {
+  final done = <String>[];
+  var start = 0;
+  var fence = false;
+  var lineStart = 0;
+  for (var i = 0; i <= text.length; i++) {
+    if (i < text.length && text.codeUnitAt(i) != 10) continue;
+    final line = text.substring(lineStart, i);
+    final trimmed = line.trimLeft();
+    if (trimmed.startsWith('```') || trimmed.startsWith('~~~')) fence = !fence;
+    // A blank line outside a fence ends the block before it (only once something follows it).
+    if (!fence && line.trim().isEmpty && i < text.length && lineStart > start) {
+      final block = text.substring(start, lineStart).trimRight();
+      if (block.isNotEmpty) done.add(block);
+      start = i + 1;
+    }
+    lineStart = i + 1;
+  }
+  return (done, text.substring(start > text.length ? text.length : start));
 }
 
 /// The subagents a turn started: how many, and what they cost together (null when any is unknown).
@@ -606,8 +665,9 @@ class _MessageFooter extends StatelessWidget {
     );
     return Row(
       children: [
+        // The icon lines up with the reply's text; its 48 dp touch box reaches into the margin.
         Transform.translate(
-          offset: const Offset(-8, 0),
+          offset: const Offset(-16, 0),
           child: CopyButton(text: text, showLabel: false),
         ),
         if (model != null || c != null || took != null)
@@ -986,7 +1046,9 @@ class _ThinkingViewState extends State<ThinkingView> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
+        Semantics(
+          expanded: body.isEmpty ? null : open,
+          child: InkWell(
           onTap: body.isEmpty ? null : _toggle,
           borderRadius: BorderRadius.circular(Radii.sm),
           child: Padding(
@@ -1008,6 +1070,7 @@ class _ThinkingViewState extends State<ThinkingView> {
               ],
             ),
           ),
+        ),
         ),
         AnimatedSize(
           duration: Motion.of(context, Motion.normal),
@@ -1172,6 +1235,12 @@ class _ToolCallViewState extends State<ToolCallView> {
       ToolStatus.failed => Icon(LucideIcons.x, size: 15, color: p.danger),
       _ => BusySpinner(size: 12),
     };
+    // The icon says it to the eye; a screen reader is told in words.
+    final statusWord = tr(switch (status) {
+      ToolStatus.done => 'Done',
+      ToolStatus.failed => 'Failed',
+      _ => 'Running',
+    });
 
     return Container(
       decoration: BoxDecoration(
@@ -1181,14 +1250,20 @@ class _ToolCallViewState extends State<ToolCallView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
+          Semantics(
+            expanded: open,
+            child: InkWell(
             borderRadius: BorderRadius.circular(Radii.md),
             onTap: () => setState(() => open = !open),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
               child: Row(
                 children: [
-                  SizedBox.square(dimension: 16, child: Center(child: indicator)),
+                  Semantics(
+                    label: statusWord,
+                    liveRegion: status != null,
+                    child: ExcludeSemantics(child: SizedBox.square(dimension: 16, child: Center(child: indicator))),
+                  ),
                   const SizedBox(width: 10),
                   Icon(toolIcon(b.toolName), size: 15, color: p.accent),
                   const SizedBox(width: 6),
@@ -1199,7 +1274,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      writing && summary.isEmpty ? 'preparing…' : summary,
+                      writing && summary.isEmpty ? tr('preparing…') : summary,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
@@ -1228,6 +1303,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                 ],
               ),
             ),
+          ),
           ),
           // A background job runs on after its call: its clock (and Stop) stay on the card until it ends.
           if (job != null)
@@ -1604,21 +1680,28 @@ class _Section extends StatelessWidget {
 }
 
 class NoticeView extends StatelessWidget {
-  const NoticeView(this.entry, {super.key});
+  const NoticeView(this.entry, {super.key, this.onRaiseBudget});
   final NoticeEntry entry;
+
+  /// Opens where the daily budget is set; offered on the notice of a budget stop.
+  final VoidCallback? onRaiseBudget;
 
   @override
   Widget build(BuildContext context) {
-    // Notices from the app itself ("Not connected to the server.") have translations; the host's own text has none
-    // and stays as it is.
-    if (entry.error) return _ErrorNote(tr(entry.text));
-    return Text(tr(entry.text), style: Theme.of(context).textTheme.bodySmall);
+    // Notices from the app itself ("Not connected to the server.") have translations, and so do the host's limit
+    // messages (trHost); the host's other text stays as it is.
+    if (entry.error) {
+      final raise = limitStopOf(entry.text) == LimitStop.budget ? onRaiseBudget : null;
+      return _ErrorNote(trHost(entry.text), action: raise == null ? null : (label: tr('Raise limit'), onTap: raise));
+    }
+    return Text(trHost(entry.text), style: Theme.of(context).textTheme.bodySmall);
   }
 }
 
 class _ErrorNote extends StatelessWidget {
-  const _ErrorNote(this.text);
+  const _ErrorNote(this.text, {this.action});
   final String text;
+  final ({String label, VoidCallback onTap})? action;
 
   @override
   Widget build(BuildContext context) {
@@ -1629,7 +1712,13 @@ class _ErrorNote extends StatelessWidget {
         borderRadius: BorderRadius.circular(Radii.md),
         border: Border.all(color: p.danger.withValues(alpha: 0.4)),
       ),
-      child: SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SelectableText(text, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: p.danger)),
+          if (action != null) TextButton(onPressed: action!.onTap, child: Text(action!.label)),
+        ],
+      ),
     );
   }
 }
@@ -1680,7 +1769,12 @@ class _AgentActivityState extends State<AgentActivity> with SingleTickerProvider
     final p = context.palette;
     final label = widget.label;
     final style = Theme.of(context).textTheme.labelMedium?.copyWith(color: p.muted);
-    return Align(
+    // Read out as it changes ("Thinking…", "Running bash…"): the dots and the sweep are for the eye.
+    return Semantics(
+      liveRegion: true,
+      label: label ?? tr('Working…'),
+      child: ExcludeSemantics(
+        child: Align(
       alignment: Alignment.centerLeft,
       child: AnimatedBuilder(
         animation: controller,
@@ -1723,6 +1817,11 @@ class _AgentActivityState extends State<AgentActivity> with SingleTickerProvider
           ],
         ),
       ),
+        ),
+      ),
     );
   }
 }
+
+/// How wide a message bubble may be: most of a phone's width, and no wider than reads well on a tablet.
+double bubbleWidth(BuildContext context) => (MediaQuery.sizeOf(context).width * 0.82).clamp(0.0, 560.0);

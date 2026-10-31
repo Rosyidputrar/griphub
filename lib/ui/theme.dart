@@ -57,6 +57,37 @@ class Palette extends ThemeExtension<Palette> {
     return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
   }
 
+  /// The accent as a colour for text (a link, "See all", a section's action): the accent itself where it reads at 4.5:1
+  /// on both the page and a card, and otherwise made darker (lighter in the dark theme) until it does. In the light theme
+  /// green, orange, pink and teal were 2.7 to 4.1:1 as text; their fills stay as chosen.
+  Color get accentText {
+    double worst(Color c) {
+      double ratio(Color b) {
+        final a = c.computeLuminance(), l = b.computeLuminance();
+        return (a > l ? a + 0.05 : l + 0.05) / (a > l ? l + 0.05 : a + 0.05);
+      }
+
+      final x = ratio(bg), y = ratio(surface);
+      return x < y ? x : y;
+    }
+
+    final darken = bg.computeLuminance() > 0.5;
+    var hsl = HSLColor.fromColor(accent);
+    var c = accent;
+    for (var i = 0; i < 60 && worst(c) < 4.5; i++) {
+      hsl = hsl.withLightness((hsl.lightness + (darken ? -0.01 : 0.01)).clamp(0.0, 1.0));
+      c = hsl.toColor();
+    }
+    return c;
+  }
+
+  /// Text and icons on a danger fill, chosen the same way: white was 2.9:1 on the dark theme's light red.
+  Color get onDanger {
+    final l = danger.computeLuminance();
+    const ink = Color(0xFF111113);
+    return 1.05 / (l + 0.05) >= (l + 0.05) / (ink.computeLuminance() + 0.05) ? Colors.white : ink;
+  }
+
   static const light = Palette(
     bg: Color(0xFFFFFFFF),
     surface: Color(0xFFF5F5F7),
@@ -127,6 +158,9 @@ extension PaletteX on BuildContext {
 const mono = 'GeistMono';
 
 /// Accent colours the user can pick, as (light, dark) pairs. The first is the default violet.
+/// What each accent is called, in [accentChoices]' order (read out by a screen reader).
+const accentNames = ['Violet', 'Blue', 'Green', 'Orange', 'Pink', 'Teal'];
+
 const accentChoices = <(Color, Color)>[
   (Color(0xFF6E56CF), Color(0xFF9E8CFC)),
   (Color(0xFF3E63DD), Color(0xFF7B93FF)),
@@ -373,7 +407,7 @@ ThemeData buildTheme(Brightness brightness) {
     onSecondaryContainer: p.text,
   );
 
-  final overlay = brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light;
+  final overlay = systemOverlayFor(brightness, p);
   final radius = BorderRadius.circular(Radii.lg);
 
   OutlineInputBorder field(Color c, [double w = 1]) => OutlineInputBorder(
@@ -398,7 +432,7 @@ ThemeData buildTheme(Brightness brightness) {
       titleTextStyle: text.titleLarge,
       iconTheme: IconThemeData(color: p.text, size: 20),
       actionsIconTheme: IconThemeData(color: p.text, size: 20),
-      systemOverlayStyle: overlay.copyWith(statusBarColor: Colors.transparent, systemNavigationBarColor: p.bg),
+      systemOverlayStyle: overlay,
     ),
     dividerTheme: DividerThemeData(color: p.border, thickness: 1, space: 1),
     iconTheme: IconThemeData(color: p.text, size: 20),
@@ -526,4 +560,39 @@ ThemeData buildTheme(Brightness brightness) {
     ),
     pageTransitionsTheme: const PageTransitionsTheme(builders: {TargetPlatform.android: SmoothPageTransitions()}),
   );
+}
+
+/// The status and navigation bars for a theme: dark icons on the light theme, light ones on the dark, over the app's own
+/// background. Set for every screen (main.dart), not only those with an AppBar: Home, onboarding and the boot screens
+/// have none, so a phone in dark mode could show white icons on the light Home.
+SystemUiOverlayStyle systemOverlayFor(Brightness brightness, Palette p) =>
+    (brightness == Brightness.light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light).copyWith(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: p.bg,
+    );
+
+/// The contrast ratio of two colours (WCAG): 1 to 21.
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance(), lb = b.computeLuminance();
+  return (la > lb ? la + 0.05 : lb + 0.05) / (la > lb ? lb + 0.05 : la + 0.05);
+}
+
+/// Icons and text on a fill of [fill]: white or near-black, whichever reads better (white on amber, teal, orange or sky
+/// was 2.2 to 2.8:1).
+Color onFill(Color fill) {
+  const ink = Color(0xFF111113);
+  return contrastRatio(Colors.white, fill) >= contrastRatio(ink, fill) ? Colors.white : ink;
+}
+
+/// [fg] as a colour for text on [bg]: itself when it reads at [target]:1, otherwise darkened (or lightened on a dark
+/// background), same hue, until it does.
+Color readableOn(Color fg, Color bg, {double target = 4.5}) {
+  final darken = bg.computeLuminance() > 0.5;
+  var hsl = HSLColor.fromColor(fg);
+  var c = fg;
+  for (var i = 0; i < 60 && contrastRatio(c, bg) < target; i++) {
+    hsl = hsl.withLightness((hsl.lightness + (darken ? -0.01 : 0.01)).clamp(0.0, 1.0));
+    c = hsl.toColor();
+  }
+  return c;
 }

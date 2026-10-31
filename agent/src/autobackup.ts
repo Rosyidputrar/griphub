@@ -37,7 +37,8 @@ import { hostname } from "node:os";
 import { join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import { deflateRaw, inflateRawSync } from "node:zlib";
-import { readSecureJson, writeSecureJson } from "./secure.js";
+import { readSecureJson, readSecureJsonStrict, writeSecureJson } from "./secure.js";
+import { isObject } from "./state.js";
 import { crc32 } from "./workbench.js";
 
 const deflate = promisify(deflateRaw);
@@ -60,6 +61,9 @@ export const DEPENDENCY_DIRS = new Set([
 	"Pods",
 	".cache",
 ]);
+
+/** What a store file keeps beside itself: its last good copy, a damaged file set aside, an unfinished write. */
+const STORE_SIDECAR = /[\\/](integrations|custom-providers|mcp|auto-backup|runs|sync)\.json\.(bak|corrupt-\d+|tmp-\d+)$/;
 
 /** Zip without zip64: no entry, and no archive, past 4 GB. Kept well under. */
 const ZIP_LIMIT = 0xf000_0000;
@@ -121,7 +125,7 @@ export class AutoBackup {
 	private making: Promise<BackupInfo | null> | null = null;
 
 	constructor(private readonly o: AutoBackupOptions) {
-		this.config = readSecureJson<Config>(o.configFile, {});
+		this.config = readSecureJson<Config>(o.configFile, {}, isObject);
 	}
 
 	private now() {
@@ -244,6 +248,9 @@ export class AutoBackup {
 		const wsSkip = new Set([...skip, this.o.agentDir]);
 		walk(this.o.agentDir, agentSkip, (abs, st) => {
 			const rel = relative(this.o.agentDir, abs).split(sep).join("/");
+			// The last good copy, a set-aside file and a half-written one that a store keeps beside itself (state.ts): the
+			// copies are encrypted with the server's own key and are no use in a backup, and they would change it every save.
+			if (STORE_SIDECAR.test(abs)) return;
 			const secure = isSecureFile(abs);
 			if (secure && this.o.noSecrets) return;
 			out.push({ abs, name: `${secure ? "secure" : "agent"}/${rel}`, size: st.size, mtimeMs: st.mtimeMs, secure });
@@ -288,11 +295,11 @@ export class AutoBackup {
 				}
 				let data: Buffer;
 				try {
-					data = item.secure
-						? Buffer.from(JSON.stringify(readSecureJson<unknown>(item.abs, null)))
-						: await readFile(item.abs);
-				} catch {
-					continue; // gone since it was listed
+					data = item.secure ? Buffer.from(JSON.stringify(readSecureJsonStrict(item.abs))) : await readFile(item.abs);
+				} catch (e) {
+					// A store that cannot be read used to be saved as `null`, and restoring that wiped the real one. Leave it out and say so.
+					if (item.secure && (e as NodeJS.ErrnoException).code !== "ENOENT") skipped.push({ name: item.name, why: "could not be read (damaged, or saved with a key this host lacks)" });
+					continue; // otherwise: gone since it was listed
 				}
 				if (!(await zip.add(item.name, data))) {
 					skipped.push({ name: item.name, why: "the backup reached its 4 GB limit" });
@@ -570,8 +577,10 @@ export function restoreBackup(zipPath: string, to: RestoreTarget) {
 		} else if (root === "secure" && RESTORE_SECURE.has(rel)) {
 			const file = join(to.agentDir, rel);
 			let value = JSON.parse(data.toString("utf8"));
+			// A backup made by an older version holds `null` for a store it could not read: writing that would wipe the real one.
+			if (value === null || typeof value !== "object") continue;
 			if (rel === "griphub/integrations.json" && value && typeof value === "object") {
-				const mine = readSecureJson<{ settings?: Record<string, unknown> }>(file, {});
+				const mine = readSecureJson<{ settings?: Record<string, unknown> }>(file, {}, isObject);
 				const settings = { ...(value.settings ?? {}) };
 				for (const k of MACHINE_SETTINGS) {
 					if (mine.settings && k in mine.settings) settings[k] = mine.settings[k];

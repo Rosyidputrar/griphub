@@ -68,6 +68,7 @@ FakeHost _host({Object? message = 'Trim the email before signing in\n\nA trailin
 
 void main() {
   setUpAll(loadAppFonts);
+  group('which names look like secrets', secretNameTests);
   setUp(() {
     applyLook(const Look());
     layoutErrors.clear();
@@ -86,7 +87,7 @@ void main() {
       });
     }
 
-    testWidgets('Commit commits everything with the message, then closes', (tester) async {
+    testWidgets('Commit commits the ticked files with the message, then closes', (tester) async {
       final host = _host();
       await pumpLook(tester, const Look(), Scaffold(body: Builder(builder: (c) => TextButton(
         onPressed: () => Navigator.of(c).push(MaterialPageRoute<void>(builder: (_) => ReviewScreen(agent: newAgent()))),
@@ -99,7 +100,8 @@ void main() {
       await frames(tester, 12);
       final commit = host.sent('git_commit').single;
       expect(commit['message'], 'Fix the login', reason: 'what the user typed over the agent\'s message');
-      expect(commit['all'], true);
+      expect(commit['all'], false, reason: 'not `git add -A`: the files are named');
+      expect(commit['paths'], ['lib/login.dart', 'lib/ui/login_form.dart', 'test/login_test.dart', 'assets/logo.png']);
       expect(host.sent('git_push'), isEmpty);
       expect(find.byType(ReviewScreen), findsNothing);
       expect(find.textContaining('Committed: a1b2c3d'), findsOneWidget);
@@ -113,7 +115,8 @@ void main() {
       ))), height: 1100);
       await tester.tap(find.text('open'));
       await frames(tester, 12);
-      await tester.tap(find.text('Commit and push'));
+      // The button says where it goes.
+      await tester.tap(find.text('Commit and push to origin/main'));
       for (var i = 0; i < 40 && find.byType(ReviewScreen).evaluate().isNotEmpty; i++) {
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
         await tester.pump(const Duration(milliseconds: 50));
@@ -122,6 +125,57 @@ void main() {
       expect(host.sent('git_push'), hasLength(1));
       expect(find.byType(ReviewScreen), findsNothing, reason: 'closed once pushed');
       expect(find.textContaining('Committed and pushed'), findsOneWidget);
+    });
+
+    Future<FakeHost> openWith(WidgetTester tester, List<Map<String, dynamic>> files) async {
+      final host = _host();
+      host.answers['git_review'] = (_) => _review(files: files);
+      await pumpLook(tester, const Look(), Scaffold(body: Builder(builder: (c) => TextButton(
+        onPressed: () => Navigator.of(c).push(MaterialPageRoute<void>(builder: (_) => ReviewScreen(agent: newAgent()))),
+        child: const Text('open'),
+      ))), height: 1100);
+      await tester.tap(find.text('open'));
+      await frames(tester, 12);
+      await tester.enterText(find.byType(TextField), 'Add the form');
+      await tester.pump();
+      return host;
+    }
+
+    Map<String, dynamic> file(String path, {String code = ' M'}) =>
+        {'path': path, 'code': code, 'staged': false, 'unstaged': true, 'untracked': code == '??'};
+
+    testWidgets('a file that looks like a secret starts unticked, says why, and is not committed', (tester) async {
+      final host = await openWith(tester, [file('lib/a.dart'), file('.env', code: '??'), file('keys/id_ed25519', code: '??')]);
+      expect(find.text('May contain secrets: not included unless you tick it'), findsNWidgets(2));
+      final boxes = tester.widgetList<Checkbox>(find.byType(Checkbox)).map((c) => c.value).toList();
+      expect(boxes, [true, false, false]);
+      expect(find.text('Commit'), findsNothing, reason: 'the button counts what goes in: "Commit (1)"');
+      await tester.tap(find.text('Commit (1)'));
+      await frames(tester, 12);
+      expect(host.sent('git_commit').single['paths'], ['lib/a.dart']);
+    });
+
+    testWidgets('ticking a secret-looking file includes it; unticking a file leaves it out; none ticked cannot commit', (tester) async {
+      final host = await openWith(tester, [file('lib/a.dart'), file('.env', code: '??')]);
+      await tester.tap(find.byType(Checkbox).at(1)); // the .env, on purpose
+      await tester.pump();
+      await tester.tap(find.byType(Checkbox).at(0)); // not the code
+      await tester.pump();
+      await tester.tap(find.byType(Checkbox).at(0));
+      await tester.pump();
+      await tester.tap(find.text('Commit'));
+      await frames(tester, 12);
+      expect(host.sent('git_commit').single['paths'], ['lib/a.dart', '.env']);
+    });
+
+    testWidgets('with nothing ticked Commit is off', (tester) async {
+      await openWith(tester, [file('lib/a.dart')]);
+      await tester.tap(find.text('Select none'));
+      await tester.pump();
+      expect(tester.widget<FilledButton>(find.ancestor(of: find.textContaining('Commit'), matching: find.byType(FilledButton)).first).onPressed, isNull);
+      await tester.tap(find.text('Select all'));
+      await tester.pump();
+      expect(tester.widget<FilledButton>(find.ancestor(of: find.text('Commit'), matching: find.byType(FilledButton)).first).onPressed, isNotNull);
     });
 
     testWidgets('a message the agent could not write says why, and the field stays for typing one', (tester) async {
@@ -213,5 +267,17 @@ void main() {
       expect(agent.offlinePrompts, isEmpty);
       expect(tester.widget<TextField>(find.byType(TextField).last).controller!.text, 'Fix the footer');
     });
+  });
+}
+
+// Which files look like secrets (ReviewScreen leaves them unticked).
+void secretNameTests() {
+  test('secret-looking names', () {
+    for (final yes in ['.env', 'app/.env.local', '.env.production', 'cert.pem', 'k/server.key', 'id_rsa', '.ssh/config', '.npmrc', 'credentials.json', 'service-account-prod.json', 'a.keystore', '.aws/credentials']) {
+      expect(looksSecret(yes), true, reason: yes);
+    }
+    for (final no in ['.env.example', '.env.sample', 'lib/env.dart', 'id_rsa.pub', 'README.md', 'monkey.dart', 'keyboard.png', 'src/keys.dart', 'package.json']) {
+      expect(looksSecret(no), false, reason: no);
+    }
   });
 }

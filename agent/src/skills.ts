@@ -6,6 +6,7 @@
 
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { atomicWrite } from "./state.js";
 
 export interface SkillInfo {
 	name: string;
@@ -99,7 +100,7 @@ export class Skills {
 			if (!seeded.includes(name)) seeded.push(name);
 		}
 		mkdirSync(dirname(this.seededFile), { recursive: true });
-		writeFileSync(this.seededFile, JSON.stringify(seeded));
+		atomicWrite(this.seededFile, JSON.stringify(seeded));
 	}
 
 	list(): SkillInfo[] {
@@ -191,7 +192,7 @@ export class Skills {
 			try {
 				await this.install(spec, log);
 				done.push(spec);
-				writeFileSync(file, JSON.stringify(done));
+				atomicWrite(file, JSON.stringify(done));
 			} catch (e) {
 				log(`Skipped ${spec}: ${(e as Error).message}`);
 			}
@@ -232,7 +233,7 @@ export class Skills {
 			}
 		}
 		mkdirSync(dirname(this.catalogFile()), { recursive: true });
-		writeFileSync(this.catalogFile(), JSON.stringify({ at: Date.now(), entries }));
+		atomicWrite(this.catalogFile(), JSON.stringify({ at: Date.now(), entries }));
 		return entries;
 	}
 

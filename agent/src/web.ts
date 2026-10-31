@@ -8,7 +8,9 @@
  * (crawl) and take screenshots.
  */
 
+import { lookup as dnsLookup } from "node:dns";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { isIP } from "node:net";
 import { join } from "node:path";
 import { Type } from "typebox";
 import { KeyError, withKeys } from "./keyring.js";
@@ -581,8 +583,80 @@ async function readCapped(res: Response, budget: number): Promise<string> {
 	return new TextDecoder().decode(out);
 }
 
-export async function webFetch(url: string, signal?: AbortSignal) {
+/**
+ * Whether [ip] is an address the agent has no business fetching from a page it was handed: this machine, a private
+ * network, a link-local address (a cloud server's metadata service is 169.254.169.254), multicast and reserved ranges.
+ * A web page the agent reads can say "fetch http://169.254.169.254/..." (or redirect there), and what comes back is
+ * the agent's to read and send on.
+ */
+export function isPrivateAddress(ip: string): boolean {
+	const v = ip.replace(/^\[|\]$/g, "").toLowerCase().split("%")[0];
+	if (isIP(v) === 4) {
+		const [a, b, c] = v.split(".").map(Number);
+		return (
+			a === 0 ||
+			a === 10 ||
+			a === 127 ||
+			(a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
+			(a === 169 && b === 254) ||
+			(a === 172 && b >= 16 && b <= 31) ||
+			(a === 192 && b === 0 && c === 0) ||
+			(a === 192 && b === 168) ||
+			(a === 198 && (b === 18 || b === 19)) ||
+			a >= 224 // multicast, reserved, broadcast
+		);
+	}
+	if (isIP(v) === 6) {
+		// An IPv4 address inside an IPv6 one (::ffff:127.0.0.1, or the NAT64 prefix) is judged as the IPv4 address.
+		const mapped = /^(?:::ffff:|64:ff9b::)(\d+\.\d+\.\d+\.\d+)$/.exec(v);
+		if (mapped) return isPrivateAddress(mapped[1]);
+		const hex = /^(?:::ffff:|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(v);
+		if (hex) {
+			const n = (parseInt(hex[1], 16) << 16) | parseInt(hex[2], 16);
+			return isPrivateAddress(`${(n >>> 24) & 255}.${(n >>> 16) & 255}.${(n >>> 8) & 255}.${n & 255}`);
+		}
+		return (
+			v === "::" ||
+			v === "::1" ||
+			/^f[cd]/.test(v) || // unique local fc00::/7
+			/^fe[89ab]/.test(v) || // link-local fe80::/10
+			/^fe[c-f]/.test(v) || // site-local (deprecated)
+			/^ff/.test(v) || // multicast
+			v.startsWith("2001:db8") // documentation
+		);
+	}
+	return false;
+}
+
+type Resolve = (host: string) => Promise<string[]>;
+
+/** Every address [host] resolves to, through the same lookup the connection will use (the DoH one when it is on). */
+const resolveAll: Resolve = (host) =>
+	new Promise((ok, fail) =>
+		dnsLookup(host, { all: true }, (err, addresses) => (err ? fail(err) : ok((addresses as { address: string }[]).map((a) => a.address)))),
+	);
+
+/** Throws unless [url] is a public web address: its host (an address, or every address its name resolves to) must not be private. */
+export async function assertPublicUrl(url: URL, resolve: Resolve = resolveAll): Promise<void> {
+	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`web_fetch only fetches http and https addresses, not ${url.protocol}`);
+	const host = url.hostname.replace(/^\[|\]$/g, "");
+	const refuse = () =>
+		new Error(`web_fetch only reaches public web addresses, and ${host} is a private or local one. For something on this machine, use a shell command such as curl.`);
+	if (isIP(host)) {
+		if (isPrivateAddress(host)) throw refuse();
+		return;
+	}
+	if (host === "localhost" || host.endsWith(".localhost")) throw refuse();
+	const addresses = await resolve(host);
+	// Any private answer refuses it: a name that is public for one lookup and private for the next is the attack.
+	if (addresses.some(isPrivateAddress)) throw refuse();
+}
+
+const MAX_REDIRECTS = 10;
+
+export async function webFetch(url: string, signal?: AbortSignal, deps: { fetch?: typeof fetch; resolve?: Resolve } = {}) {
 	if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+	const doFetch = deps.fetch ?? fetch;
 	// The caller may never abort, so cap the wait at 60s (combined with the
 	// caller's signal) and the body at 5 MB: the tool pages the text
 	// afterwards anyway (max 60k chars per call), so nothing is lost.
@@ -596,56 +670,224 @@ export async function webFetch(url: string, signal?: AbortSignal) {
 	let res: Response;
 	let raw: string;
 	try {
-		res = await fetch(url, {
-			headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
-			redirect: "follow",
-			signal: ctrl.signal,
-		});
+		// Redirects are followed here, one hop at a time, so that every address is looked at before it is fetched: an
+		// attacker's page that answers 302 to http://169.254.169.254/ would otherwise be followed inside fetch.
+		let target = new URL(url);
+		for (let hop = 0; ; hop++) {
+			await assertPublicUrl(target, deps.resolve);
+			res = await doFetch(target.href, {
+				headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5" },
+				redirect: "manual",
+				signal: ctrl.signal,
+			});
+			const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+			if (!location) break;
+			if (hop >= MAX_REDIRECTS) throw new Error(`web_fetch stopped after ${MAX_REDIRECTS} redirects`);
+			await res.body?.cancel().catch(() => {});
+			target = new URL(location, target);
+		}
 		const type = res.headers.get("content-type") ?? "";
 		raw = await readCapped(res, 5_000_000);
-		return finishFetch(res, type, raw);
+		// `res.url` is empty for a response built by hand; the page's own address is the last hop.
+		return finishFetch(res, type, raw, target.href);
 	} finally {
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", onCallerAbort);
 	}
 }
 
-function finishFetch(res: Response, type: string, raw: string) {
+function finishFetch(res: Response, type: string, raw: string, finalUrl: string) {
 	let text: string;
 	let title = "";
 	if (/html|xml/.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {
-		title = stripTags(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
-		text = htmlToText(raw, res.url);
+		title = stripTags(findBlocks(raw, TITLE, 1)[0]?.inner ?? "");
+		text = htmlToText(raw, finalUrl);
 	} else {
 		text = raw;
 	}
-	return { url: res.url, status: res.status, contentType: type, title, text };
+	return { url: finalUrl, status: res.status, contentType: type, title, text };
 }
+
+// The page is the web's to write, and every step below used to be a regular expression that could be made to run for
+// minutes on a few hundred kilobytes (`<` repeated 200 000 times took 62 s, and nothing restarted a host stuck there). The
+// cause is always the same: an opening that has no end makes the engine look for the end from every opening again, so the
+// work grows with the square of the page. The steps are the same and give the same text; each is now a scan that looks at
+// every part of the page a bounded number of times. The tests compare the output with the old expressions, and time the
+// shapes that broke them.
+
+/** One kind of element: [open] and [close] are sources for case-insensitive RegExps; [tag] says the opening runs to the next `>`. */
+interface Block {
+	open: string;
+	close: string;
+	tag?: boolean;
+}
+
+interface Found {
+	block: number;
+	start: number;
+	end: number;
+	inner: string;
+}
+
+/** Where the last match of [source] starts in [s], or -1. */
+function lastStart(s: string, source: string): number {
+	const re = new RegExp(source, "gi");
+	let at = -1;
+	for (let m = re.exec(s); m; m = re.exec(s)) at = m.index;
+	return at;
+}
+
+/**
+ * The elements of [s] in order, as the expression `<open>[\s\S]*?<close>` of any of [blocks] would find them one after
+ * another (the one that starts first wins, and the search goes on after its end), at most [limit] of them. An opening that
+ * no closing follows ends the search for its kind, because no later opening has one either.
+ */
+function findBlocks(s: string, blocks: Block[], limit = Infinity): Found[] {
+	const slots = blocks.map((b) => ({
+		open: new RegExp(b.open, "gi"),
+		close: new RegExp(b.close, "gi"),
+		tag: !!b.tag,
+		lastClose: lastStart(s, b.close),
+		at: -1,
+		innerStart: 0,
+	}));
+	const found: Found[] = [];
+	let pos = 0;
+	while (found.length < limit) {
+		let best = -1;
+		for (let i = 0; i < slots.length; i++) {
+			const sl = slots[i];
+			if (sl.at < pos) {
+				sl.at = Infinity;
+				sl.open.lastIndex = pos;
+				const m = sl.open.exec(s);
+				if (m) {
+					// An opening that goes on to a `>` ends at the first one after its name (`[^>]*>`). Looked for here, not by the
+					// expression: with no `>` left, the engine would look for it again from every opening.
+					const end = m.index + m[0].length;
+					const gt = sl.tag ? s.indexOf(">", end) : end - 1;
+					if (gt >= 0 && gt + 1 <= sl.lastClose) {
+						sl.at = m.index;
+						sl.innerStart = gt + 1;
+					}
+				}
+			}
+			if (sl.at < Infinity && (best < 0 || sl.at < slots[best].at)) best = i;
+		}
+		if (best < 0) break;
+		const sl = slots[best];
+		sl.close.lastIndex = sl.innerStart;
+		const end = sl.close.exec(s) as RegExpExecArray; // there is one: the opening was only taken when a closing starts after it
+		found.push({ block: best, start: sl.at, end: end.index + end[0].length, inner: s.slice(sl.innerStart, end.index) });
+		pos = end.index + end[0].length;
+	}
+	return found;
+}
+
+/** [s] with each element of [blocks] replaced by what [to] says (see findBlocks). */
+function replaceBlocks(s: string, blocks: Block[], to: (block: number, inner: string) => string): string {
+	let out = "";
+	let pos = 0;
+	for (const f of findBlocks(s, blocks)) {
+		out += s.slice(pos, f.start) + to(f.block, f.inner);
+		pos = f.end;
+	}
+	return out + s.slice(pos);
+}
+
+/** `s.replace(re, to)` for an expression whose every match ends with `>`: nothing after the last `>` can match. */
+function replaceTags(s: string, re: RegExp, to: string): string {
+	const cut = s.lastIndexOf(">") + 1;
+	return cut === 0 ? s : s.slice(0, cut).replace(re, to) + s.slice(cut);
+}
+
+/** Tags removed with what is between them and their closing tag. */
+const NOISE_TAGS = ["script", "style", "noscript", "svg", "head", "template", "iframe", "nav", "footer", "form"];
+
+/**
+ * Links with an address: `[label](address)` for one that goes somewhere on the web, the label alone for the rest. This
+ * is `<a\b[^>]*href="([^"#][^"]*)"[^>]*>([\s\S]*?)<\/a>` taken apart: the address is the one after the last `href="` in
+ * the tag that is followed by a quote (the value may hold a `>`), the label runs to the next `</a>`.
+ */
+function linkify(s: string, base: string): string {
+	const open = /<a\b/gi;
+	const close = /<\/a>/gi;
+	const lastClose = lastStart(s, "<\\/a>");
+	let out = "";
+	let pos = 0;
+	for (;;) {
+		open.lastIndex = pos;
+		const found = open.exec(s);
+		if (!found) break;
+		const i = found.index;
+		const gt = s.indexOf(">", i + 2); // the first `>`: the tag's attributes before the address end here at the latest
+		if (gt < 0) break; // no `>` for this one, or any later one
+		const region = s.slice(i + 2, gt);
+		const starts: number[] = [];
+		const re = /href="/gi;
+		for (let m = re.exec(region); m; m = re.exec(region)) starts.push(i + 2 + m.index);
+		let hit: { href: string; from: number } | null = null;
+		for (let k = starts.length - 1; k >= 0 && !hit; k--) {
+			const p = starts[k];
+			const first = s[p + 6];
+			if (first === undefined || first === '"' || first === "#") continue;
+			const q = s.indexOf('"', p + 7);
+			if (q < 0) continue;
+			// Only the first of these can end past `gt`: the quote of the `href="` after it comes first for the others.
+			const after = q < gt ? gt : s.indexOf(">", q + 1);
+			if (after < 0 || lastClose < after + 1) continue;
+			hit = { href: s.slice(p + 6, q), from: after + 1 };
+		}
+		if (!hit) {
+			// Any `<a` before this tag's `>` has the same ones to choose from, and none of them works either.
+			out += s.slice(pos, gt + 1);
+			pos = gt + 1;
+			continue;
+		}
+		close.lastIndex = hit.from;
+		const end = close.exec(s) as RegExpExecArray;
+		const label = stripTags(s.slice(hit.from, end.index)).trim();
+		let replacement = "";
+		if (label) {
+			let abs = decodeEntities(hit.href);
+			try {
+				abs = new URL(abs, base).href;
+			} catch {}
+			replacement = /^https?:/.test(abs) ? `[${label}](${abs})` : label;
+		}
+		out += s.slice(pos, i) + replacement;
+		pos = end.index + end[0].length;
+	}
+	return out + s.slice(pos);
+}
+
+const MAIN_BLOCKS: Block[] = [
+	{ open: "<main\\b", close: "<\\/main>" },
+	{ open: "<article\\b", close: "<\\/article>" },
+];
+const NOISE_BLOCKS: Block[] = NOISE_TAGS.map((t) => ({ open: `<${t}\\b`, close: `<\\/${t}>` }));
+const COMMENT: Block[] = [{ open: "<!--", close: "-->" }];
+const PRE: Block[] = [{ open: "<pre\\b", close: "<\\/pre>", tag: true }];
+const CODE: Block[] = [{ open: "<code\\b", close: "<\\/code>", tag: true }];
+const HEADINGS: Block[] = [1, 2, 3, 4, 5, 6].map((n) => ({ open: `<h${n}\\b`, close: `<\\/h${n}>`, tag: true }));
+const TITLE: Block[] = [{ open: "<title", close: "<\\/title>", tag: true }];
 
 /** Readable text with light markdown: headings, lists, links and code kept. */
 export function htmlToText(html: string, base = ""): string {
 	let s = html;
-	// Prefer the main content when the page marks it.
-	const main = s.match(/<(main|article)\b[\s\S]*?<\/\1>/i);
-	if (main && main[0].length > 500) s = main[0];
-	s = s.replace(/<(script|style|noscript|svg|head|template|iframe|nav|footer|form)\b[\s\S]*?<\/\1>/gi, "");
-	s = s.replace(/<!--[\s\S]*?-->/g, "");
-	s = s.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code) => `\n\n\`\`\`\n${decodeEntities(stripTags(code))}\n\`\`\`\n\n`);
-	s = s.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, code) => `\`${decodeEntities(stripTags(code))}\``);
-	s = s.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, n, t) => `\n\n${"#".repeat(Number(n))} ${stripTags(t).trim()}\n\n`);
-	s = s.replace(/<a\b[^>]*href="([^"#][^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, t) => {
-		const label = stripTags(t).trim();
-		if (!label) return "";
-		let abs = decodeEntities(href);
-		try {
-			abs = new URL(abs, base).href;
-		} catch {}
-		return /^https?:/.test(abs) ? `[${label}](${abs})` : label;
-	});
-	s = s.replace(/<li\b[^>]*>/gi, "\n- ");
-	s = s.replace(/<(br|hr)\b[^>]*>/gi, "\n");
-	s = s.replace(/<\/(p|div|section|tr|table|ul|ol|blockquote|dd|dt|h\d)>/gi, "\n\n");
-	s = s.replace(/<(td|th)\b[^>]*>/gi, " | ");
+	// Prefer the main content when the page marks it (the first of `main` and `article` to open and close).
+	const main = findBlocks(s, MAIN_BLOCKS, 1)[0];
+	if (main && main.end - main.start > 500) s = s.slice(main.start, main.end);
+	s = replaceBlocks(s, NOISE_BLOCKS, () => "");
+	s = replaceBlocks(s, COMMENT, () => "");
+	s = replaceBlocks(s, PRE, (_, code) => `\n\n\`\`\`\n${decodeEntities(stripTags(code))}\n\`\`\`\n\n`);
+	s = replaceBlocks(s, CODE, (_, code) => `\`${decodeEntities(stripTags(code))}\``);
+	s = replaceBlocks(s, HEADINGS, (n, t) => `\n\n${"#".repeat(n + 1)} ${stripTags(t).trim()}\n\n`);
+	s = linkify(s, base);
+	s = replaceTags(s, /<li\b[^>]*>/gi, "\n- ");
+	s = replaceTags(s, /<(br|hr)\b[^>]*>/gi, "\n");
+	s = replaceTags(s, /<\/(p|div|section|tr|table|ul|ol|blockquote|dd|dt|h\d)>/gi, "\n\n");
+	s = replaceTags(s, /<(td|th)\b[^>]*>/gi, " | ");
 	s = decodeEntities(stripTags(s));
 	return s
 		.split("\n")
@@ -655,14 +897,45 @@ export function htmlToText(html: string, base = ""): string {
 		.trim();
 }
 
-function stripTags(s: string) {
-	return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+\n/g, "\n").trim();
+/** [s] without its tags (`<` up to the next `>`; a `<` with no `>` after it is text), in one pass. */
+function removeTags(s: string): string {
+	let out = "";
+	let from = 0;
+	for (let lt = s.indexOf("<"); lt >= 0; ) {
+		const gt = s.indexOf(">", lt + 1);
+		if (gt < 0) break; // no `>` after this `<`, so none after any later one
+		if (gt === lt + 1) {
+			lt = s.indexOf("<", lt + 1); // `<>` is not a tag; whatever follows may be
+			continue;
+		}
+		out += s.slice(from, lt);
+		from = gt + 1;
+		lt = s.indexOf("<", from);
+	}
+	return out + s.slice(from);
+}
+
+/** Whitespace that ends in a line break becomes the line break: all of `\s+\n`, without looking for the break from every space. */
+function tidyLineEnds(s: string): string {
+	return s.replace(/\s{2,}/g, (run) => {
+		const lf = run.lastIndexOf("\n");
+		return lf >= 1 ? `\n${run.slice(lf + 1)}` : run;
+	});
+}
+
+export function stripTags(s: string) {
+	return tidyLineEnds(decodeEntities(removeTags(s))).trim();
+}
+
+/** A character reference as the character, or U+FFFD for a number that is no character (String.fromCodePoint throws on it). */
+function codePoint(n: number): string {
+	return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "�";
 }
 
 function decodeEntities(s: string) {
 	return s
-		.replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-		.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+		.replace(/&#(\d+);/g, (_, d) => codePoint(Number(d)))
+		.replace(/&#x([0-9a-f]+);/gi, (_, h) => codePoint(parseInt(h, 16)))
 		.replace(/&nbsp;/g, " ")
 		.replace(/&lt;/g, "<")
 		.replace(/&gt;/g, ">")

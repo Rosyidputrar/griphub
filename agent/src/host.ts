@@ -38,7 +38,7 @@ import * as gitops from "./gitops.js";
 import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
-import { compactLimit, Integrations, type Log, run } from "./integrations.js";
+import { compactLimit, gitRun, Integrations, type Log, run } from "./integrations.js";
 import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
@@ -49,6 +49,9 @@ import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
+import { onStoreProblem, storeProblemMessage } from "./state.js";
+import { serialQueue, swapSession } from "./sessionswap.js";
+import { startWatchdog } from "./watchdog.js";
 import { Skills } from "./skills.js";
 import {
 	FULL_TOOLS,
@@ -519,26 +522,44 @@ const promptQueue = new PromptQueue(
 	(message) => send({ type: "error", message }),
 );
 
-async function openSession(sessionManager: SessionManager) {
-	unsubscribe?.();
-	guard.cancelAll();
-	session?.dispose();
-	turnStartedAt = null;
-	// Queued follow-ups belong to the chat being left (pi drops them with it).
-	promptQueue.clear();
-	const result = await buildSession(sessionManager, {
-		interactive: true,
-		onLimit: (reason) => send({ type: "notice", message: reason }),
+/** One chat switch or rebuild at a time (sessionswap.ts). */
+const oneSwitch = serialQueue();
+
+function openSession(sessionManager: SessionManager) {
+	return oneSwitch(async () => {
+		// The new session is built before the old one is let go of: a build that fails leaves the open chat as it was.
+		let modelFallbackMessage: string | undefined;
+		await swapSession({
+			assertIdle,
+			build: async () => {
+				const result = await buildSession(sessionManager, {
+					interactive: true,
+					onLimit: (reason) => send({ type: "notice", message: reason }),
+				});
+				modelFallbackMessage = result.modelFallbackMessage;
+				return result.session;
+			},
+			retire: () => {
+				unsubscribe?.();
+				guard.cancelAll();
+				session?.dispose();
+				turnStartedAt = null;
+				// Queued follow-ups belong to the chat being left (pi drops them with it).
+				promptQueue.clear();
+			},
+			install: (next) => {
+				session = next;
+				unsubscribe = next.subscribe((event) => {
+					send({ type: "event", event: wireEvent(event) });
+					onSessionEvent(event);
+				});
+			},
+		});
+		if (modelFallbackMessage) send({ type: "notice", message: modelFallbackMessage });
+		// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
+		setTimeout(deliverJobs, 0);
+		return state();
 	});
-	session = result.session;
-	unsubscribe = session.subscribe((event) => {
-		send({ type: "event", event: wireEvent(event) });
-		onSessionEvent(event);
-	});
-	if (result.modelFallbackMessage) send({ type: "notice", message: result.modelFallbackMessage });
-	// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
-	setTimeout(deliverJobs, 0);
-	return state();
 }
 
 /** Hooks on the active chat: model fallback and "done" notifications. */
@@ -835,7 +856,11 @@ function estimateUsage(model: string, u: any): number | null {
  * the local estimate for the whole day. Refreshes in the background so a
  * prompt never waits on the network.
  */
+/** Only tests set this: what "spent today" says, so the budget can be reached without spending anything. */
+const TEST_SPENT = process.env.GRIPHUB_TEST_SPENT_CREDITS === undefined ? null : Number(process.env.GRIPHUB_TEST_SPENT_CREDITS);
+
 function spentToday(): { credits: number; real: boolean } {
+	if (TEST_SPENT !== null && Number.isFinite(TEST_SPENT)) return { credits: TEST_SPENT, real: true };
 	void router.refreshToday(60_000).catch(() => {});
 	const today = router.today();
 	const sessions = join(agentDir, "sessions");
@@ -1129,7 +1154,7 @@ async function projectDeleteCheck(path: string) {
 	const chats = (await SessionManager.listAll()).filter((i) => i.cwd && within(resolve(i.cwd), dir));
 	const git = existsSync(join(dir, ".git"));
 	const lines = async (args: string[]) =>
-		(await run("git", args, { cwd: dir }).catch(() => "")).split("\n").filter((l) => l.trim()).length;
+		(await gitRun(args, { cwd: dir }).catch(() => "")).split("\n").filter((l) => l.trim()).length;
 	const blockers: string[] = [];
 	const s = session!;
 	if (s.isStreaming && within(resolve(s.sessionManager.getCwd()), dir)) blockers.push("The agent is working in this project");
@@ -1349,6 +1374,7 @@ async function handle(cmd: Command): Promise<unknown> {
 			// After a failed turn: continue it if the request made it into the history, else send the prompt again.
 			if (s.isStreaming) throw new Error("The agent is still working");
 			checkBudget();
+			await health.assertRoom();
 			const last = (s.messages as any[]).at(-1);
 			const failedTurn = last && (last.role === "user" || (last.role === "assistant" && last.stopReason === "error"));
 			// The last prompt from this chat that never made it into the history (refused, or failed to start).
@@ -1420,6 +1446,9 @@ async function handle(cmd: Command): Promise<unknown> {
 			guard.planMode = !!cmd.on;
 			return state();
 		case "plan_approve":
+			// Carrying out the plan is a request like any other: it asks for the budget and the disk too.
+			checkBudget();
+			await health.assertRoom();
 			guard.planMode = false;
 			s.prompt(cmd.text || "The plan is approved. Carry it out now, step by step.").catch((e) =>
 				send({ type: "error", message: String(e?.message ?? e) }),
@@ -1525,6 +1554,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			return models.map((m) => ({ ...m, credits: rates[m.id]?.credits ?? null, perImage: rates[m.id]?.perImage ?? true, list: rates[m.id]?.list ?? null, promoEndsAt: rates[m.id]?.promoEndsAt ?? null }));
 		}
 		case "custom_provider_images_generate":
+			// A picture costs several credits (more than most turns): the daily budget applies to it too.
+			checkBudget();
 			return {
 				b64_json: await generateImage(
 					GRIPHUB_BASE_URL,
@@ -1649,7 +1680,14 @@ async function handle(cmd: Command): Promise<unknown> {
 			await gitops.discard(cwd, cmd.paths ?? []);
 			return gitops.status(cwd);
 		case "git_commit":
-			return { commit: await gitops.commit(cwd, String(cmd.message ?? "").trim() || "Update", !!cmd.all) };
+			return {
+				commit: await gitops.commit(
+					cwd,
+					String(cmd.message ?? "").trim() || "Update",
+					!!cmd.all,
+					Array.isArray(cmd.paths) ? cmd.paths.map(String).filter((p) => p && !p.includes("\0")) : undefined,
+				),
+			};
 		case "git_log":
 			return gitops.log(cwd, cmd.limit ?? 40);
 		case "git_branches":
@@ -2065,7 +2103,8 @@ async function shutdown(code = 0) {
 	process.exit(code);
 }
 
-const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0) });
+// Only tests shorten the poll.
+const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0), pollMs: Number(process.env.GRIPHUB_RESTART_POLL_MS) || undefined });
 
 // ---------------------------------------------------------------------------
 // Startup
@@ -2076,6 +2115,15 @@ async function main() {
 	process.on("unhandledRejection", (reason) => {
 		console.error("[host] unhandled rejection (kept alive):", reason);
 	});
+	// A state file that could not be read is set aside and reported (state.ts), never taken for an empty one: the person
+	// is told here, in the chat, as soon as an app connects.
+	onStoreProblem((p) => {
+		log("store problem:", storeProblemMessage(p));
+		send({ type: "notice", message: storeProblemMessage(p) });
+	});
+	// A server host stuck in one loop never answers and never exits, so the service manager has nothing to restart:
+	// a watchdog thread kills it after two minutes without a sign of life (watchdog.ts).
+	if (server) startWatchdog({ staleMs: Number(process.env.GRIPHUB_WATCHDOG_MS) || 120_000 });
 	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
 	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
 	// reaped by the app — the OS or user must kill that ssh.)
@@ -2172,6 +2220,7 @@ async function main() {
 				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
 			};
 		},
+		checkBudget: () => checkBudget(),
 	});
 	jobs = new Jobs({
 		send: (r) => send(r),
