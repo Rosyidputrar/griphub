@@ -614,7 +614,7 @@ function finishFetch(res: Response, type: string, raw: string) {
 	let text: string;
 	let title = "";
 	if (/html|xml/.test(type) || /^\s*<(!doctype|html)/i.test(raw)) {
-		title = stripTags(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
+		title = stripTags(findBlocks(raw, TITLE, 1)[0]?.inner ?? "");
 		text = htmlToText(raw, res.url);
 	} else {
 		text = raw;
@@ -622,30 +622,184 @@ function finishFetch(res: Response, type: string, raw: string) {
 	return { url: res.url, status: res.status, contentType: type, title, text };
 }
 
+// The page is the web's to write, and every step below used to be a regular expression that could be made to run for
+// minutes on a few hundred kilobytes (`<` repeated 200 000 times took 62 s, and nothing restarted a host stuck there). The
+// cause is always the same: an opening that has no end makes the engine look for the end from every opening again, so the
+// work grows with the square of the page. The steps are the same and give the same text; each is now a scan that looks at
+// every part of the page a bounded number of times. The tests compare the output with the old expressions, and time the
+// shapes that broke them.
+
+/** One kind of element: [open] and [close] are sources for case-insensitive RegExps; [tag] says the opening runs to the next `>`. */
+interface Block {
+	open: string;
+	close: string;
+	tag?: boolean;
+}
+
+interface Found {
+	block: number;
+	start: number;
+	end: number;
+	inner: string;
+}
+
+/** Where the last match of [source] starts in [s], or -1. */
+function lastStart(s: string, source: string): number {
+	const re = new RegExp(source, "gi");
+	let at = -1;
+	for (let m = re.exec(s); m; m = re.exec(s)) at = m.index;
+	return at;
+}
+
+/**
+ * The elements of [s] in order, as the expression `<open>[\s\S]*?<close>` of any of [blocks] would find them one after
+ * another (the one that starts first wins, and the search goes on after its end), at most [limit] of them. An opening that
+ * no closing follows ends the search for its kind, because no later opening has one either.
+ */
+function findBlocks(s: string, blocks: Block[], limit = Infinity): Found[] {
+	const slots = blocks.map((b) => ({
+		open: new RegExp(b.open, "gi"),
+		close: new RegExp(b.close, "gi"),
+		tag: !!b.tag,
+		lastClose: lastStart(s, b.close),
+		at: -1,
+		innerStart: 0,
+	}));
+	const lastGt = s.lastIndexOf(">");
+	const found: Found[] = [];
+	let pos = 0;
+	while (found.length < limit) {
+		let best = -1;
+		for (let i = 0; i < slots.length; i++) {
+			const sl = slots[i];
+			if (sl.at < pos) {
+				sl.at = Infinity;
+				// An opening that runs to a `>` needs one after it; without the check the engine looks for it from every opening.
+				if (!sl.tag || pos <= lastGt) {
+					sl.open.lastIndex = pos;
+					const m = sl.open.exec(s);
+					if (m && m.index + m[0].length <= sl.lastClose) {
+						sl.at = m.index;
+						sl.innerStart = m.index + m[0].length;
+					}
+				}
+			}
+			if (sl.at < Infinity && (best < 0 || sl.at < slots[best].at)) best = i;
+		}
+		if (best < 0) break;
+		const sl = slots[best];
+		sl.close.lastIndex = sl.innerStart;
+		const end = sl.close.exec(s) as RegExpExecArray; // there is one: the opening was only taken when a closing starts after it
+		found.push({ block: best, start: sl.at, end: end.index + end[0].length, inner: s.slice(sl.innerStart, end.index) });
+		pos = end.index + end[0].length;
+	}
+	return found;
+}
+
+/** [s] with each element of [blocks] replaced by what [to] says (see findBlocks). */
+function replaceBlocks(s: string, blocks: Block[], to: (block: number, inner: string) => string): string {
+	let out = "";
+	let pos = 0;
+	for (const f of findBlocks(s, blocks)) {
+		out += s.slice(pos, f.start) + to(f.block, f.inner);
+		pos = f.end;
+	}
+	return out + s.slice(pos);
+}
+
+/** `s.replace(re, to)` for an expression whose every match ends with `>`: nothing after the last `>` can match. */
+function replaceTags(s: string, re: RegExp, to: string): string {
+	const cut = s.lastIndexOf(">") + 1;
+	return cut === 0 ? s : s.slice(0, cut).replace(re, to) + s.slice(cut);
+}
+
+/** Tags removed with what is between them and their closing tag. */
+const NOISE_TAGS = ["script", "style", "noscript", "svg", "head", "template", "iframe", "nav", "footer", "form"];
+
+/**
+ * Links with an address: `[label](address)` for one that goes somewhere on the web, the label alone for the rest. This
+ * is `<a\b[^>]*href="([^"#][^"]*)"[^>]*>([\s\S]*?)<\/a>` taken apart: the address is the one after the last `href="` in
+ * the tag that is followed by a quote (the value may hold a `>`), the label runs to the next `</a>`.
+ */
+function linkify(s: string, base: string): string {
+	const open = /<a\b/gi;
+	const close = /<\/a>/gi;
+	const lastClose = lastStart(s, "<\\/a>");
+	let out = "";
+	let pos = 0;
+	for (;;) {
+		open.lastIndex = pos;
+		const found = open.exec(s);
+		if (!found) break;
+		const i = found.index;
+		const gt = s.indexOf(">", i + 2); // the first `>`: the tag's attributes before the address end here at the latest
+		if (gt < 0) break; // no `>` for this one, or any later one
+		const region = s.slice(i + 2, gt);
+		const starts: number[] = [];
+		const re = /href="/gi;
+		for (let m = re.exec(region); m; m = re.exec(region)) starts.push(i + 2 + m.index);
+		let hit: { href: string; from: number } | null = null;
+		for (let k = starts.length - 1; k >= 0 && !hit; k--) {
+			const p = starts[k];
+			const first = s[p + 6];
+			if (first === undefined || first === '"' || first === "#") continue;
+			const q = s.indexOf('"', p + 7);
+			if (q < 0) continue;
+			// Only the first of these can end past `gt`: the quote of the `href="` after it comes first for the others.
+			const after = q < gt ? gt : s.indexOf(">", q + 1);
+			if (after < 0 || lastClose < after + 1) continue;
+			hit = { href: s.slice(p + 6, q), from: after + 1 };
+		}
+		if (!hit) {
+			// Any `<a` before this tag's `>` has the same ones to choose from, and none of them works either.
+			out += s.slice(pos, gt + 1);
+			pos = gt + 1;
+			continue;
+		}
+		close.lastIndex = hit.from;
+		const end = close.exec(s) as RegExpExecArray;
+		const label = stripTags(s.slice(hit.from, end.index)).trim();
+		let replacement = "";
+		if (label) {
+			let abs = decodeEntities(hit.href);
+			try {
+				abs = new URL(abs, base).href;
+			} catch {}
+			replacement = /^https?:/.test(abs) ? `[${label}](${abs})` : label;
+		}
+		out += s.slice(pos, i) + replacement;
+		pos = end.index + end[0].length;
+	}
+	return out + s.slice(pos);
+}
+
+const MAIN_BLOCKS: Block[] = [
+	{ open: "<main\\b", close: "<\\/main>" },
+	{ open: "<article\\b", close: "<\\/article>" },
+];
+const NOISE_BLOCKS: Block[] = NOISE_TAGS.map((t) => ({ open: `<${t}\\b`, close: `<\\/${t}>` }));
+const COMMENT: Block[] = [{ open: "<!--", close: "-->" }];
+const PRE: Block[] = [{ open: "<pre\\b[^>]*>", close: "<\\/pre>", tag: true }];
+const CODE: Block[] = [{ open: "<code\\b[^>]*>", close: "<\\/code>", tag: true }];
+const HEADINGS: Block[] = [1, 2, 3, 4, 5, 6].map((n) => ({ open: `<h${n}\\b[^>]*>`, close: `<\\/h${n}>`, tag: true }));
+const TITLE: Block[] = [{ open: "<title[^>]*>", close: "<\\/title>", tag: true }];
+
 /** Readable text with light markdown: headings, lists, links and code kept. */
 export function htmlToText(html: string, base = ""): string {
 	let s = html;
-	// Prefer the main content when the page marks it.
-	const main = s.match(/<(main|article)\b[\s\S]*?<\/\1>/i);
-	if (main && main[0].length > 500) s = main[0];
-	s = s.replace(/<(script|style|noscript|svg|head|template|iframe|nav|footer|form)\b[\s\S]*?<\/\1>/gi, "");
-	s = s.replace(/<!--[\s\S]*?-->/g, "");
-	s = s.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code) => `\n\n\`\`\`\n${decodeEntities(stripTags(code))}\n\`\`\`\n\n`);
-	s = s.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_, code) => `\`${decodeEntities(stripTags(code))}\``);
-	s = s.replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi, (_, n, t) => `\n\n${"#".repeat(Number(n))} ${stripTags(t).trim()}\n\n`);
-	s = s.replace(/<a\b[^>]*href="([^"#][^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href, t) => {
-		const label = stripTags(t).trim();
-		if (!label) return "";
-		let abs = decodeEntities(href);
-		try {
-			abs = new URL(abs, base).href;
-		} catch {}
-		return /^https?:/.test(abs) ? `[${label}](${abs})` : label;
-	});
-	s = s.replace(/<li\b[^>]*>/gi, "\n- ");
-	s = s.replace(/<(br|hr)\b[^>]*>/gi, "\n");
-	s = s.replace(/<\/(p|div|section|tr|table|ul|ol|blockquote|dd|dt|h\d)>/gi, "\n\n");
-	s = s.replace(/<(td|th)\b[^>]*>/gi, " | ");
+	// Prefer the main content when the page marks it (the first of `main` and `article` to open and close).
+	const main = findBlocks(s, MAIN_BLOCKS, 1)[0];
+	if (main && main.end - main.start > 500) s = s.slice(main.start, main.end);
+	s = replaceBlocks(s, NOISE_BLOCKS, () => "");
+	s = replaceBlocks(s, COMMENT, () => "");
+	s = replaceBlocks(s, PRE, (_, code) => `\n\n\`\`\`\n${decodeEntities(stripTags(code))}\n\`\`\`\n\n`);
+	s = replaceBlocks(s, CODE, (_, code) => `\`${decodeEntities(stripTags(code))}\``);
+	s = replaceBlocks(s, HEADINGS, (n, t) => `\n\n${"#".repeat(n + 1)} ${stripTags(t).trim()}\n\n`);
+	s = linkify(s, base);
+	s = replaceTags(s, /<li\b[^>]*>/gi, "\n- ");
+	s = replaceTags(s, /<(br|hr)\b[^>]*>/gi, "\n");
+	s = replaceTags(s, /<\/(p|div|section|tr|table|ul|ol|blockquote|dd|dt|h\d)>/gi, "\n\n");
+	s = replaceTags(s, /<(td|th)\b[^>]*>/gi, " | ");
 	s = decodeEntities(stripTags(s));
 	return s
 		.split("\n")
@@ -655,14 +809,45 @@ export function htmlToText(html: string, base = ""): string {
 		.trim();
 }
 
-function stripTags(s: string) {
-	return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+\n/g, "\n").trim();
+/** [s] without its tags (`<` up to the next `>`; a `<` with no `>` after it is text), in one pass. */
+function removeTags(s: string): string {
+	let out = "";
+	let from = 0;
+	for (let lt = s.indexOf("<"); lt >= 0; ) {
+		const gt = s.indexOf(">", lt + 1);
+		if (gt < 0) break; // no `>` after this `<`, so none after any later one
+		if (gt === lt + 1) {
+			lt = s.indexOf("<", lt + 1); // `<>` is not a tag; whatever follows may be
+			continue;
+		}
+		out += s.slice(from, lt);
+		from = gt + 1;
+		lt = s.indexOf("<", from);
+	}
+	return out + s.slice(from);
+}
+
+/** Whitespace that ends in a line break becomes the line break: all of `\s+\n`, without looking for the break from every space. */
+function tidyLineEnds(s: string): string {
+	return s.replace(/\s{2,}/g, (run) => {
+		const lf = run.lastIndexOf("\n");
+		return lf >= 1 ? `\n${run.slice(lf + 1)}` : run;
+	});
+}
+
+export function stripTags(s: string) {
+	return tidyLineEnds(decodeEntities(removeTags(s))).trim();
+}
+
+/** A character reference as the character, or U+FFFD for a number that is no character (String.fromCodePoint throws on it). */
+function codePoint(n: number): string {
+	return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "�";
 }
 
 function decodeEntities(s: string) {
 	return s
-		.replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-		.replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+		.replace(/&#(\d+);/g, (_, d) => codePoint(Number(d)))
+		.replace(/&#x([0-9a-f]+);/gi, (_, h) => codePoint(parseInt(h, 16)))
 		.replace(/&nbsp;/g, " ")
 		.replace(/&lt;/g, "<")
 		.replace(/&gt;/g, ">")
