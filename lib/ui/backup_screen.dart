@@ -92,7 +92,7 @@ class _BackupScreenState extends State<BackupScreen> {
     try {
       final picked = widget.pickFile != null
           ? await widget.pickFile!()
-          : (await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['zip'])).firstOrNull?.path;
+          : (await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['zip', 'ghb'])).firstOrNull?.path;
       if (picked == null || !mounted) return;
       if (!_server) {
         setState(() => _path.text = picked);
@@ -134,6 +134,11 @@ class _BackupScreenState extends State<BackupScreen> {
   Future<void> _restore() async {
     final path = _path.text.trim();
     if (path.isEmpty) return;
+    // A phone agent's automatic backup (encrypted): its own flow, asking for the recovery code.
+    if (!_server && path.endsWith('.ghb')) {
+      await restorePhoneBackup(context, agent, path);
+      return;
+    }
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -187,6 +192,10 @@ class _BackupScreenState extends State<BackupScreen> {
           if (agent.remote.configured) ...[
             SectionLabel(tr('Server'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
             ServerBackupCard(agent: agent),
+          ],
+          if (!_server) ...[
+            SectionLabel(tr('This phone'), padding: const EdgeInsets.fromLTRB(4, 8, 4, 10)),
+            PhoneBackupCard(agent: agent),
           ],
           SectionLabel(tr('Back up'), padding: EdgeInsets.fromLTRB(4, 8, 4, 10)),
           SurfaceCard(

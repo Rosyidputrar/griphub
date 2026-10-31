@@ -128,6 +128,34 @@ test("another key, or a changed byte, is refused", async (t) => {
 	assert.throws(() => decryptBackup(join(s.root, "other.bin"), KEY, join(s.root, "z.zip")), /not a GripHub server backup/);
 });
 
+test("a phone's backups: no secrets in them, the key comes back as a recovery code, and they restore without it all", async (t) => {
+	const s = server(t);
+	const b = backups(t, s, { noSecrets: true });
+	assert.equal(b.recoveryKey(), null, "no key while they are off");
+	b.configure(KEY);
+	assert.equal(b.recoveryKey(), KEY, "the phone's app shows this once to write down");
+	const made = await b.tick();
+	assert.ok(made);
+	const files = backupFiles(made.path, KEY, join(s.root, "phone-plain.zip"));
+	const names = [...files.keys()];
+	assert.ok(!names.some((n) => n.startsWith("secure/")), "API keys, tokens and MCP servers stay out");
+	assert.ok(!names.includes("agent/griphub/integrations.json"), "nor the machine-encrypted copies");
+	for (const n of ["agent/sessions/--w--/chat.jsonl", "agent/skills/web/SKILL.md", "workspace/site/index.html", "home/.ssh/id_ed25519"]) {
+		assert.ok(names.includes(n), `${n} is in it`);
+	}
+	assert.equal(readFileSync(made.path).includes(Buffer.from(SECRET)), false, "no secret readable in the file");
+
+	// Restored on another phone (the point of the recovery code): data back, no secrets to leak, nothing fails on their absence.
+	const zip = join(s.root, "phone-restore.zip");
+	decryptBackup(made.path, KEY, zip);
+	const other = tempDir(t, "other-");
+	const to = { agentDir: join(other, "agent"), workspace: join(other, "workspace"), home: join(other, "home") };
+	const r = restoreBackup(zip, to);
+	assert.ok(r.restored > 0);
+	assert.equal(JSON.parse(readFileSync(join(to.agentDir, "sessions/--w--/chat.jsonl"), "utf8").split("\n")[0]).cwd, `${to.workspace}/site`);
+	assert.equal(existsSync(join(to.agentDir, "griphub", "integrations.json")), false, "no keys appeared out of nowhere");
+});
+
 test("restored on the phone: chats moved to its workspace, secrets kept encrypted, its own settings and SSH key stay", async (t) => {
 	const s = server(t);
 	const b = backups(t, s);
