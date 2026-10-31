@@ -1593,6 +1593,10 @@ async function handle(cmd: Command): Promise<unknown> {
 			return integrations.githubDeviceStart();
 		case "github_device_poll":
 			return integrations.githubDevicePoll(cmd.deviceCode);
+		case "github_device_status":
+			return integrations.githubDeviceStatus();
+		case "github_device_cancel":
+			return integrations.githubDeviceCancel();
 		case "github_logout":
 			return integrations.githubLogout();
 		case "github_repos":

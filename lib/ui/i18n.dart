@@ -1723,6 +1723,10 @@ const _id = <String, String>{
       'Nyala: setiap perintah agent berjalan di dalam box. Mati: perintah langsung berjalan di server sebagai akun griphub, tanpa dinding box. Biarkan menyala kecuali box tidak bisa dibangun, atau perintahnya macet (lihat Bila ada masalah).',
   'Background jobs': 'Pekerjaan latar',
   'this chat': 'chat ini',
+  "These accounts are the server's: the agent there signs in to them, so what you connect on this phone's own agent does not carry over.":
+      'Akun-akun ini milik server: agent di server yang masuk ke layanan itu, jadi akun yang kamu hubungkan di agent HP tidak ikut terbawa.',
+  "These accounts are for this phone's agent. A server agent keeps its own: connect there too if you use one.":
+      'Akun-akun ini untuk agent di HP ini. Agent di server menyimpan akunnya sendiri: hubungkan juga di sana kalau kamu memakai server.',
   'Summarized turns': 'Giliran yang diringkas',
   'Turns copied': 'Giliran disalin',
   'Read the earlier turns': 'Baca giliran sebelumnya',
@@ -1732,8 +1736,8 @@ const _id = <String, String>{
       'Giliran ini diganti ringkasan agar chat tetap hemat: model tidak lagi menerimanya. Ditampilkan apa adanya, untuk dibaca.',
   'Commands hang and never answer':
       'Perintah macet dan tidak pernah selesai',
-  'With the box on, a command that waits for ever with no output means the box is stuck, not the agent. Stop the box in Settings > The agent\'s box and try again; if it hangs again, turn the box off there: commands then run on the server itself.':
-      'Dengan box menyala, perintah yang menunggu terus tanpa keluaran berarti box-nya macet, bukan agent-nya. Hentikan box di Pengaturan > Box agent lalu coba lagi; kalau macet lagi, matikan box di sana: perintah lalu berjalan langsung di server.',
+  'With the box on, a command that waits for ever with no output, or is refused with "the agent\'s box did not answer", means the box is stuck, not the agent. Reset the box in Settings > The agent\'s box and try again; if that does not help, turn the box off there: commands then run on the server itself.':
+      'Dengan box menyala, perintah yang menunggu terus tanpa keluaran, atau ditolak dengan pesan "the agent\'s box did not answer", berarti box-nya macet, bukan agent-nya. Reset box di Pengaturan > Box agent lalu coba lagi; kalau belum membaik, matikan box di sana: perintah lalu berjalan langsung di server.',
   'Paste the setup code in the app, then tap "Install / update agent".':
       'Tempel setup code di aplikasi, lalu ketuk "Pasang / perbarui agent".',
   'Read the server guide':

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
@@ -74,6 +76,19 @@ class _AccountsScreenState extends State<AccountsScreen> {
             : ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
                 children: [
+                  // Each agent keeps its own accounts, on its own machine: a sign-in made while the phone's agent was in
+                  // use is not on the server, and the other way round.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+                    child: Text(
+                      tr(
+                        widget.agent.client.isRemote
+                            ? "These accounts are the server's: the agent there signs in to them, so what you connect on this phone's own agent does not carry over."
+                            : "These accounts are for this phone's agent. A server agent keeps its own: connect there too if you use one.",
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                   _Header(tr('GitHub')),
                   it.github == null
                       ? _GithubConnect(
@@ -257,13 +272,34 @@ class _GithubConnect extends StatefulWidget {
 class _GithubConnectState extends State<_GithubConnect> {
   bool starting = false;
   bool showToken = false;
-  ({String deviceCode, String userCode, String verificationUri, int expiresIn, int interval})? flow;
+  GithubDeviceFlow? flow;
   int attempt = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    _resume();
+  }
+
+  /// Leaving the screen only stops watching: the host goes on waiting for the approval, and signs in by itself when it
+  /// comes (the app is told).
   @override
   void dispose() {
     attempt++;
     super.dispose();
+  }
+
+  /// A sign-in the host is still waiting on (the screen was left, or the app closed, before it was approved): its code
+  /// is shown again and the wait goes on.
+  Future<void> _resume() async {
+    final f = await widget.agent.integrations.githubDeviceStatus();
+    if (f == null || !mounted || starting) return;
+    final mine = ++attempt;
+    setState(() {
+      starting = true;
+      flow = f;
+    });
+    await _watch(f, mine);
   }
 
   Future<void> _start() async {
@@ -276,7 +312,21 @@ class _GithubConnectState extends State<_GithubConnect> {
       setState(() => flow = f);
       await Clipboard.setData(ClipboardData(text: f.userCode));
       await widget.agent.client.openUrl(f.verificationUri);
-      final ok = await it.githubDeviceWait(f.deviceCode, f.interval, cancelled: () => !mounted || mine != attempt);
+      await _watch(f, mine);
+    } catch (e) {
+      if (mounted && mine == attempt) {
+        widget.onError(friendlyError(e));
+        setState(() {
+          starting = false;
+          flow = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _watch(GithubDeviceFlow f, int mine) async {
+    try {
+      final ok = await widget.agent.integrations.githubDeviceWait(f, cancelled: () => !mounted || mine != attempt);
       if (ok && mounted) widget.onDone();
     } catch (e) {
       if (mounted && mine == attempt) widget.onError(friendlyError(e));
@@ -290,11 +340,15 @@ class _GithubConnectState extends State<_GithubConnect> {
     }
   }
 
-  void _cancel() => setState(() {
-    attempt++;
-    starting = false;
-    flow = null;
-  });
+  /// Gives the sign-in up: the host stops waiting too, so approving on github.com later signs in nothing.
+  void _cancel() {
+    unawaited(widget.agent.integrations.githubDeviceCancel());
+    setState(() {
+      attempt++;
+      starting = false;
+      flow = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

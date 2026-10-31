@@ -51,7 +51,7 @@ List<(String, String)> serverTroubleshooting() => [
   (
     tr('Commands hang and never answer'),
     tr(
-      'With the box on, a command that waits for ever with no output means the box is stuck, not the agent. Stop the box in Settings > The agent\'s box and try again; if it hangs again, turn the box off there: commands then run on the server itself.',
+      'With the box on, a command that waits for ever with no output, or is refused with "the agent\'s box did not answer", means the box is stuck, not the agent. Reset the box in Settings > The agent\'s box and try again; if that does not help, turn the box off there: commands then run on the server itself.',
     ),
   ),
   (
