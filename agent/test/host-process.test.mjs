@@ -125,6 +125,29 @@ test("phone mode: ready, then commands; no hello_server and no seq; closing stdi
 	assert.ok(Date.now() - t0 < 1500, `exited in ${Date.now() - t0} ms`);
 });
 
+test("a new chat rebuilt for a setting stays in its folder, not wherever the host was started", async (t) => {
+	const dir = home(t);
+	// Started somewhere else than the workspace, as a server daemon is (systemd: / or home).
+	const elsewhere = mkdtempSync(join(tmpdir(), "gh-started-in-"));
+	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
+	const child = spawn(process.execPath, [hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	let id = 0;
+	const call = async (type, args = {}) => {
+		const n = ++id;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	const ws = join(dir, "workspace");
+	assert.equal((await call("state")).data.cwd, ws);
+	// A shell change rebuilds the chat (so do MCP servers coming up after start); it has no message, so no file yet.
+	const r = await call("container_enable", { on: false });
+	assert.equal(r.ok, true, r.error);
+	assert.equal((await call("state")).data.cwd, ws, "still the workspace");
+});
+
 test("phone mode: files_find gives the composer's @ list from the chat's folder, best match first", async (t) => {
 	const dir = home(t);
 	const ws = join(dir, "workspace");
