@@ -688,6 +688,13 @@ class AgentController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How the agent asks before acting (`ask_all`, `ask_risky`, `auto`): saved on the host for every chat, and shown at once.
+  Future<void> setApprovalMode(String mode) async {
+    await integrations.updateSettings({'approvalMode': mode});
+    approvalMode = mode;
+    notifyListeners();
+  }
+
   Future<void> setPlanMode(bool on) async {
     _applyState(await client.call<Map<String, dynamic>>('plan_mode', {'on': on}));
     notifyListeners();

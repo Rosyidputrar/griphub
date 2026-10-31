@@ -113,6 +113,8 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.': 'Agent akan menjalankan setiap perintah, mengedit file apa pun, dan memakai semua tool tanpa bertanya. Tetap aktif untuk semua chat sampai kamu mematikannya di Pengaturan > Persetujuan.',
+  'Permissions bypassed: the agent acts without asking, in every chat.': 'Izin dilewati: agent bertindak tanpa bertanya, di semua chat.',
   'The key was not accepted. Check that you copied all of it, with no spaces.': 'Key ditolak. Pastikan tersalin utuh, tanpa spasi.',
   'GripHub did not answer. Check your connection and try again.': 'GripHub tidak menjawab. Periksa koneksi lalu coba lagi.',
   'GripHub could not load the models. Try again in a moment.': 'GripHub belum bisa memuat model. Coba lagi sebentar lagi.',

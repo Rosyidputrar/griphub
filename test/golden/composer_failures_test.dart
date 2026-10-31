@@ -1,14 +1,18 @@
 // UX-02: Stop, Plan mode and the thinking level used to fail without a word when the host did not take them or the link
 // to a server was down (an unhandled async error, and a tap that looked like it did nothing).
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
+import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/theme.dart';
 
 import 'harness.dart';
 
 void main() {
   setUpAll(loadAppFonts);
+  group('bypass all permissions', bypassTests);
   setUp(() {
     applyLook(const Look());
     layoutErrors.clear();
@@ -61,5 +65,43 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Plan mode is not available right now.'), findsOneWidget);
+  });
+}
+
+// UX-07: "Bypass all permissions" is saved for every chat; the dialog did not say so, the button looked like any other,
+// and once on nothing in the chat showed it.
+void bypassTests() {
+  testWidgets('the chat says approvals are bypassed, and Turn off puts the question back', (tester) async {
+    final host = FakeHost();
+    host.answers['settings_set'] = (c) => <String, dynamic>{};
+    final agent = newAgent()..approvalMode = 'auto';
+    await pumpLook(tester, const Look(), ChatScreen(agent: agent));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.textContaining('Permissions bypassed'), findsOneWidget);
+
+    await tester.tap(find.text('Turn off'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(agent.approvalMode, 'ask_risky');
+    expect(find.textContaining('Permissions bypassed'), findsNothing);
+    expect(host.commands.where((c) => c['type'] == 'settings_set' && (c['settings'] as Map)['approvalMode'] == 'ask_risky'), hasLength(1));
+  });
+
+  testWidgets('with the default mode there is no bar', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(), ChatScreen(agent: newAgent()));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.textContaining('Permissions bypassed'), findsNothing);
+  });
+
+  testWidgets('the confirmation says it is for every chat until turned off, and its button is the danger colour', (tester) async {
+    FakeHost();
+    late BuildContext ctx;
+    await pumpLook(tester, const Look(), Builder(builder: (c) => Scaffold(body: Center(child: TextButton(onPressed: () => confirmBypass(ctx = c), child: const Text('go'))))));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('stays on for all chats until you turn it off in Settings > Approvals'), findsOneWidget);
+    final button = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Bypass'));
+    expect(button.style?.backgroundColor?.resolve({}), ctx.palette.danger);
   });
 }

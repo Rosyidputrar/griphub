@@ -635,7 +635,8 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
             DevServerBanner(agent: agent),
-            ApprovalCards(features: agent.features),
+            ApprovalCards(features: agent.features, agent: agent),
+            BypassBar(agent: agent),
             if (_changedFiles > 0 && !_reviewClosed && !agent.busy)
               ReviewBanner(
                 files: _changedFiles,

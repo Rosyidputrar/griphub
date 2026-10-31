@@ -545,10 +545,18 @@ Future<bool> confirmBypass(BuildContext context) async =>
       context: context,
       builder: (context) => AlertDialog(
         title: Text(tr('Bypass all permissions?')),
-        content: Text(tr('The agent will run every command, edit any file and use every tool without asking.')),
+        content: Text(
+          tr(
+            'The agent will run every command, edit any file and use every tool without asking. This stays on for all chats until you turn it off in Settings > Approvals.',
+          ),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Bypass'))),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: Colors.white),
+            child: Text(tr('Bypass')),
+          ),
         ],
       ),
     ) ??
@@ -559,8 +567,11 @@ Future<bool> confirmBypass(BuildContext context) async =>
 /// this, the second half of a double-tap lands on the NEXT card's Allow
 /// button and approves an action the user never saw.
 class ApprovalCards extends StatefulWidget {
-  const ApprovalCards({super.key, required this.features});
+  const ApprovalCards({super.key, required this.features, this.agent});
   final Features features;
+
+  /// The chat's agent: "Bypass all permissions" on a card goes through it, so the chat shows at once that it is on.
+  final AgentController? agent;
 
   @override
   State<ApprovalCards> createState() => _ApprovalCardsState();
@@ -690,9 +701,14 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                   onPressed: () async {
                     if (!await confirmBypass(context)) return;
                     try {
-                      await widget.features.client.call('settings_set', {
-                        'settings': {'approvalMode': 'auto'},
-                      });
+                      final agent = widget.agent;
+                      if (agent != null) {
+                        await agent.setApprovalMode('auto');
+                      } else {
+                        await widget.features.client.call('settings_set', {
+                          'settings': {'approvalMode': 'auto'},
+                        });
+                      }
                       for (final pending in [...widget.features.approvals]) {
                         await widget.features.answer(pending, allow: true);
                       }
@@ -816,6 +832,51 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
           style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bypass
+
+/// While approvals are bypassed (for every chat, until turned off) the chat says so: the agent acts without asking, and
+/// nothing else on the screen would remind anyone. One tap puts the question back.
+class BypassBar extends StatelessWidget {
+  const BypassBar({super.key, required this.agent});
+  final AgentController agent;
+
+  Future<void> _turnOff(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await agent.setApprovalMode('ask_risky');
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (agent.approvalMode != 'auto') return const SizedBox.shrink();
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+        decoration: BoxDecoration(color: p.danger.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(Radii.lg)),
+        child: Row(
+          children: [
+            Icon(LucideIcons.shieldOff, size: 16, color: p.danger),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                tr('Permissions bypassed: the agent acts without asking, in every chat.'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.text),
+              ),
+            ),
+            TextButton(onPressed: () => _turnOff(context), child: Text(tr('Turn off'))),
+          ],
+        ),
+      ),
     );
   }
 }

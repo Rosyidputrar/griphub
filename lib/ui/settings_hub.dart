@@ -51,8 +51,7 @@ class _SettingsHubState extends State<SettingsHub> {
     if (!mounted) return;
     setState(() => _approvalSaving = v);
     try {
-      await widget.agent.integrations.updateSettings({'approvalMode': v});
-      widget.agent.approvalMode = v;
+      await widget.agent.setApprovalMode(v);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${tr('Could not change approvals')}: ${friendlyError(e)}')));
