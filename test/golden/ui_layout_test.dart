@@ -1,10 +1,12 @@
 // Layouts that broke on ordinary phones (UI audit): each case is pumped at the sizes that broke it, and fails on any
 // overflow instead of only recording it. Goldens show the fixed layout.
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/code_view.dart';
 import 'package:griphub_agent/ui/griphub_screen.dart';
 import 'package:griphub_agent/ui/kit.dart';
 import 'package:griphub_agent/ui/onboarding.dart';
@@ -31,6 +33,7 @@ void main() {
   group('UI-02: sheets', sheetTests);
   group('UI-03: first run', firstRunTests);
   group('UI-06: accent colour', accentTests);
+  group('UI-07: copy button', copyButtonTests);
 
   group('UI-01: the suggestions on an empty chat', () {
     const looks = [
@@ -180,3 +183,36 @@ void accentTests() {
   });
 }
 
+void copyButtonTests() {
+  testWidgets('UI-07: the reply footer copy button says what it does, is 48 dp, and says when it has copied', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
+      return null;
+    });
+    await pumpLook(tester, const Look(), const Scaffold(body: Center(child: CopyButton(text: 'jawaban', showLabel: false))));
+    final node = find.bySemanticsLabel('Copy');
+    expect(node, findsOneWidget);
+    expect(tester.getSemantics(node), isSemantics(isButton: true, hasTapAction: true));
+    expect(find.byTooltip('Copy'), findsOneWidget);
+    final size = tester.getSize(find.byType(CopyButton));
+    expect(size.width >= 48 && size.height >= 48, isTrue, reason: 'it is $size');
+    // A screen reader's double tap copies, and the button then says so (a live region).
+    tester.semantics.tap(find.semantics.byLabel('Copy'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(copied, 'jawaban');
+    expect(tester.getSemantics(find.bySemanticsLabel('Copied')), isSemantics(isLiveRegion: true));
+    await tester.pump(const Duration(seconds: 2));
+    handle.dispose();
+  });
+
+  testWidgets('UI-07: with its label it stays as it was (a code block header)', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(), const Scaffold(body: Center(child: CopyButton(text: 'x'))));
+    expect(find.text('Copy'), findsOneWidget);
+    expect(find.byTooltip('Copy'), findsNothing);
+  });
+}

@@ -277,26 +277,42 @@ class _CopyButtonState extends State<CopyButton> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final color = copied ? p.success : p.muted;
-    return InkWell(
+    final said = tr(copied ? 'Copied' : 'Copy');
+    // Said to a screen reader ("Copy", then "Copied" as it happens) and, when it is only an icon, in a tooltip; an icon
+    // alone gets a 48 dp touch box (it was 30 x 26 under every reply).
+    final button = InkWell(
       onTap: _copy,
       borderRadius: BorderRadius.circular(Radii.sm),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
-              child: Icon(copied ? LucideIcons.check : LucideIcons.copy, key: ValueKey(copied), size: 14, color: color),
-            ),
-            if (widget.showLabel) ...[
-              const SizedBox(width: 5),
-              Text(tr(copied ? 'Copied' : 'Copy'), style: TextStyle(fontSize: 11.5, color: color)),
+      child: ConstrainedBox(
+        constraints: widget.showLabel ? const BoxConstraints() : const BoxConstraints(minWidth: 48, minHeight: 48),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 150),
+                child: Icon(copied ? LucideIcons.check : LucideIcons.copy, key: ValueKey(copied), size: 14, color: color),
+              ),
+              if (widget.showLabel) ...[
+                const SizedBox(width: 5),
+                Text(said, style: TextStyle(fontSize: 11.5, color: color)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
+    final labelled = Semantics(
+      button: true,
+      label: said,
+      liveRegion: copied,
+      onTap: _copy,
+      excludeSemantics: true,
+      child: button,
+    );
+    return widget.showLabel ? labelled : Tooltip(message: said, child: labelled);
   }
 }
 

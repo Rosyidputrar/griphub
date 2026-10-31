@@ -607,8 +607,9 @@ class _MessageFooter extends StatelessWidget {
     );
     return Row(
       children: [
+        // The icon lines up with the reply's text; its 48 dp touch box reaches into the margin.
         Transform.translate(
-          offset: const Offset(-8, 0),
+          offset: const Offset(-16, 0),
           child: CopyButton(text: text, showLabel: false),
         ),
         if (model != null || c != null || took != null)
