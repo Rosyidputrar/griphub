@@ -196,6 +196,19 @@ test("#2 container: a failed install leaves the working rootfs untouched", async
 	delete process.env.GRIPHUB_ROOTFS;
 });
 
+test("the default context limit follows the model's window: 65%, never under the floor", async () => {
+	const { compactLimit, COMPACT_AT_DEFAULT, COMPACT_AT_SHARE } = await bundle("integrations");
+	assert.equal(COMPACT_AT_SHARE, 0.65);
+	assert.equal(compactLimit(undefined, 872_000), 567_000, "65% of the window, rounded to thousands");
+	assert.equal(compactLimit(undefined, 1_000_000), 650_000);
+	assert.equal(compactLimit(undefined, 2_000_000), 1_300_000);
+	assert.equal(compactLimit(undefined, 200_000), COMPACT_AT_DEFAULT, "a small window stays on the floor: past it, pi's own compaction rules");
+	assert.equal(compactLimit(undefined, undefined), COMPACT_AT_DEFAULT, "no window known: the floor");
+	assert.equal(compactLimit(0, 872_000), 0, "0 is the user's: the host's summaries are off");
+	assert.equal(compactLimit(500_000, 872_000), 500_000, "a set limit is used as it is");
+	assert.equal(compactLimit(500_000, undefined), 500_000);
+});
+
 test("cleanup", () => {
 	rmSync(out, { recursive: true, force: true });
 });

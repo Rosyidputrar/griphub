@@ -38,7 +38,7 @@ import * as gitops from "./gitops.js";
 import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
-import { COMPACT_AT_DEFAULT, Integrations, type Log, run } from "./integrations.js";
+import { compactLimit, Integrations, type Log, run } from "./integrations.js";
 import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
@@ -587,10 +587,9 @@ function onSessionEvent(event: AgentSessionEvent) {
 /** The summary the host started itself, while it runs: prompts and job callbacks wait for it. */
 let capping: Promise<void> | null = null;
 
-/** The context limit in force: the user's, or the default; 0 when it is left to pi. */
+/** The context limit in force: the user's, or the default share of the open chat's model window; 0 leaves it to pi. */
 function compactAt(): number {
-	const v = integrations?.settings.compactAt;
-	return typeof v === "number" && v >= 0 ? v : COMPACT_AT_DEFAULT;
+	return compactLimit(integrations?.settings.compactAt, session?.getContextUsage()?.contextWindow);
 }
 
 /**
@@ -615,10 +614,10 @@ const CAP_MAX_FAILURES = 3;
  */
 async function capContext() {
 	const s = session;
-	const limit = compactAt();
-	if (!s || !limit || s.isStreaming || s.isCompacting || fallbackPending || capping) return;
+	if (!s || s.isStreaming || s.isCompacting || fallbackPending || capping) return;
 	const usage = s.getContextUsage();
-	if (!usage?.tokens || usage.contextWindow <= limit || usage.tokens <= limit) return;
+	const limit = compactLimit(integrations?.settings.compactAt, usage?.contextWindow);
+	if (!limit || !usage?.tokens || usage.contextWindow <= limit || usage.tokens <= limit) return;
 	const chat = s.sessionFile ?? s.sessionId;
 	if (capFailed?.chat === chat && (capFailed.count >= CAP_MAX_FAILURES || usage.tokens < capFailed.tokens * CAP_RETRY_GROWTH)) return;
 	// pi keeps the newest turns as they are (keepRecentTokens); with no more than that in the chat (the rest is the

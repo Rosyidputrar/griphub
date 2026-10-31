@@ -1769,6 +1769,7 @@ const _id = <String, String>{
       'Kamu butuh server Ubuntu atau Debian (x86_64 atau arm64) dengan minimal 2 core, memori 4 GB dan disk 20 GB, serta akses root sekali. Pakai server khusus untuk agent: box-nya berbagi jaringan dengan server.',
   // Context limit
   'At the model\'s limit': 'Di batas model',
+  '{p}% of the model\'s window': '{p}% dari jendela model',
   'Context summarized': 'Konteks diringkas',
   'Every request sends the whole chat to the model. To keep that affordable, older turns are replaced by a summary; the newest ones stay as they were.': 'Setiap permintaan mengirim seluruh chat ke model. Supaya tetap hemat, giliran lama diganti dengan ringkasan; giliran terbaru tetap utuh.',
   'Every request sends the whole chat, so a long chat costs more with every message. Past this size the older turns become a summary. Large models would otherwise wait until close to their own limit.': 'Setiap permintaan mengirim seluruh chat, jadi chat panjang makin mahal di tiap pesan. Lewat ukuran ini, giliran lama dijadikan ringkasan. Tanpa batas ini, model besar baru meringkas saat hampir mencapai batasnya sendiri.',

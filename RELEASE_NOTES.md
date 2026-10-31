@@ -2,7 +2,7 @@
 
 ## Bahasa Indonesia
 
-- Chat panjang kini lebih hemat: begitu konteks melewati 300 ribu token, giliran lama otomatis diringkas dan giliran terbaru tetap utuh. Sebelumnya model berkonteks besar baru meringkas saat hampir mencapai batasnya sendiri, sehingga setiap pesan membaca ulang konteks yang sangat besar. Batasnya bisa diubah di Pengaturan → Usage → Ringkas chat pada (100 ribu sampai 500 ribu token, atau di batas model).
+- Chat panjang diringkas otomatis: begitu konteks melewati batas, giliran lama menjadi ringkasan dan giliran terbaru tetap utuh. Sebelumnya model berkonteks besar baru meringkas saat hampir mencapai batasnya sendiri. Batas bawaannya kini mengikuti model: 65% dari jendela konteksnya (minimal 300 ribu token), bukan lagi angka yang sama untuk semua model. Batasnya bisa diubah di Pengaturan → Usage → Ringkas chat pada; pilihannya juga mengikuti jendela model yang dipakai, sampai di bawah batas model.
 - Saat konteks diringkas, chat menampilkan "Meringkas konteks" dengan waktu yang berjalan, lalu berapa token yang dihemat (misalnya 320k → 24k token). Bila gagal, alasannya ditampilkan. Ketuk barisnya untuk penjelasan.
 - Pesan yang dikirim saat konteks sedang diringkas kini menunggu sampai selesai, tidak lagi ditolak.
 - Animasi memuat yang baru di seluruh aplikasi: komet yang berputar, besar saat satu layar menunggu data dan kecil di tombol atau baris. Warnanya menyesuaikan tema terang dan gelap, dan berhenti bergerak bila animasi dimatikan di sistem. Pembaca layar mengucapkan "Memuat…", lalu "Selesai" atau "Gagal".
@@ -33,7 +33,7 @@
 
 ## English
 
-- Long chats cost less: once the context passes 300k tokens, older turns are summarized automatically and the newest stay as they were. Large models used to summarize only close to their own limit, so every message re-read a huge context. Change the limit in Settings → Usage → Summarize the chat at (100k to 500k tokens, or at the model's limit).
+- Long chats are summarized automatically: once the context passes the limit, older turns become a summary and the newest stay as they were. Large models used to summarize only close to their own limit. The default limit now follows the model: 65% of its context window (at least 300k tokens), no longer one figure for every model. Change it in Settings → Usage → Summarize the chat at; the choices follow the open model's window too, up to just under its limit.
 - While the context is summarized, the chat shows "Summarizing the context" with a running clock, then how many tokens it saved (for example 320k → 24k tokens). A failure says why. Tap the line for what it means.
 - A message sent while the context is being summarized now waits for it instead of being refused.
 - A new loading animation across the app: circling comets, large when a whole screen is waiting and small on buttons and rows. The colours follow the light and dark themes, and it stands still when animations are turned off in the system. Screen readers say "Loading…", then "Done" or "Failed".

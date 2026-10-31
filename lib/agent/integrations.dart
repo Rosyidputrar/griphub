@@ -179,10 +179,30 @@ class AppSettings {
   String get dns => json['dns'] as String? ?? 'cloudflare';
 
   /// Tokens of context past which the chat is summarized (host.ts capContext); 0 leaves it to the model's own limit.
-  int get compactAt => (json['compactAt'] as num?)?.toInt() ?? compactAtDefault;
+  /// Null while the user set nothing: the host then uses [compactAtShare] of the model's window, at least
+  /// [compactAtFloor]. A host too old to say so sends its flat default instead of null.
+  int? get compactAt => (json['compactAt'] as num?)?.toInt();
 
-  /// The host's default (integrations.ts COMPACT_AT_DEFAULT), for a host too old to send it.
+  /// The share of the model's window a chat may fill before it is summarized, when no limit is set
+  /// (integrations.ts COMPACT_AT_SHARE); null on a host too old to follow the window.
+  double? get compactAtShare => (json['compactAtShare'] as num?)?.toDouble();
+
+  /// The least the default limit can be, in tokens (integrations.ts COMPACT_AT_DEFAULT).
+  int get compactAtFloor => (json['compactAtFloor'] as num?)?.toInt() ?? compactAtDefault;
+
+  /// The old hosts' flat default, for one too old to send its own figures.
   static const compactAtDefault = 300000;
+
+  /// The limit in force for a model whose window is [contextWindow] tokens (integrations.ts compactLimit):
+  /// the user's own (0 = off), or the default share of the window, never under the floor.
+  int compactLimit(int? contextWindow) {
+    final set = compactAt;
+    if (set != null) return set;
+    final share = compactAtShare;
+    if (share == null) return compactAtDefault;
+    final byWindow = (((contextWindow ?? 0) * share) / 1000).round() * 1000;
+    return byWindow > compactAtFloor ? byWindow : compactAtFloor;
+  }
   String? get dnsUrl => json['dnsUrl'] as String?;
   bool get hasBraveKey => json['braveKey'] == true;
   bool get hasTavilyKey => json['tavilyKey'] == true;

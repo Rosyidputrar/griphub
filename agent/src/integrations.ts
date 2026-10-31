@@ -130,7 +130,8 @@ export interface AppSettings {
 	/**
 	 * Summarize the chat once its context passes this many tokens (host.ts capContext), on models whose own limit is
 	 * larger: every request re-reads the whole context, so a 1M-token model would otherwise pay for ~850k tokens a
-	 * request before pi compacts it. Unset means COMPACT_AT_DEFAULT; 0 leaves it to pi (near the model's limit).
+	 * request before pi compacts it. Unset means the default share of the model's window (COMPACT_AT_SHARE, but never
+	 * under COMPACT_AT_DEFAULT); 0 leaves it to pi (near the model's limit).
 	 */
 	compactAt?: number;
 	/**
@@ -147,8 +148,28 @@ const DEFAULT_SETTINGS: AppSettings = { dns: "cloudflare" };
 /** A server resolves names itself: no ISP block pages to get around, and DoH would only add a hop. */
 const SERVER_DEFAULT_SETTINGS: AppSettings = { dns: "system" };
 
-/** The context, in tokens, past which a chat is summarized when the user set no limit (host.ts capContext). */
+/**
+ * With no limit set, a chat is summarized once it fills this share of the model's window (host.ts capContext): room
+ * enough that a summary is rarely met, while a request never re-reads the better part of a very large window.
+ */
+export const COMPACT_AT_SHARE = 0.65;
+
+/**
+ * The least a default limit can be, in tokens (and the default itself when the model's window is unknown). A flat
+ * share alone would summarize a 200k model at 130k, more eagerly than before this default followed the window; under
+ * this floor the chat is left to pi, which compacts near the model's own limit anyway.
+ */
 export const COMPACT_AT_DEFAULT = 300_000;
+
+/**
+ * The context limit in force for a model whose window is [contextWindow] tokens: the user's own ([compactAt]; 0 turns
+ * the host's summaries off), or the default share of the window, never under the floor. Models at or under the floor
+ * are left to pi either way: capContext only acts when the window is larger than the limit.
+ */
+export function compactLimit(compactAt: number | undefined, contextWindow: number | undefined): number {
+	if (typeof compactAt === "number" && compactAt >= 0) return compactAt;
+	return Math.max(COMPACT_AT_DEFAULT, Math.round(((contextWindow ?? 0) * COMPACT_AT_SHARE) / 1_000) * 1_000);
+}
 
 /** Where pushes go when the user turned them on without naming a server. */
 export const NTFY_DEFAULT_URL = "https://ntfy.sh";
@@ -245,7 +266,11 @@ export class Integrations {
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
 			dailyBudget: dailyBudget ?? 0,
-			compactAt: this.settings.compactAt ?? COMPACT_AT_DEFAULT,
+			// Null while the user set nothing: the limit then follows the open chat's model (compactLimit). An app too old
+			// to know the share shows its old default instead, which only mislabels the row. The floor is the fallback.
+			compactAt: this.settings.compactAt ?? null,
+			compactAtShare: COMPACT_AT_SHARE,
+			compactAtFloor: COMPACT_AT_DEFAULT,
 			// Public by design (an OAuth App's Client ID is no secret). It was left out, so the app never showed the one
 			// saved, and said "built-in" for a build that has none.
 			githubClientId: (this.settings.githubClientId ?? "").trim(),
@@ -295,6 +320,10 @@ export class Integrations {
 		}
 		if (next.subagentMinutesLimit !== undefined && !limit(next.subagentMinutesLimit, true)) {
 			throw new Error("The subagent time limit must be 0 (no limit) or a whole number of minutes");
+		}
+		// 0 turns the host's summaries off (pi's own stay); anything else must be a sane token count.
+		if (next.compactAt !== undefined && !(typeof next.compactAt === "number" && Number.isInteger(next.compactAt) && next.compactAt >= 0)) {
+			throw new Error("The context limit must be 0 (the model's own limit) or a whole number of tokens");
 		}
 		this.store.settings = next;
 		this.save();

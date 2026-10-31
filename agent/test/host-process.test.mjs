@@ -805,8 +805,9 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 // The context limit: past it the chat is summarized, long before a large model's own limit
 
 /**
- * A phone host on the mock router with a model of [contextWindow] tokens and the context limit set to [compactAt].
- * [extra]: more environment for the host; [model]: the model's id (one with a known price, for a test of costs).
+ * A phone host on the mock router with a model of [contextWindow] tokens and the context limit set to [compactAt]
+ * (undefined leaves the default in force: the share of the window). [extra]: more environment for the host;
+ * [model]: the model's id (one with a known price, for a test of costs).
  */
 async function phoneWithModel(t, contextWindow, compactAt, extra = {}, model = "mock-model") {
 	const dir = home(t);
@@ -828,10 +829,14 @@ async function phoneWithModel(t, contextWindow, compactAt, extra = {}, model = "
 	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: model, name: "Mock", contextWindow }] } })).ok, true);
 	assert.equal((await call("set_model", { provider: "griphub", model })).ok, true);
 	const before = (await call("settings_get")).data;
-	assert.equal(before.compactAt, 300_000, "the default the app shows");
-	const set = await call("settings_set", { settings: { compactAt } });
-	assert.equal(set.ok, true, set.error);
-	assert.equal(set.data.compactAt, compactAt, "the app sees what was saved, 0 included");
+	assert.equal(before.compactAt, null, "no limit set: the default follows the model");
+	assert.equal(before.compactAtShare, 0.65, "the app can say what the default is");
+	assert.equal(before.compactAtFloor, 300_000);
+	if (compactAt !== undefined) {
+		const set = await call("settings_set", { settings: { compactAt } });
+		assert.equal(set.ok, true, set.error);
+		assert.equal(set.data.compactAt, compactAt, "the app sees what was saved, 0 included");
+	}
 	// Each prompt is about 10k tokens.
 	const say = async (i) => {
 		const from = records.length;
@@ -954,6 +959,15 @@ test("a summary that fails is not bought again after every turn, and gives up af
 
 test("a context limit of 0 leaves it to the model's own limit", async (t) => {
 	const h = await phoneWithModel(t, 200_000, 0);
+	for (let i = 0; i < 4; i++) await h.say(i);
+	await new Promise((r) => setTimeout(r, 300));
+	assert.deepEqual(compactions(h.records), []);
+});
+
+test("with no limit set, a model at the default's floor is left to its own limit", async (t) => {
+	// 200k window: the default (65% of the window, at least 300k) sits past the window, so the host never summarizes
+	// earlier than pi would. Before the default followed the window, the flat 300k meant the same; this keeps it so.
+	const h = await phoneWithModel(t, 200_000, undefined);
 	for (let i = 0; i < 4; i++) await h.say(i);
 	await new Promise((r) => setTimeout(r, 300));
 	assert.deepEqual(compactions(h.records), []);
