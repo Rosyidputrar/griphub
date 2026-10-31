@@ -17,6 +17,7 @@ import { configureDns, validateCustomDohUrl, type DnsMode } from "./dns.js";
 import { maskKey, parseKeys } from "./keyring.js";
 import { checkConfig, type NotifyConfig } from "./notify.js";
 import { readSecureJson, writeSecureJson } from "./secure.js";
+import { isObject } from "./state.js";
 
 export interface SshHost {
 	id: string;
@@ -260,7 +261,7 @@ export class Integrations {
 		this.file = join(dir, "integrations.json");
 		this.home = process.env.HOME ?? agentDir;
 		// Encrypted at rest when the Keystore key is available (see secure.ts).
-		this.store = { sshHosts: [], ...readSecureJson<Partial<Store>>(this.file, {}) };
+		this.store = { sshHosts: [], ...readSecureJson<Partial<Store>>(this.file, {}, (v) => isObject(v) && (v.sshHosts === undefined || Array.isArray(v.sshHosts))) };
 		this.exportEnv();
 		this.applySettings();
 	}

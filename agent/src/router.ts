@@ -25,6 +25,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { atomicWrite } from "./state.js";
 
 export const ROUTER_ORIGIN = "https://griphubrouter.web.id";
 
@@ -387,7 +388,7 @@ export class Router {
 
 	private save() {
 		try {
-			writeFileSync(this.opts.cacheFile, JSON.stringify(this.cache));
+			atomicWrite(this.opts.cacheFile, JSON.stringify(this.cache));
 		} catch {
 			// Cache is an optimisation; the next fetch rebuilds it.
 		}

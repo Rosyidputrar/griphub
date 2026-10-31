@@ -29,6 +29,7 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { gitRun, type Integrations, run } from "./integrations.js";
 import type { CustomProviders } from "./providers.js";
+import { atomicWrite, isObject, keepBackup, loadStore, readJsonFile } from "./state.js";
 
 const REPO = "griphub-sync";
 /** GitHub rejects files over 100 MB. */
@@ -185,11 +186,8 @@ export class GitHubSync {
 			repo: null,
 			pendingDelete: [],
 		};
-		try {
-			this.state = { ...empty, ...JSON.parse(readFileSync(this.file, "utf8")) };
-		} catch {
-			this.state = empty;
-		}
+		// Unreadable: set aside and reported, not taken for a first run that then overwrites it (state.ts).
+		this.state = { ...empty, ...loadStore<object | null>(this.file, readJsonFile, null, isObject) };
 	}
 
 	status(): SyncStatus {
@@ -199,7 +197,8 @@ export class GitHubSync {
 	}
 
 	private save() {
-		writeFileSync(this.file, JSON.stringify(this.state));
+		keepBackup(this.file, readJsonFile, isObject);
+		atomicWrite(this.file, JSON.stringify(this.state));
 		this.deps.notify(this.status());
 	}
 

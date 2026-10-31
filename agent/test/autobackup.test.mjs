@@ -201,3 +201,31 @@ test("restored on the phone: chats moved to its workspace, secrets kept encrypte
 	assert.equal(restoreBackup(zip, to).keptSshKey, true);
 	assert.equal(readFileSync(join(to.home, ".ssh/id_ed25519"), "utf8"), "PHONE KEY");
 });
+
+test("a store that cannot be read is left out of a backup (it used to be saved as `null`), and restoring a `null` store writes nothing", async (t) => {
+	const s = server(t);
+	const damaged = join(s.agentDir, "griphub", "custom-providers.json");
+	writeFileSync(damaged, readFileSync(damaged).subarray(0, 30)); // cut short
+	const b = backups(t, s);
+	b.configure(KEY);
+	const made = await b.tick();
+	const files = backupFiles(made.path, KEY, join(s.root, "plain.zip"));
+	assert.ok(!files.has("secure/griphub/custom-providers.json"), "not stored as null");
+	assert.ok(files.has("secure/griphub/integrations.json"), "the readable one is");
+	const zipPath = join(s.root, "again.zip");
+	decryptBackup(made.path, KEY, zipPath);
+	const skipped = readManifest(zipPath).skipped;
+	assert.ok(skipped.some((x) => x.name === "secure/griphub/custom-providers.json" && /could not be read/.test(x.why)), JSON.stringify(skipped));
+
+	// A backup made before this fix holds `null` for it; restoring must leave the phone's own store alone.
+	const phone = tempDir(t, "phone-");
+	const to = { agentDir: join(phone, "agent"), workspace: join(phone, "workspace"), home: join(phone, "home") };
+	mkdirSync(join(to.agentDir, "griphub"), { recursive: true });
+	const mine = join(to.agentDir, "griphub", "custom-providers.json");
+	writeSecureJson(mine, [{ id: "griphub", apiKey: "sk-phone" }]);
+	const { writeZip } = await bundle("workbench");
+	const zip = join(s.root, "nulls.zip");
+	writeFileSync(zip, writeZip([{ name: "secure/griphub/custom-providers.json", data: Buffer.from("null") }, { name: "manifest.json", data: Buffer.from("{}") }]));
+	restoreBackup(zip, to);
+	assert.equal(readSecureJson(mine, [])[0].apiKey, "sk-phone", "the phone's store is untouched");
+});

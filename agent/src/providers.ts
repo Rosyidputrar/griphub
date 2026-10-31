@@ -9,8 +9,9 @@
  * so the key never sits there in plain text.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readSecureJson, writeSecureJson } from "./secure.js";
+import { atomicWrite } from "./state.js";
 
 export const APIS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
 export type ProviderApi = (typeof APIS)[number];
@@ -78,7 +79,7 @@ export class CustomProviders {
 		private readonly storeFile: string,
 		private readonly modelsFile: string,
 	) {
-		this.providers = readSecureJson<CustomProvider[]>(storeFile, []);
+		this.providers = readSecureJson<CustomProvider[]>(storeFile, [], Array.isArray);
 		// Locked build: anything that is not GripHub (an old store, a synced
 		// backup from another build) is dropped, and GripHub's endpoint is
 		// forced back to the canonical one.
@@ -98,7 +99,7 @@ export class CustomProviders {
 		try {
 			const text = this.modelsJsonText([]);
 			if (!existsSync(this.modelsFile) || readFileSync(this.modelsFile, "utf8") !== text) {
-				writeFileSync(this.modelsFile, text);
+				atomicWrite(this.modelsFile, text);
 			}
 		} catch {
 			// models.json is not valid JSON; leave it untouched.
@@ -168,7 +169,7 @@ export class CustomProviders {
 	}
 
 	private writeModelsJson(removed: string[]) {
-		writeFileSync(this.modelsFile, this.modelsJsonText(removed));
+		atomicWrite(this.modelsFile, this.modelsJsonText(removed));
 	}
 
 	/** The models.json content this build writes for the current store. */

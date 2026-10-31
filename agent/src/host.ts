@@ -49,6 +49,7 @@ import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
+import { onStoreProblem, storeProblemMessage } from "./state.js";
 import { startWatchdog } from "./watchdog.js";
 import { Skills } from "./skills.js";
 import {
@@ -2076,6 +2077,12 @@ async function main() {
 	// log it and keep running. Features still handle their own errors.
 	process.on("unhandledRejection", (reason) => {
 		console.error("[host] unhandled rejection (kept alive):", reason);
+	});
+	// A state file that could not be read is set aside and reported (state.ts), never taken for an empty one: the person
+	// is told here, in the chat, as soon as an app connects.
+	onStoreProblem((p) => {
+		log("store problem:", storeProblemMessage(p));
+		send({ type: "notice", message: storeProblemMessage(p) });
 	});
 	// A server host stuck in one loop never answers and never exits, so the service manager has nothing to restart:
 	// a watchdog thread kills it after two minutes without a sign of life (watchdog.ts).
