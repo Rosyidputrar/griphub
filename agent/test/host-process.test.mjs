@@ -54,6 +54,8 @@ function env(dir, extra = {}) {
 		// GRIPHUB_MODE=server would turn a phone-mode host into a server one (server mode is chosen with --listen).
 		PI_CODING_AGENT_DIR: join(dir, ".pi", "agent"),
 		GRIPHUB_MODE: undefined,
+		// The restart gate checks often, so waiting "for a few polls" is a short wait.
+		GRIPHUB_RESTART_POLL_MS: "50",
 		...extra,
 	};
 }
@@ -299,10 +301,10 @@ test("server mode: a private socket, hello_server, resume, kick, and the daemon 
 
 	// Every client gone: the daemon keeps running, and a client can resume where it was.
 	two.socket.destroy();
-	await new Promise((r) => setTimeout(r, 300));
-	assert.equal(d.child.exitCode, null, "still running with nobody connected");
+	// (No sleep to "give it time to exit": the next client connecting is what shows it is still there.)
 	const three = await dial(d.sock);
 	const h3 = await three.until((r) => r.type === "hello_server");
+	assert.equal(d.child.exitCode, null, "still running with nobody connected");
 	assert.equal(h3.epoch, hello.epoch, "the same daemon");
 	const r3 = await three.call("resume", { since: h3.seq, epoch: h3.epoch });
 	assert.equal(r3.data.gap, false);
@@ -393,8 +395,8 @@ test("server mode: host_restart when idle waits for a working subagent, then res
 	const id = await startSubagent(m);
 	const r = await m.c.call("host_restart", { whenIdle: true });
 	assert.deepEqual(r.data, { restarting: false, pending: true });
-	// Longer than the gate's 2 s poll: still running, the subagent untouched.
-	await new Promise((res) => setTimeout(res, 2500));
+	// The gate polls every 50 ms here (GRIPHUB_RESTART_POLL_MS): after twenty polls it is still waiting, the subagent untouched.
+	await new Promise((res) => setTimeout(res, 1000));
 	assert.equal(m.d.child.exitCode, null, "the restart waits for the subagent");
 	assert.ok(!m.c.records.some((x) => x.type === "subagent_finished"));
 	// The subagent finishes its turn; the daemon then goes on its own, cleanly.
@@ -601,13 +603,17 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 	const first = await startSubagent(m);
 	writeFileSync(m.mock.MOCK_RELEASE, "");
 	await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === first);
-	await new Promise((r) => setTimeout(r, 300));
+	// "Nothing was pushed" has to be looked at after the host had its chance to push: a push is sent from the same place
+	// the finish is announced from, and a round trip on the same connection is answered after it.
+	await m.c.call("hello");
 	assert.deepEqual(pushes, []);
 
 	// The app goes away while a subagent works: its end is pushed, with nothing about the work in it.
 	rmSync(m.mock.MOCK_RELEASE);
 	await startSubagent(m);
 	m.c.socket.destroy();
+	// The host has to notice the closed connection before the subagent ends. (A fixed wait is safe here: if it were too
+	// short, the push below would not be sent and the test would fail, not pass.)
 	await new Promise((r) => setTimeout(r, 200));
 	writeFileSync(m.mock.MOCK_RELEASE, "");
 	await waitFor(() => pushes.length > 0, 15_000);
@@ -704,7 +710,9 @@ test("a background job's result calls its chat back with no user message, and tu
 });
 
 test("a background job can be stopped, and stops what it started; its chat is told it was stopped", async (t) => {
-	const tool = { name: "background_job", arguments: { command: "sleep 600 & sleep 600; wait" } };
+	// A duration no other test or process uses, so the check at the end looks at this job's sleeps only.
+	const mark = `600.${process.pid}`;
+	const tool = { name: "background_job", arguments: { command: `sleep ${mark} & sleep ${mark}; wait` } };
 	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool) });
 	await m.c.call("prompt", { text: "Jalankan" });
 	const started = await m.c.until((r) => r.type === "job" && r.job.status === "running", 30_000, "for the job");
@@ -715,8 +723,8 @@ test("a background job can be stopped, and stops what it started; its chat is to
 	assert.equal(ended.job.id, started.job.id);
 	const notice = await m.c.until((r) => r.type === "event" && r.event.type === "message_start" && r.event.message.role === "custom", 30_000, "for the message");
 	assert.match(JSON.stringify(notice.event.message.content), /stopped by the user/);
-	// Nothing of it is left running (the job's own sleeps; no other test starts "sleep 600").
-	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === "sleep 600"), 10_000);
+	// Nothing of it is left running (the job's own sleeps).
+	await waitFor(() => !execFileSync("ps", ["-eo", "args"]).toString().split("\n").some((l) => l.trim() === `sleep ${mark}`), 10_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -1013,7 +1021,9 @@ test("a summary that fails is not bought again after every turn, and gives up af
 	// Ten turns of about 10k tokens each: past the limit from the third. Without a brake that is a paid summary after
 	// each of the last eight; with it, a try only when the chat grew by a quarter, and none after three failures.
 	for (let i = 0; i < 10; i++) await h.say(i);
-	await new Promise((r) => setTimeout(r, 300));
+	// A summary is tried when a turn ends, before the next one starts: one more turn is the point after which the
+	// last try has been made (and by then the host has given up, so a late one cannot hide behind a fixed wait).
+	await h.say(10);
 	const tried = summaries();
 	assert.ok(tried >= 1, "it did try once the chat passed the limit");
 	assert.ok(tried <= 3, `tried ${tried} times over eight turns past the limit`);
@@ -1022,7 +1032,8 @@ test("a summary that fails is not bought again after every turn, and gives up af
 test("a context limit of 0 leaves it to the model's own limit", async (t) => {
 	const h = await phoneWithModel(t, 200_000, 0);
 	for (let i = 0; i < 4; i++) await h.say(i);
-	await new Promise((r) => setTimeout(r, 300));
+	// Compaction is decided when a turn ends, before the next starts: a fifth turn is the point after which "never" is proven.
+	await h.say(4);
 	assert.deepEqual(compactions(h.records), []);
 });
 
@@ -1031,6 +1042,6 @@ test("with no limit set, a model at the default's floor is left to its own limit
 	// earlier than pi would. Before the default followed the window, the flat 300k meant the same; this keeps it so.
 	const h = await phoneWithModel(t, 200_000, undefined);
 	for (let i = 0; i < 4; i++) await h.say(i);
-	await new Promise((r) => setTimeout(r, 300));
+	await h.say(4); // as above
 	assert.deepEqual(compactions(h.records), []);
 });

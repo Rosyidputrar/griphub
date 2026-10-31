@@ -81,8 +81,11 @@ export class Runner {
 		if (saved) this.store = { runs: [], schedules: [], concurrency: 1, ...saved } as typeof this.store;
 		// Runs interrupted by an app restart cannot resume.
 		for (const r of this.store.runs) if (r.status === "running") r.status = "error";
+		// Neither keeps a process alive by itself: the host has its connections for that, and a test that forgets dispose() ends.
 		this.timer = setInterval(() => void this.tick(), 60_000);
+		this.timer.unref();
 		this.firstTick = setTimeout(() => void this.tick(), 5_000);
+		this.firstTick.unref();
 	}
 
 	private save() {

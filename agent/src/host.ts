@@ -2086,7 +2086,8 @@ async function shutdown(code = 0) {
 	process.exit(code);
 }
 
-const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0) });
+// Only tests shorten the poll.
+const restartGate = new RestartGate({ isIdle, exit: () => void shutdown(0), pollMs: Number(process.env.GRIPHUB_RESTART_POLL_MS) || undefined });
 
 // ---------------------------------------------------------------------------
 // Startup
