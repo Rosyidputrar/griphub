@@ -689,11 +689,16 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                 TextButton.icon(
                   onPressed: () async {
                     if (!await confirmBypass(context)) return;
-                    await widget.features.client.call('settings_set', {
-                      'settings': {'approvalMode': 'auto'},
-                    });
-                    for (final pending in [...widget.features.approvals]) {
-                      await widget.features.answer(pending, allow: true);
+                    try {
+                      await widget.features.client.call('settings_set', {
+                        'settings': {'approvalMode': 'auto'},
+                      });
+                      for (final pending in [...widget.features.approvals]) {
+                        await widget.features.answer(pending, allow: true);
+                      }
+                    } catch (e) {
+                      // Offline, or the host did not take it: the cards that were not answered are still here.
+                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
                     }
                   },
                   style: TextButton.styleFrom(foregroundColor: p.muted),
@@ -729,28 +734,44 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
     if (_responded) return;
     setState(() => _responded = true);
     widget.onAnswered?.call();
-    await widget.features.answer(widget.approval, allow: allow, always: always);
+    try {
+      await widget.features.answer(widget.approval, allow: allow, always: always);
+    } catch (e) {
+      // The answer did not get to the host, which is still waiting for it: the card is back, and can be answered again.
+      if (!mounted) return;
+      setState(() => _responded = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // A server agent keeps waiting while the link is down; an answer tapped now could only get lost.
+    return ValueListenableBuilder<Connection>(
+      valueListenable: widget.features.client.connection,
+      builder: (context, link, _) => _buttons(context, offline: !link.connected),
+    );
+  }
+
+  Widget _buttons(BuildContext context, {required bool offline}) {
     final p = context.palette;
+    final blocked = _responded || offline;
     final deny = OutlinedButton(
-      onPressed: _responded ? null : () => _answer(allow: false),
+      onPressed: blocked ? null : () => _answer(allow: false),
       style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), foregroundColor: p.danger),
       child: Text(tr('Deny')),
     );
     final always = OutlinedButton(
-      onPressed: _responded ? null : () => _answer(allow: true, always: true),
+      onPressed: blocked ? null : () => _answer(allow: true, always: true),
       style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42)),
       child: Text(tr('Always')),
     );
     final allow = FilledButton(
-      onPressed: _responded ? null : () => _answer(allow: true),
+      onPressed: blocked ? null : () => _answer(allow: true),
       style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
       child: Text(tr('Allow')),
     );
-    return LayoutBuilder(
+    final buttons = LayoutBuilder(
       builder: (context, constraints) {
         // Equal thirds must fit the widest label; on a narrow phone with large text "Izinkan" broke into "Izin/kan".
         final style = Theme.of(context).textTheme.labelLarge;
@@ -783,6 +804,18 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
           ],
         );
       },
+    );
+    if (!offline) return buttons;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        buttons,
+        const SizedBox(height: 8),
+        Text(
+          tr('Not connected. The agent is still waiting for your answer: reconnect to answer.'),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+        ),
+      ],
     );
   }
 }

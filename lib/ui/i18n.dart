@@ -113,6 +113,7 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'Not connected. The agent is still waiting for your answer: reconnect to answer.': 'Tidak tersambung. Agent masih menunggu jawabanmu: sambungkan lagi untuk menjawab.',
   'models available': 'model tersedia',
   'GripHub connected': 'GripHub terhubung',
   'Save & load models': 'Simpan & muat model',

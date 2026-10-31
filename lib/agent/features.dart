@@ -400,11 +400,22 @@ class Features extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Answers a card. The card goes at once (and a second tap on it is ignored), but an answer that did not reach the
+  /// host brings it back and throws: the host goes on waiting for it, and a card that vanished with the answer would
+  /// leave the agent stuck at "Working" with nothing to tap.
   Future<void> answer(Approval a, {required bool allow, bool always = false}) async {
     if (!_answered.add(a.id)) return;
+    final at = approvals.indexOf(a);
     approvals.remove(a);
     notifyListeners();
-    await client.call('approval_reply', {'approvalId': a.id, 'allow': allow, 'always': always, 'key': a.key});
+    try {
+      await client.call('approval_reply', {'approvalId': a.id, 'allow': allow, 'always': always, 'key': a.key});
+    } catch (_) {
+      _answered.remove(a.id);
+      if (!approvals.any((x) => x.id == a.id)) approvals.insert(at < 0 || at > approvals.length ? 0 : at, a);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   // Conversation editing ------------------------------------------------------
