@@ -856,7 +856,11 @@ function estimateUsage(model: string, u: any): number | null {
  * the local estimate for the whole day. Refreshes in the background so a
  * prompt never waits on the network.
  */
+/** Only tests set this: what "spent today" says, so the budget can be reached without spending anything. */
+const TEST_SPENT = process.env.GRIPHUB_TEST_SPENT_CREDITS === undefined ? null : Number(process.env.GRIPHUB_TEST_SPENT_CREDITS);
+
 function spentToday(): { credits: number; real: boolean } {
+	if (TEST_SPENT !== null && Number.isFinite(TEST_SPENT)) return { credits: TEST_SPENT, real: true };
 	void router.refreshToday(60_000).catch(() => {});
 	const today = router.today();
 	const sessions = join(agentDir, "sessions");
@@ -1370,6 +1374,7 @@ async function handle(cmd: Command): Promise<unknown> {
 			// After a failed turn: continue it if the request made it into the history, else send the prompt again.
 			if (s.isStreaming) throw new Error("The agent is still working");
 			checkBudget();
+			await health.assertRoom();
 			const last = (s.messages as any[]).at(-1);
 			const failedTurn = last && (last.role === "user" || (last.role === "assistant" && last.stopReason === "error"));
 			// The last prompt from this chat that never made it into the history (refused, or failed to start).
@@ -1441,6 +1446,9 @@ async function handle(cmd: Command): Promise<unknown> {
 			guard.planMode = !!cmd.on;
 			return state();
 		case "plan_approve":
+			// Carrying out the plan is a request like any other: it asks for the budget and the disk too.
+			checkBudget();
+			await health.assertRoom();
 			guard.planMode = false;
 			s.prompt(cmd.text || "The plan is approved. Carry it out now, step by step.").catch((e) =>
 				send({ type: "error", message: String(e?.message ?? e) }),
@@ -1546,6 +1554,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			return models.map((m) => ({ ...m, credits: rates[m.id]?.credits ?? null, perImage: rates[m.id]?.perImage ?? true, list: rates[m.id]?.list ?? null, promoEndsAt: rates[m.id]?.promoEndsAt ?? null }));
 		}
 		case "custom_provider_images_generate":
+			// A picture costs several credits (more than most turns): the daily budget applies to it too.
+			checkBudget();
 			return {
 				b64_json: await generateImage(
 					GRIPHUB_BASE_URL,
@@ -2210,6 +2220,7 @@ async function main() {
 				approvalMode: st.subagentApprovalMode ?? st.approvalMode ?? "ask_risky",
 			};
 		},
+		checkBudget: () => checkBudget(),
 	});
 	jobs = new Jobs({
 		send: (r) => send(r),

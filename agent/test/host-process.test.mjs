@@ -1045,3 +1045,41 @@ test("with no limit set, a model at the default's floor is left to its own limit
 	await h.say(4); // as above
 	assert.deepEqual(compactions(h.records), []);
 });
+
+// ---------------------------------------------------------------------------
+// The daily budget: every way of spending asks for it (BE-11). Only prompt and retry did; a plan being carried out, a
+// subagent and a picture started whatever was left. The spend is made up by the test hook (nothing is bought).
+
+test("server mode: with the daily budget used up, a plan, a retry, a subagent and a picture are refused before anything is sent", async (t) => {
+	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
+	const set = await m.c.call("settings_set", { settings: { dailyBudget: 5 } });
+	assert.equal(set.ok, true, set.error);
+	const refused = /Daily budget of 5 credits reached \(5\.02 credits spent today\)/;
+	for (const [type, args] of [
+		["prompt", { text: "Halo" }],
+		["plan_approve", {}],
+		["retry", {}],
+		["subagent_start", { task: "Periksa lima berkas", profile: "read" }],
+		["custom_provider_images_generate", { model: "gpt-image", prompt: "kucing", size: "1024x1024" }],
+	]) {
+		const r = await m.c.call(type, args);
+		assert.equal(r.ok, false, `${type} was not refused`);
+		assert.match(r.error, refused, type);
+	}
+	assert.equal(m.requests(), 0, "nothing reached the model");
+	assert.ok(!m.c.records.some((x) => x.type === "subagent_status"), "no subagent was created");
+});
+
+test("server mode: with no budget set (or room left) the same commands go ahead", async (t) => {
+	const m = await withModel(t, { GRIPHUB_TEST_SPENT_CREDITS: "5.02" });
+	// No dailyBudget: off.
+	const off = await m.c.call("subagent_start", { task: "Periksa lima berkas", profile: "read" });
+	assert.equal(off.ok, true, off.error);
+	// Room left: a cap above the spend.
+	await m.c.call("settings_set", { settings: { dailyBudget: 6 } });
+	const room = await m.c.call("subagent_start", { task: "Periksa tiga berkas", profile: "read" });
+	assert.equal(room.ok, true, room.error);
+	// Let both finish, so the host is not writing into the folder while it is removed.
+	writeFileSync(m.mock.MOCK_RELEASE, "");
+	for (const id of [off.data.id, room.data.id]) await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === id, 30_000, "for a subagent to finish");
+});
