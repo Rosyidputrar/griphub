@@ -665,7 +665,6 @@ function findBlocks(s: string, blocks: Block[], limit = Infinity): Found[] {
 		at: -1,
 		innerStart: 0,
 	}));
-	const lastGt = s.lastIndexOf(">");
 	const found: Found[] = [];
 	let pos = 0;
 	while (found.length < limit) {
@@ -674,13 +673,16 @@ function findBlocks(s: string, blocks: Block[], limit = Infinity): Found[] {
 			const sl = slots[i];
 			if (sl.at < pos) {
 				sl.at = Infinity;
-				// An opening that runs to a `>` needs one after it; without the check the engine looks for it from every opening.
-				if (!sl.tag || pos <= lastGt) {
-					sl.open.lastIndex = pos;
-					const m = sl.open.exec(s);
-					if (m && m.index + m[0].length <= sl.lastClose) {
+				sl.open.lastIndex = pos;
+				const m = sl.open.exec(s);
+				if (m) {
+					// An opening that goes on to a `>` ends at the first one after its name (`[^>]*>`). Looked for here, not by the
+					// expression: with no `>` left, the engine would look for it again from every opening.
+					const end = m.index + m[0].length;
+					const gt = sl.tag ? s.indexOf(">", end) : end - 1;
+					if (gt >= 0 && gt + 1 <= sl.lastClose) {
 						sl.at = m.index;
-						sl.innerStart = m.index + m[0].length;
+						sl.innerStart = gt + 1;
 					}
 				}
 			}
@@ -779,10 +781,10 @@ const MAIN_BLOCKS: Block[] = [
 ];
 const NOISE_BLOCKS: Block[] = NOISE_TAGS.map((t) => ({ open: `<${t}\\b`, close: `<\\/${t}>` }));
 const COMMENT: Block[] = [{ open: "<!--", close: "-->" }];
-const PRE: Block[] = [{ open: "<pre\\b[^>]*>", close: "<\\/pre>", tag: true }];
-const CODE: Block[] = [{ open: "<code\\b[^>]*>", close: "<\\/code>", tag: true }];
-const HEADINGS: Block[] = [1, 2, 3, 4, 5, 6].map((n) => ({ open: `<h${n}\\b[^>]*>`, close: `<\\/h${n}>`, tag: true }));
-const TITLE: Block[] = [{ open: "<title[^>]*>", close: "<\\/title>", tag: true }];
+const PRE: Block[] = [{ open: "<pre\\b", close: "<\\/pre>", tag: true }];
+const CODE: Block[] = [{ open: "<code\\b", close: "<\\/code>", tag: true }];
+const HEADINGS: Block[] = [1, 2, 3, 4, 5, 6].map((n) => ({ open: `<h${n}\\b`, close: `<\\/h${n}>`, tag: true }));
+const TITLE: Block[] = [{ open: "<title", close: "<\\/title>", tag: true }];
 
 /** Readable text with light markdown: headings, lists, links and code kept. */
 export function htmlToText(html: string, base = ""): string {
