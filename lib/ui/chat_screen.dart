@@ -1020,6 +1020,18 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// Runs what a control does and says so when it fails (the link is down, the host refused). A failure nobody caught
+/// used to end as an unhandled async error and a tap that looked like it did nothing.
+Future<void> tellFailure(BuildContext context, Future<void> Function() call, {String? done}) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await call();
+    if (done != null) messenger.showSnackBar(SnackBar(content: Text(done)));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(friendlyError(e))));
+  }
+}
+
 class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
@@ -1044,6 +1056,17 @@ class _Composer extends StatelessWidget {
   final FocusNode focus;
   final AgentController agent;
   final VoidCallback onSend;
+
+  /// Stop. With a server agent and the link down it cannot reach the host: it says so instead of looking like it worked.
+  Future<void> _stop(BuildContext context) {
+    if (!agent.client.connection.value.connected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(tr("Offline: can't stop it from here. It stops by itself when it finishes; reconnect to stop it now."))),
+      );
+      return Future.value();
+    }
+    return tellFailure(context, agent.abort, done: tr('Stopping…'));
+  }
 
   /// The last message is still on its way: Send spins and is off.
   final bool sending;
@@ -1164,14 +1187,14 @@ class _Composer extends StatelessWidget {
                             icon: LucideIcons.listChecks,
                             label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
                             active: agent.planMode,
-                            onTap: () => agent.setPlanMode(!agent.planMode),
+                            onTap: () => tellFailure(context, () => agent.setPlanMode(!agent.planMode)),
                           ),
                         ],
                       ),
                     ),
                     // While the agent works, Stop stays reachable; typed text adds Send (queues a follow-up).
                     if (busy)
-                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: agent.abort),
+                      _RoundButton(icon: LucideIcons.square, label: tr('Stop'), filled: !hasText, onTap: () => _stop(context)),
                     if (hasText || sending)
                       _RoundButton(
                         onLongPress: sending ? null : onQueue,
@@ -1237,7 +1260,7 @@ class _ThinkingChip extends StatelessWidget {
     return PopupMenuButton<String>(
       tooltip: tr('Thinking level'),
       initialValue: agent.thinkingLevel,
-      onSelected: agent.setThinking,
+      onSelected: (level) => tellFailure(context, () => agent.setThinking(level)),
       position: PopupMenuPosition.over,
       elevation: 0,
       itemBuilder: (context) => [
