@@ -50,6 +50,7 @@ import { Preview } from "./preview.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { onStoreProblem, storeProblemMessage } from "./state.js";
+import { serialQueue, swapSession } from "./sessionswap.js";
 import { startWatchdog } from "./watchdog.js";
 import { Skills } from "./skills.js";
 import {
@@ -521,26 +522,44 @@ const promptQueue = new PromptQueue(
 	(message) => send({ type: "error", message }),
 );
 
-async function openSession(sessionManager: SessionManager) {
-	unsubscribe?.();
-	guard.cancelAll();
-	session?.dispose();
-	turnStartedAt = null;
-	// Queued follow-ups belong to the chat being left (pi drops them with it).
-	promptQueue.clear();
-	const result = await buildSession(sessionManager, {
-		interactive: true,
-		onLimit: (reason) => send({ type: "notice", message: reason }),
+/** One chat switch or rebuild at a time (sessionswap.ts). */
+const oneSwitch = serialQueue();
+
+function openSession(sessionManager: SessionManager) {
+	return oneSwitch(async () => {
+		// The new session is built before the old one is let go of: a build that fails leaves the open chat as it was.
+		let modelFallbackMessage: string | undefined;
+		await swapSession({
+			assertIdle,
+			build: async () => {
+				const result = await buildSession(sessionManager, {
+					interactive: true,
+					onLimit: (reason) => send({ type: "notice", message: reason }),
+				});
+				modelFallbackMessage = result.modelFallbackMessage;
+				return result.session;
+			},
+			retire: () => {
+				unsubscribe?.();
+				guard.cancelAll();
+				session?.dispose();
+				turnStartedAt = null;
+				// Queued follow-ups belong to the chat being left (pi drops them with it).
+				promptQueue.clear();
+			},
+			install: (next) => {
+				session = next;
+				unsubscribe = next.subscribe((event) => {
+					send({ type: "event", event: wireEvent(event) });
+					onSessionEvent(event);
+				});
+			},
+		});
+		if (modelFallbackMessage) send({ type: "notice", message: modelFallbackMessage });
+		// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
+		setTimeout(deliverJobs, 0);
+		return state();
 	});
-	session = result.session;
-	unsubscribe = session.subscribe((event) => {
-		send({ type: "event", event: wireEvent(event) });
-		onSessionEvent(event);
-	});
-	if (result.modelFallbackMessage) send({ type: "notice", message: result.modelFallbackMessage });
-	// Jobs of this chat that ended while another chat was open call it back now (after this command has answered).
-	setTimeout(deliverJobs, 0);
-	return state();
 }
 
 /** Hooks on the active chat: model fallback and "done" notifications. */
