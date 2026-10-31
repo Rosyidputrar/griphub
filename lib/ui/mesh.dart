@@ -88,12 +88,27 @@ class Avatar extends StatelessWidget {
     final initials = name.trim().isEmpty
         ? '?'
         : name.trim().split(RegExp(r'\s+')).take(2).map((w) => w[0].toUpperCase()).join();
-    return SizedBox.square(
-      dimension: size,
-      child: ClipOval(
-        child: url != null
-            ? Image.network(url!, fit: BoxFit.cover, errorBuilder: (_, _, _) => _initials(initials))
-            : _initials(initials),
+    // Decoded at the size it is drawn (not the photo's full size), with the initials while it loads and a name for a
+    // screen reader.
+    final px = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    return Semantics(
+      image: true,
+      label: name,
+      child: SizedBox.square(
+        dimension: size,
+        child: ClipOval(
+          child: url != null
+              ? Image.network(
+                  url!,
+                  fit: BoxFit.cover,
+                  cacheWidth: px,
+                  cacheHeight: px,
+                  excludeFromSemantics: true,
+                  loadingBuilder: (context, child, progress) => progress == null ? child : _initials(initials),
+                  errorBuilder: (_, _, _) => _initials(initials),
+                )
+              : ExcludeSemantics(child: _initials(initials)),
+        ),
       ),
     );
   }

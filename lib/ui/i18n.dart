@@ -130,6 +130,8 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'Open photo': 'Buka foto',
+  'Open file': 'Buka file',
   'Violet': 'Ungu',
   'Blue': 'Biru',
   'Green': 'Hijau',

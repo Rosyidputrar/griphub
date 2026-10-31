@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import 'kit.dart';
 import 'theme.dart';
 
 /// Storyset illustrations (https://storyset.com, free with attribution),
@@ -50,7 +51,13 @@ class StorysetCredit extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return GestureDetector(
+    // An 11 px line to read, a 48 dp target to tap, and a link to a screen reader.
+    return Semantics(
+      link: true,
+      label: 'Illustrations by Storyset',
+      onTap: () => openUrl('https://storyset.com'),
+      excludeSemantics: true,
+      child: TapTarget(
       onTap: () => openUrl('https://storyset.com'),
       child: Text.rich(
         TextSpan(
@@ -64,6 +71,7 @@ class StorysetCredit extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }

@@ -10,6 +10,8 @@ import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/code_view.dart';
 import 'package:griphub_agent/ui/diff_view.dart';
 import 'package:griphub_agent/ui/home_shell.dart';
+import 'package:griphub_agent/ui/illustration.dart';
+import 'package:griphub_agent/ui/mesh.dart';
 import 'package:griphub_agent/ui/kit.dart';
 import 'package:griphub_agent/ui/search_screen.dart';
 import 'package:griphub_agent/ui/settings_hub.dart';
@@ -43,6 +45,7 @@ void main() {
   group('UI-20: Back', backTests);
   group('UI-21: pills', pillTests);
   group('UI-22: text size', textScaleTests);
+  group('UI-24: attachments, avatar, credit', attachmentSemanticsTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -555,5 +558,52 @@ void textScaleTests() {
     await frames(tester);
     await loadImages(tester);
     await expectLater(find.byType(SettingsHub), matchesGoldenFile(golden('settings_text_x2.0_id')));
+  });
+}
+
+void attachmentSemanticsTests() {
+  testWidgets('UI-24: a sent file chip and a photo say what they are and open, and the chip is 48 dp', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(
+      tester,
+      const Look(),
+      const Scaffold(
+        body: MessageAttachments(
+          attachments: [
+            (path: '/w/notes.pdf', name: 'notes.pdf', mime: 'application/pdf', size: 2048),
+            (path: '/w/shot.png', name: 'shot.png', mime: 'image/png', size: 4096),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    final chip = find.bySemanticsLabel('Open file notes.pdf');
+    expect(chip, findsOneWidget);
+    expect(tester.getSemantics(chip), isSemantics(isButton: true, hasTapAction: true));
+    expect(tester.getSize(chip).height, greaterThanOrEqualTo(48));
+    expect(tester.getSemantics(find.bySemanticsLabel('Open photo shot.png')), isSemantics(isButton: true, isImage: true));
+    handle.dispose();
+  });
+
+  testWidgets('UI-24: an avatar has a name for a screen reader', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(tester, const Look(), const Scaffold(body: Center(child: Avatar(name: 'Rosyid Putra'))));
+    expect(tester.getSemantics(find.bySemanticsLabel('Rosyid Putra')), isSemantics(isImage: true));
+    handle.dispose();
+  });
+
+  testWidgets('UI-24: the Storyset credit is a 48 dp link', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    String? opened;
+    await pumpLook(tester, const Look(), Scaffold(body: Center(child: StorysetCredit(openUrl: (u) async => opened = u))));
+    final link = find.bySemanticsLabel('Illustrations by Storyset');
+    expect(tester.getSemantics(link), isSemantics(isLink: true));
+    expect(tester.getSize(find.byType(TapTarget)).height, greaterThanOrEqualTo(48));
+    await tester.tap(find.byType(TapTarget));
+    expect(opened, 'https://storyset.com');
+    handle.dispose();
   });
 }

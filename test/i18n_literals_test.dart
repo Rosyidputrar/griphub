@@ -38,6 +38,7 @@ const _allowed = {
   'settings_screen.dart:GripHub Router',
   'server_screen.dart:agent.example.com',
   'server_screen.dart:griphub1:…',
+  'illustration.dart:Illustrations by Storyset', // the licence's credit line, shown in English as it is written
 };
 
 final _literal = RegExp(r"""(?:\bText|_snack)\('([A-Za-z][^'$]*)'|\b(?:tooltip|hintText|labelText|label|title|message): '([A-Za-z][^'$]*)'""");

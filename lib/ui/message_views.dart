@@ -117,7 +117,13 @@ class MessageAttachments extends StatelessWidget {
             alignment: WrapAlignment.end,
             children: [
               for (final a in photos)
-                GestureDetector(
+                // A picture, and a way to open it: said to a screen reader by its name.
+                Semantics(
+                  button: true,
+                  image: true,
+                  label: '${tr('Open photo')} ${a.name}',
+                  child: GestureDetector(
+                  excludeFromSemantics: true,
                   onTap: () => openAttachmentViewer(context, a, fs: fs),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(Radii.md),
@@ -136,6 +142,7 @@ class MessageAttachments extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
                 ),
             ],
           ),
@@ -162,10 +169,16 @@ class _AttachmentFileChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     final a = attachment;
-    return GestureDetector(
+    // Said by its name, and 48 dp to touch.
+    return Semantics(
+      button: true,
+      label: '${tr('Open file')} ${a.name}',
+      onTap: () => openAttachmentViewer(context, a, fs: fs),
+      excludeSemantics: true,
+      child: GestureDetector(
       onTap: () => openAttachmentViewer(context, a, fs: fs),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 240),
+        constraints: const BoxConstraints(maxWidth: 240, minHeight: 48),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           color: p.raised,
@@ -195,6 +208,7 @@ class _AttachmentFileChip extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }
