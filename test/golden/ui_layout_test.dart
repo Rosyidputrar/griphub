@@ -8,6 +8,8 @@ import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/griphub_screen.dart';
 import 'package:griphub_agent/ui/kit.dart';
 import 'package:griphub_agent/ui/onboarding.dart';
+import 'package:griphub_agent/ui/settings_hub.dart';
+import 'package:griphub_agent/ui/theme.dart';
 
 import 'harness.dart';
 
@@ -28,6 +30,7 @@ void main() {
 
   group('UI-02: sheets', sheetTests);
   group('UI-03: first run', firstRunTests);
+  group('UI-06: accent colour', accentTests);
 
   group('UI-01: the suggestions on an empty chat', () {
     const looks = [
@@ -147,3 +150,33 @@ void firstRunTests() {
     });
   }
 }
+
+void accentTests() {
+  testWidgets('UI-06: each accent swatch says its colour and whether it is chosen, is 48 dp, and the title has room', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(tester, const Look(language: 'id', width: 320, textScale: 1.3), SettingsHub(agent: newAgent()), height: 2400);
+    await tester.pump(const Duration(milliseconds: 200));
+    collectLayoutErrors(tester, 'accent');
+    expectNoOverflow('the accent row');
+    await tester.scrollUntilVisible(find.text('Warna aksen'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -200));
+    await tester.pump();
+    // The title on one line, not "War / na / aks / en".
+    final title = tester.getSize(find.text('Warna aksen'));
+    expect(title.width, greaterThan(80));
+    for (final name in ['Ungu', 'Biru', 'Hijau', 'Oranye', 'Merah muda', 'Hijau toska']) {
+      expect(find.bySemanticsLabel(name), findsOneWidget, reason: name);
+    }
+    expect(tester.getSemantics(find.bySemanticsLabel('Ungu')), isSemantics(isSelected: true, isButton: true), reason: 'the chosen one says so');
+    expect(tester.getSemantics(find.bySemanticsLabel('Hijau')), isSemantics(isSelected: false, isButton: true));
+    final target = tester.getSize(find.descendant(of: find.bySemanticsLabel('Hijau'), matching: find.byType(TapTarget)).first);
+    expect(target.width >= 48 && target.height >= 48, isTrue, reason: 'swatch target is $target');
+    await tester.tap(find.bySemanticsLabel('Hijau'));
+    await tester.pump();
+    expect(Appearance.instance.accent, 2);
+    Appearance.instance.update(accent: 0);
+    handle.dispose();
+  });
+}
+

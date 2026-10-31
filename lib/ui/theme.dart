@@ -127,6 +127,9 @@ extension PaletteX on BuildContext {
 const mono = 'GeistMono';
 
 /// Accent colours the user can pick, as (light, dark) pairs. The first is the default violet.
+/// What each accent is called, in [accentChoices]' order (read out by a screen reader).
+const accentNames = ['Violet', 'Blue', 'Green', 'Orange', 'Pink', 'Teal'];
+
 const accentChoices = <(Color, Color)>[
   (Color(0xFF6E56CF), Color(0xFF9E8CFC)),
   (Color(0xFF3E63DD), Color(0xFF7B93FF)),

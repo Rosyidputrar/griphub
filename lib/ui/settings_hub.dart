@@ -494,28 +494,40 @@ class _SettingsHubState extends State<SettingsHub> {
                     ),
                     onTap: () => look.update(compact: !look.compact),
                   ),
+                  // The title on its own line and the swatches under it, so neither starves on a narrow phone; each swatch
+                  // is a 48 dp target that says its colour and whether it is the one chosen.
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                    child: Row(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(child: Text(tr('Accent colour'), style: text.titleSmall)),
-                        for (var i = 0; i < accentChoices.length; i++)
-                          GestureDetector(
-                            onTap: () => look.update(accent: i),
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 8),
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Theme.of(context).brightness == Brightness.light
-                                    ? accentChoices[i].$1
-                                    : accentChoices[i].$2,
-                                border: Border.all(color: look.accent == i ? p.text : Colors.transparent, width: 2.5),
+                        Text(tr('Accent colour'), style: text.titleSmall),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          children: [
+                            for (var i = 0; i < accentChoices.length; i++)
+                              Semantics(
+                                button: true,
+                                selected: look.accent == i,
+                                label: tr(accentNames[i]),
+                                child: TapTarget(
+                                  onTap: () => look.update(accent: i),
+                                  child: Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Theme.of(context).brightness == Brightness.light
+                                          ? accentChoices[i].$1
+                                          : accentChoices[i].$2,
+                                      border: Border.all(color: look.accent == i ? p.text : Colors.transparent, width: 2.5),
+                                    ),
+                                    child: look.accent == i ? Icon(LucideIcons.check, size: 14, color: p.inverse) : null,
+                                  ),
+                                ),
                               ),
-                              child: look.accent == i ? Icon(LucideIcons.check, size: 14, color: p.inverse) : null,
-                            ),
-                          ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
