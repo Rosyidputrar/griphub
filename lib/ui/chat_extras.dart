@@ -194,7 +194,7 @@ int _fileSize(File file) {
 Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
   final clipboardImage = await client?.clipboardHasImage() ?? false;
   if (!context.mounted) return const [];
-  final choice = await showModalBottomSheet<String>(
+  final choice = await showAppSheet<String>(
     context: context,
     builder: (context) => SafeArea(
       child: Padding(

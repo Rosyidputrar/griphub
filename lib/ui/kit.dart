@@ -736,3 +736,12 @@ Future<T?> runWithProgress<T>(
     if (route.isActive) nav.removeRoute(route);
   }
 }
+
+/// A bottom sheet that is never cut off: as tall as its content, up to the whole screen, and it scrolls past that. A plain
+/// sheet stops at 9/16 of the screen's height, which in landscape left a menu's last rows (Delete) out of reach.
+Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showModalBottomSheet<T>(
+  context: context,
+  isScrollControlled: true,
+  useSafeArea: true,
+  builder: (context) => SingleChildScrollView(child: builder(context)),
+);

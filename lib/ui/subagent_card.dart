@@ -1286,7 +1286,7 @@ class CrossChatBanner extends StatelessWidget {
   }
 
   Future<void> _pick(BuildContext context, Map<String, List<SubagentState>> chats) async {
-    final path = await showModalBottomSheet<String>(
+    final path = await showAppSheet<String>(
       context: context,
       builder: (context) {
         final p = context.palette;

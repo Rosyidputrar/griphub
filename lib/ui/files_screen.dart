@@ -249,7 +249,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
   }
 
   Future<void> _openHtml(_Entry e) async {
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showAppSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -508,7 +508,7 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
   Future<void> _showEntrySheet(_Entry e) async {
     if (busy()) return;
     final p = context.palette;
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(

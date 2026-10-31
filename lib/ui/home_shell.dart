@@ -1252,7 +1252,7 @@ class _ChatsTabState extends State<_ChatsTab> {
   });
 
   Future<void> _menu(SessionSummary s) async {
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Padding(
@@ -1494,7 +1494,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
   }
 
   Future<void> _projectMenu(ProjectInfo project) async {
-    final action = await showModalBottomSheet<String>(
+    final action = await showAppSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Padding(

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/kit.dart';
 
 import 'harness.dart';
 
@@ -22,6 +23,8 @@ void main() {
     applyLook(const Look());
     layoutErrors.clear();
   });
+
+  group('UI-02: sheets', sheetTests);
 
   group('UI-01: the suggestions on an empty chat', () {
     const looks = [
@@ -51,5 +54,60 @@ void main() {
         await expectLater(find.byType(ChatScreen), matchesGoldenFile(golden('empty_chat_suggestions_${look.name}')));
       });
     }
+  });
+}
+
+/// The chat menu's rows (Rename, Select, Delete) in a sheet, as home_shell.dart builds them.
+Widget _menuRows(BuildContext context) => SafeArea(
+  child: Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+    child: SettingsGroup(
+      children: [
+        SettingsRow(icon: Icons.edit, color: Colors.blue, title: 'Rename', onTap: () => Navigator.pop(context, 'rename')),
+        SettingsRow(icon: Icons.check_box, color: Colors.grey, title: 'Select', subtitle: 'Pick several chats to delete at once', onTap: () => Navigator.pop(context, 'select')),
+        SettingsRow(icon: Icons.delete, color: Colors.red, title: 'Delete', destructive: true, onTap: () => Navigator.pop(context, 'delete')),
+      ],
+    ),
+  ),
+);
+
+void sheetTests() {
+  // 780 x 340: a phone on its side. A plain sheet stops at 9/16 of that (about 190 dp) and cut Delete off.
+  Future<String?> openSheet(WidgetTester tester, {required bool app, double textScale = 1}) async {
+    String? picked;
+    await pumpLook(
+      tester,
+      Look(width: 780, textScale: textScale),
+      Builder(
+        builder: (c) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () async => picked = app
+                  ? await showAppSheet<String>(context: c, builder: _menuRows)
+                  : await showModalBottomSheet<String>(context: c, builder: _menuRows),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+      height: 340,
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    collectLayoutErrors(tester, 'sheet');
+    await tester.scrollUntilVisible(find.text('Delete'), 40, scrollable: find.byType(Scrollable).last);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    return picked;
+  }
+
+  testWidgets('UI-02: in landscape every row of a menu sheet can be reached, Delete included', (tester) async {
+    expect(await openSheet(tester, app: true), 'delete');
+    expectNoOverflow('the menu sheet');
+  });
+
+  testWidgets('UI-02: with large text too', (tester) async {
+    expect(await openSheet(tester, app: true, textScale: 1.3), 'delete');
+    expectNoOverflow('the menu sheet');
   });
 }
