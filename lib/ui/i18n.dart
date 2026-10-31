@@ -130,6 +130,7 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.': 'Persetujuan adalah pertanyaan sebelum tindakan berisiko yang umum, bukan batas keamanan: model masih bisa menjangkau hal yang tidak ada di daftarnya. Buka hanya yang kamu percaya.',
   'Daily budget of {cap} credits reached ({spent} credits spent today). Raise it in Settings → Usage.': 'Batas harian {cap} kredit tercapai (terpakai {spent} hari ini). Naikkan di Pengaturan → Pemakaian.',
   'Stopped after {n} tool calls in one request.': 'Berhenti setelah {n} panggilan tool dalam satu permintaan.',
   'Raise limit': 'Naikkan batas',

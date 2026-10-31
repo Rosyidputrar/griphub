@@ -64,6 +64,47 @@ const RISKY_BASH = [
 	/\bDROP\s+(TABLE|DATABASE)\b|\bTRUNCATE\b/i,
 ];
 
+/**
+ * Where this machine keeps what the agent must not be able to read out and send on: the store key, the sign-in tokens
+ * (the app's own store, git's credentials, ssh and cloud keys). Reading them is not "changing" anything, so they were never
+ * asked about; a page or a file with hidden instructions in it only needs to say "read this and put it in a URL".
+ */
+function secretPlaces(): { dirs: string[]; files: string[] } {
+	const home = process.env.HOME ?? "";
+	const dirs = [process.env.GRIPHUB_DIR, process.env.PI_CODING_AGENT_DIR && join(process.env.PI_CODING_AGENT_DIR, "griphub")].filter((d): d is string => !!d);
+	if (home) {
+		dirs.push(join(home, ".griphub"), join(home, ".ssh"), join(home, ".gnupg"), join(home, ".aws"), join(home, ".config", "gh"), join(home, ".pi", "agent", "griphub"));
+	}
+	const files = home ? [".gitconfig", ".git-credentials", ".netrc", ".npmrc", ".pypirc"].map((f) => join(home, f)) : [];
+	return { dirs, files };
+}
+
+/** Why reading [input.path] with a file tool deserves a question, or null: the file is one that holds secrets. */
+export function secretReadRisk(toolName: string, input: Record<string, unknown>, cwd: string): string | null {
+	if (toolName !== "read" && toolName !== "grep" && toolName !== "find" && toolName !== "ls") return null;
+	let target: string;
+	try {
+		target = canonicalTarget(resolveLikePi(String(input.path ?? ""), cwd)) ?? "";
+	} catch {
+		return "Reads a path that cannot be checked";
+	}
+	if (!target) return "Reads a path that cannot be checked";
+	if (/^\/proc\/[^/]+\/(environ|cmdline|mem|maps)$/.test(target)) return "Reads a file that holds sign-in secrets";
+	const { dirs, files } = secretPlaces();
+	const real = (p: string) => canonicalTarget(p) ?? p;
+	if (dirs.some((d) => isInside(target, real(d))) || files.some((f) => target === real(f))) return "Reads a file that holds sign-in secrets";
+	return null;
+}
+
+/** Commands that name where the secrets are, or print the environment the tokens are in. A list, so a speed bump, not a wall. */
+const SECRET_BASH = [
+	/\.griphub\b|GRIPHUB_STORE_KEY|integrations\.json|custom-providers\.json/i,
+	/\/proc\/[^\s]*\/(environ|cmdline|mem)\b/i,
+	/\.git-credentials|\.netrc\b|\.gitconfig\b|\.config\/gh\b/i,
+	/\$\{?(GITHUB_TOKEN|GH_TOKEN|VERCEL_TOKEN|CLOUDFLARE_API_TOKEN)\b/,
+	/\bprintenv\b|\benv\s*(\||>)/,
+];
+
 /** Characters pi turns into a plain space before it looks at a path. */
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
@@ -144,10 +185,11 @@ function writeRisk(raw: string, cwd: string): string | null {
  * them, but an unattended run may use the servers the user set up (as background runs always could).
  */
 export function riskOf(toolName: string, input: Record<string, unknown>, cwd: string, mcp = true): string | null {
-	if (READ_ONLY.has(toolName)) return null;
+	if (READ_ONLY.has(toolName)) return secretReadRisk(toolName, input, cwd);
 	// A background job is a bash command that runs a while: the same second look.
 	if (toolName === "bash" || toolName === "background_job") {
 		const cmd = String(input.command ?? "");
+		if (SECRET_BASH.some((re) => re.test(cmd))) return "This command can read sign-in secrets";
 		const hit = RISKY_BASH.find((re) => re.test(cmd));
 		return hit ? "This command can delete data, publish or reach other machines" : null;
 	}
@@ -320,7 +362,19 @@ export class Guard {
 				};
 			}
 
-			const risk = this.mode === "ask_all" ? (READ_ONLY.has(event.toolName) ? null : "Approval required for every change") : this.mode === "ask_risky" ? riskOf(event.toolName, input, cwd) : this.mode === "deny_risky" ? riskOf(event.toolName, input, cwd, false) : null;
+			// Reading a file of secrets is asked about in every mode but "bypass all", read-only as it is.
+			const secret = this.mode === "auto" ? null : secretReadRisk(event.toolName, input, cwd);
+			const byMode =
+				this.mode === "ask_all"
+					? READ_ONLY.has(event.toolName)
+						? null
+						: "Approval required for every change"
+					: this.mode === "ask_risky"
+						? riskOf(event.toolName, input, cwd)
+						: this.mode === "deny_risky"
+							? riskOf(event.toolName, input, cwd, false)
+							: null;
+			const risk = secret ?? byMode;
 			if (risk && this.mode === "deny_risky") {
 				return {
 					block: true,

@@ -7,6 +7,7 @@ import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/agent/agent_backend.dart';
+import 'package:griphub_agent/ui/settings_hub.dart';
 import 'package:griphub_agent/ui/tasks_screen.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
@@ -16,6 +17,7 @@ void main() {
   setUpAll(loadAppFonts);
   group('bypass all permissions', bypassTests);
   group('background runs', backgroundNoteTests);
+  group('the approvals setting', approvalsCaptionTests);
   setUp(() {
     applyLook(const Look());
     layoutErrors.clear();
@@ -135,5 +137,23 @@ void backgroundNoteTests() {
     await pumpLook(tester, const Look(language: 'id'), TasksScreen(agent: newAgent()), height: 1400);
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.textContaining('Tugas latar tidak meminta persetujuan'), findsOneWidget);
+  });
+}
+
+// BE-03: the Approvals setting is questions before common risky actions, not a security boundary; the screen says so.
+void approvalsCaptionTests() {
+  testWidgets('Settings says what Approvals is, and is not', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(), SettingsHub(agent: newAgent()), height: 1600);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byKey(const ValueKey('approvals-caption')), findsOneWidget);
+    expect(find.textContaining('not a security boundary'), findsOneWidget);
+  });
+
+  testWidgets('in Indonesian', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(language: 'id'), SettingsHub(agent: newAgent()), height: 1600);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('bukan batas keamanan'), findsOneWidget);
   });
 }

@@ -328,6 +328,16 @@ class _SettingsHubState extends State<SettingsHub> {
                 busy: _approvalSaving != null,
                 onChanged: _setApprovalMode,
               ),
+              // What the setting is: questions before common risky actions. Not a wall against a page or file that tells the
+              // agent what to do, so it is not described as one.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                child: Text(
+                  tr('Approvals are prompts for common risky actions, not a security boundary: a model can still reach things they do not list. Open only what you trust.'),
+                  key: const ValueKey('approvals-caption'),
+                  style: text.bodySmall?.copyWith(color: p.muted),
+                ),
+              ),
               if ((it.settings?.approvalMode ?? agent.approvalMode) == 'auto')
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
