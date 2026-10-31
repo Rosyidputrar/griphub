@@ -959,6 +959,8 @@ const _id = <String, String>{
   'Waiting': 'Antre',
   'Done': 'Selesai',
   'Loading…': 'Memuat…',
+  'The connection dropped while the message was being sent. Once it is back, check whether it arrived before sending it again.':
+      'Koneksi putus saat pesan sedang dikirim. Setelah tersambung lagi, cek apakah pesannya sampai sebelum mengirim ulang.',
   'Recently edited': 'Terakhir diedit',
   'Largest': 'Terbesar',
   'Folders': 'Folder',

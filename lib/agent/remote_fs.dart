@@ -89,7 +89,7 @@ class RemoteFs implements AgentFs {
   @override
   Future<String> readString(String path) async => utf8.decode(await read(path));
 
-  static bool _lost(AgentError e) => e.code == 'connection_lost' || e.code == 'offline';
+  static bool _lost(AgentError e) => e.code == 'connection_lost' || e.code == 'offline' || e.code == 'not_sent';
 
   /// Runs one request, and if the connection drops meanwhile waits for it to come back and tries again. For requests
   /// that can safely be repeated (reads).
