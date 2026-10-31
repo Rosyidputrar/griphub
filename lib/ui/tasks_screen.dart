@@ -248,6 +248,28 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
                       ),
                       const SizedBox(height: 12),
                       PrimaryButton(label: tr('Queue'), icon: LucideIcons.listTodo, busy: _queueing, onPressed: _queue),
+                      const SizedBox(height: 10),
+                      // Nobody is there to answer: what a run may do without asking depends on where the agent runs.
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            agent.client.isRemote ? LucideIcons.shieldCheck : LucideIcons.shieldAlert,
+                            size: 14,
+                            color: agent.client.isRemote ? p.faint : p.warning,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              agent.client.isRemote
+                                  ? tr('Background runs do not ask: risky actions (deleting files, force push, writing outside the project) are refused.')
+                                  : tr('Background runs do not ask before acting: commands, edits and pushes run on their own, whatever the Approvals setting is.'),
+                              key: const ValueKey('background-approvals-note'),
+                              style: text.bodySmall?.copyWith(color: agent.client.isRemote ? p.muted : p.warning),
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 18),
                       Row(
                         children: [

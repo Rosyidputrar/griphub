@@ -6,6 +6,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
 import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/agent/agent_backend.dart';
+import 'package:griphub_agent/ui/tasks_screen.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
 import 'harness.dart';
@@ -13,6 +15,7 @@ import 'harness.dart';
 void main() {
   setUpAll(loadAppFonts);
   group('bypass all permissions', bypassTests);
+  group('background runs', backgroundNoteTests);
   setUp(() {
     applyLook(const Look());
     layoutErrors.clear();
@@ -103,5 +106,34 @@ void bypassTests() {
     expect(find.textContaining('stays on for all chats until you turn it off in Settings > Approvals'), findsOneWidget);
     final button = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Bypass'));
     expect(button.style?.backgroundColor?.resolve({}), ctx.palette.danger);
+  });
+}
+
+// UX-06: a background run on the phone has no approval guard at all (a server's refuse risky actions); the Tasks screen
+// said nothing either way.
+void backgroundNoteTests() {
+  testWidgets('on the phone the Tasks screen says background runs do not ask', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(), TasksScreen(agent: newAgent()), height: 1400);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('Background runs do not ask before acting'), findsOneWidget);
+    expect(find.textContaining('whatever the Approvals setting is'), findsOneWidget);
+  });
+
+  testWidgets('with a server agent it says what is refused instead', (tester) async {
+    FakeHost();
+    final agent = newAgent();
+    agent.client.remote = const LaunchSpec(['ssh']);
+    await pumpLook(tester, const Look(), TasksScreen(agent: agent), height: 1400);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('risky actions (deleting files, force push'), findsOneWidget);
+    expect(find.textContaining('Background runs do not ask before acting'), findsNothing);
+  });
+
+  testWidgets('in Indonesian', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(language: 'id'), TasksScreen(agent: newAgent()), height: 1400);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('Tugas latar tidak meminta persetujuan'), findsOneWidget);
   });
 }
