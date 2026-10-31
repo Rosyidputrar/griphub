@@ -74,20 +74,27 @@ export class UnsafeRepoConfig extends Error {
 	}
 }
 
-/** What git-lfs puts in a repository's config; the one program a project's own settings may name. */
-const LFS_FILTER: Record<string, string> = {
-	clean: "git-lfs clean -- %f",
-	smudge: "git-lfs smudge -- %f",
-	process: "git-lfs filter-process",
+/**
+ * What `git lfs install` writes in a repository's config (with and without --skip-smudge); the one program a project's
+ * own settings may name. Naming git-lfs is not enough to be safe: git-lfs has settings of its own that name programs
+ * (see whyUnsafe), and it runs on a pull, a checkout and a push.
+ */
+const LFS_FILTER: Record<string, string[]> = {
+	clean: ["git-lfs clean -- %f"],
+	smudge: ["git-lfs smudge -- %f", "git-lfs smudge --skip -- %f"],
+	process: ["git-lfs filter-process", "git-lfs filter-process --skip"],
 };
 
 /** Why [key] (as `git config --list` writes it: section and name in lower case) is not allowed in a project's settings, or null. */
 function whyUnsafe(key: string, value: string): string | null {
 	if (key === "include.path" || /^includeif\..+\.path$/.test(key)) return "include another file, which could say anything";
 	const filter = /^filter\.(.+)\.(clean|smudge|process)$/.exec(key);
-	if (filter) return filter[1] === "lfs" && value === LFS_FILTER[filter[2]] ? null : "run a program on every file git adds or checks out";
+	if (filter) return filter[1] === "lfs" && LFS_FILTER[filter[2]].includes(value) ? null : "run a program on every file git adds or checks out";
 	// git-lfs runs these on every file it tracks (`lfs.extension.<name>.clean` / `.smudge`), and `git lfs install` never writes them.
 	if (/^lfs\.extension\..+\.(clean|smudge)$/.test(key)) return "run a program on every large file git adds or checks out";
+	// A transfer agent named in the settings is run by git-lfs instead of its own upload and download: on a push, and on a
+	// pull or checkout that has large files to fetch. (Found by running it: the program ran on a host push.)
+	if (/^lfs\.customtransfer\..+\.(path|args)$/.test(key) || /^lfs\.(.+\.)?standalonetransferagent$/.test(key)) return "run a program to send or fetch large files";
 	if (/^diff\..+\.(command|textconv)$/.test(key) || key === "diff.external") return "run a program to compare files";
 	if (/^merge\..+\.(driver|recursive)$/.test(key)) return "run a program to merge files";
 	if (/^credential\..+\.helper$/.test(key)) return "run a program to look up a password";

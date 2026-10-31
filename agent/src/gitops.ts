@@ -258,8 +258,8 @@ export async function push(cwd: string, log: (l: string) => void) {
  * A project that uses Git LFS keeps big files as small pointers in its commits and the files themselves on the LFS
  * server. LFS uploads them from a `pre-push` hook, and the host runs git with hooks off (SAFE_GIT_FLAGS), so that hook
  * never runs: the remote would get pointers whose files are nowhere. Upload them here, before the push, the way the
- * hook would. `git lfs push` runs no hook and no program from the project's settings (lfs.extension.* is refused by
- * assertRepoConfigSafe).
+ * hook would. `git lfs push` runs no hook and no program from the project's settings (lfs.extension.*, a custom
+ * transfer agent and filters other than git-lfs's own are refused by assertRepoConfigSafe).
  */
 async function pushLfsObjects(cwd: string, log: (l: string) => void) {
 	// The filter is what `git lfs install` leaves in the repository's settings (or in the user's global ones).

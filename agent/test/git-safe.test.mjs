@@ -347,3 +347,55 @@ test("a project's lfs.extension settings (a program git-lfs would run on every l
 	await assert.rejects(gitRun(["add", "-A"], { cwd: dir }), /lfs\.extension\.x\.(clean|smudge)/);
 	assert.equal(existsSync(marker), false, "the program never ran");
 });
+
+test("a custom transfer agent named in a project's settings is not run by a push, a pull or a checkout: it is refused", { skip: !hasLfs && "git-lfs is not installed" }, async () => {
+	const remote = join(root, "remote.git");
+	mkdirSync(remote);
+	raw(remote, "init", "-q", "--bare", "-b", "main");
+	const dir = repo();
+	raw(dir, "lfs", "install", "--local");
+	raw(dir, "lfs", "track", "*.bin");
+	raw(dir, "remote", "add", "origin", remote);
+	writeFileSync(join(dir, "big.bin"), Buffer.alloc(4096, 7));
+	await gitops.stage(dir, "all");
+	await gitops.commit(dir, "with a large file", false);
+	config(dir, "lfs.customtransfer.evil.path", boom);
+	config(dir, "lfs.standalonetransferagent", "evil");
+	raw(dir, "lfs", "push", "origin", "HEAD");
+	assert.ok(ran(), "plain git lfs runs the agent (the attack is real)");
+	reset();
+	await refused(gitops.push(dir, () => {}), /run a program to send or fetch large files: "lfs\.(customtransfer\.evil\.path|standalonetransferagent)"/);
+	await refused(gitops.pull(dir, () => {}), /run a program to send or fetch large files/);
+	await refused(gitops.checkout(dir, "main", false), /run a program to send or fetch large files/);
+	assert.ok(!ran(), "the agent never ran");
+});
+
+test("every setting that names a git-lfs transfer program is refused, for an address too; the ones git lfs install writes are not", { skip: !hasLfs && "git-lfs is not installed" }, async () => {
+	for (const [key, value] of [
+		["lfs.customtransfer.x.path", boom],
+		["lfs.customtransfer.x.args", "--serve"],
+		["lfs.standalonetransferagent", "x"],
+		["lfs.https://example.com/me/p.git/info/lfs.standalonetransferagent", "x"],
+	]) {
+		const dir = repo(`lfs-${key.replace(/\W/g, "")}`);
+		raw(dir, "lfs", "install", "--local");
+		await assertRepoConfigSafe(dir);
+		config(dir, key, value);
+		await refused(assertRepoConfigSafe(dir), /run a program to send or fetch large files/);
+	}
+	assert.ok(!ran());
+});
+
+test("git lfs install --skip-smudge writes settings that are allowed too: a project set up that way is not refused", { skip: !hasLfs && "git-lfs is not installed" }, async () => {
+	const dir = repo();
+	raw(dir, "lfs", "install", "--local", "--skip-smudge");
+	assert.match(raw(dir, "config", "--get", "filter.lfs.smudge"), /--skip/, "the settings really are the --skip ones");
+	await assertRepoConfigSafe(dir);
+	assert.equal((await gitops.status(dir)).repo, true);
+	// A lookalike is not git-lfs.
+	config(dir, "filter.lfs.smudge", `git-lfs smudge --skip -- %f; ${boom}`);
+	await refused(assertRepoConfigSafe(dir), /filter\.lfs\.smudge/);
+	config(dir, "filter.lfs.smudge", "git-lfs smudge --skip -- %f");
+	config(dir, "filter.lfs.process", `${boom} --skip`);
+	await refused(assertRepoConfigSafe(dir), /filter\.lfs\.process/);
+});
