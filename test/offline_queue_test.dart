@@ -193,14 +193,16 @@ void main() {
   test('opening the chat its messages were kept for sends them', () async {
     var chat = 's';
     final answer = backend.onCommand!;
-    backend.onCommand = (c) => c['type'] == 'state' || c['type'] == 'switch_session'
+    backend.onCommand = (c) => c['type'] == 'state' || c['type'] == 'open_session'
         ? {'sessionId': chat, 'sessionFile': '$chat.jsonl', 'cwd': '/w', 'isStreaming': false}
         : answer(c);
     agent.offlinePrompts = [OfflinePrompt(id: 'o1', text: 'for the other chat', session: 'other')];
     await agent.flushOffline();
     expect(prompts, isEmpty, reason: 'not while another chat is open');
     chat = 'other';
-    await agent.resync();
+    // Opened from the chat list. (A resync no longer stands in for this: it keeps the chat on screen, see
+    // resync_chat_test.dart.)
+    await agent.openSession('other.jsonl');
     await until(() => prompts.isNotEmpty, 'the kept message to go');
     expect(prompts, ['for the other chat']);
   });

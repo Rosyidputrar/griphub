@@ -88,7 +88,7 @@ class EnergySpinner extends StatefulWidget {
   final String? semanticsLabel;
 
   /// How long the turn into a check or a cross takes until the symbol stands (its ripple fades a little after).
-  static const outcomeDuration = Duration(milliseconds: 650);
+  static const outcomeDuration = Duration(milliseconds: 700);
 
   @override
   State<EnergySpinner> createState() => _EnergySpinnerState();
@@ -315,7 +315,12 @@ class _Painter extends CustomPainter {
     required this.solid,
     required this.outcome,
     required this.still,
-  }) : super(repaint: clock);
+  }) : assert(
+         _recolorFrom + _recolorFor <= _travelFrom + 1e-9,
+         'the comets take the outcome colour fully before they travel onto the symbol, as in the approved mock: a half '
+         'green check formed early reads as "done" before it is',
+       ),
+       super(repaint: clock);
 
   final _SpinClock clock;
   final _Comets comets;
@@ -325,13 +330,13 @@ class _Painter extends CustomPainter {
   final bool still;
 
   // The turn into a check or a cross, in seconds from the outcome: the spin slows to a stop as the orbits flatten,
-  // the comets take the outcome's colour, then travel onto the symbol's two strokes, which pops once and sends out a
-  // ripple.
+  // the comets take the outcome's colour, all of it, and only then travel onto the symbol's two strokes, which pops
+  // once and sends out a ripple.
   static const _settle = .25;
-  static const _recolorFrom = .10, _recolorFor = .25;
-  static const _travelFrom = .25, _travelFor = .30;
-  static const _popFrom = .55, _popFor = .15;
-  static const _rippleFrom = .55, _rippleFor = .40;
+  static const _recolorFrom = .10, _recolorFor = .20;
+  static const _travelFrom = .30, _travelFor = .30;
+  static const _popFrom = .60, _popFor = .15;
+  static const _rippleFrom = .60, _rippleFor = .40;
   static const outcomeEnd = _rippleFrom + _rippleFor;
 
   /// One turn of the small spinner, in seconds.

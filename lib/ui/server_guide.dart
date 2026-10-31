@@ -49,6 +49,12 @@ List<(String, String)> serverTroubleshooting() => [
     ),
   ),
   (
+    tr('Commands hang and never answer'),
+    tr(
+      'With the box on, a command that waits for ever with no output means the box is stuck, not the agent. Stop the box in Settings > The agent\'s box and try again; if it hangs again, turn the box off there: commands then run on the server itself.',
+    ),
+  ),
+  (
     tr('Disk space warnings'),
     tr(
       'Under 5 GB free the agent takes no new work. Delete what you no longer need (old projects, build output, node_modules you can install again), or empty the box\'s home folder.',
@@ -160,7 +166,7 @@ class _ServerGuideScreenState extends State<ServerGuideScreen> {
                 (
                   tr('Run the agent\'s commands in the box'),
                   tr(
-                    'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built.',
+                    'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built, or its commands hang (see When something goes wrong).',
                   ),
                 ),
                 (tr('Stop the box'), tr('Frees its memory. Nothing is lost; the next command starts it again.')),

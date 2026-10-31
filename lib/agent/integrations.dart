@@ -222,6 +222,9 @@ class AppSettings {
   /// GitHub OAuth App Client ID for the device flow, entered in Settings.
   /// Null means GitHub login is not configured (no fallback).
   String? get githubClientId => json['githubClientId'] as String?;
+
+  /// Whether this build comes with a GitHub OAuth Client ID of its own (none does unless it was built with one).
+  bool get githubClientIdBuiltIn => json['githubClientIdBuiltIn'] == true;
   List<Map<String, dynamic>> get fallbackModels =>
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;

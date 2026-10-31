@@ -16,8 +16,8 @@ import { appendFileSync, existsSync } from "node:fs";
 const ROUTER = "https://griphubrouter.web.id/v1";
 const realFetch = globalThis.fetch;
 
-function chunk(delta, finish = null) {
-	return `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock-model", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+function chunk(delta, finish = null, extra = {}) {
+	return `data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", created: 0, model: "mock-model", choices: [{ index: 0, delta, finish_reason: finish }], ...extra })}\n\n`;
 }
 
 globalThis.fetch = async (input, init) => {
@@ -29,6 +29,14 @@ globalThis.fetch = async (input, init) => {
 	const enc = new TextEncoder();
 	const request = JSON.parse(typeof init?.body === "string" ? init.body : await new Response(init?.body ?? (input instanceof Request ? input.body : null)).text());
 	const last = request.messages?.at(-1);
+	// pi's summary of a long chat (compaction) asks with its own system prompt; MOCK_FAIL_SUMMARY makes the router
+	// refuse it, as a router out of credit or a model that is down would. Each one is counted in MOCK_LOG as "summary".
+// A summary says what it used (30k in, 1k out), so its cost can be told; chat replies say none, as before.
+	const summary = JSON.stringify(request.messages?.[0] ?? "").includes("context summarization assistant");
+	if (summary && process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, "summary\n");
+	if (summary && process.env.MOCK_FAIL_SUMMARY) {
+		return new Response('{"error":{"message":"Summary refused by the mock router"}}', { status: 400, headers: { "content-type": "application/json" } });
+	}
 	// MOCK_BODIES: what each request asked, one JSON line each (the last message), for tests that check the prompt.
 	if (process.env.MOCK_BODIES) appendFileSync(process.env.MOCK_BODIES, `${JSON.stringify(last?.content ?? "")}\n`);
 	if (process.env.MOCK_TOOL) {
@@ -55,7 +63,8 @@ globalThis.fetch = async (input, init) => {
 				}
 				await new Promise((r) => setTimeout(r, 25));
 			}
-			controller.enqueue(enc.encode(chunk({ content: " Selesai." }, "stop")));
+			const usage = summary ? { usage: { prompt_tokens: 30_000, completion_tokens: 1_000 } } : {};
+			controller.enqueue(enc.encode(chunk({ content: " Selesai." }, "stop", usage)));
 			controller.enqueue(enc.encode("data: [DONE]\n\n"));
 			controller.close();
 		},

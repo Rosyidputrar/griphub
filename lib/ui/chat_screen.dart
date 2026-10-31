@@ -31,6 +31,7 @@ import 'server_screen.dart';
 import 'settings_screen.dart';
 import 'folder_picker.dart';
 import 'subagent_card.dart';
+import 'summarized_turns_screen.dart';
 import 'theme.dart';
 import 'transfer_dialog.dart';
 import 'todo_views.dart';
@@ -756,7 +757,12 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
             NoticeEntry() => NoticeView(e),
             JobEntry() => JobNoticeView(e),
-            CompactionEntry() => CompactionView(e),
+            CompactionEntry() => CompactionView(
+              e,
+              onShowEarlier: () =>
+                  Navigator.of(context)
+                      .push(MaterialPageRoute<void>(builder: (_) => SummarizedTurnsScreen(agent: agent))),
+            ),
           };
           final gap = i == 0 ? 0.0 : (e is UserEntry ? 28.0 : 14.0);
           return Padding(

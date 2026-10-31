@@ -309,6 +309,8 @@ interface Runtime {
 	limitReason?: string;
 	lastError?: string;
 	deadlineMs: number | null;
+	/** Fires at the time limit: a subagent waiting for an approval would otherwise wait past it (see begin). */
+	deadlineTimer?: NodeJS.Timeout;
 	settling: boolean;
 	cachedCredits: number | null;
 }
@@ -511,6 +513,22 @@ export class SubagentManager {
 		return rec;
 	}
 
+	/**
+	 * Stops the subagents of chats that are being deleted ([gone]: their session files, resolved): nothing would hear
+	 * their report, and one still writing would change files with no chat left to say who did. Returns how many.
+	 */
+	stopForChats(gone: Set<string>, resolvePath: (p: string) => string): number {
+		let n = 0;
+		for (const [id, rt] of this.runtimes) {
+			const s = rt.record.status;
+			if (s === "done" || s === "failed" || s === "stopped") continue;
+			if (!gone.has(resolvePath(rt.record.parentSessionFile))) continue;
+			this.stop(id, true);
+			n++;
+		}
+		return n;
+	}
+
 	/** Queues a message for the subagent; it is sent as a new turn at the next settled boundary. */
 	queueMessage(id: string, text: string): SubagentRecord {
 		const rt = this.runtimes.get(id);
@@ -571,6 +589,15 @@ export class SubagentManager {
 		rec.startedAt = Date.now();
 		rec.currentActivity = "Starting…";
 		rt.deadlineMs = rt.limits.minutesLimit > 0 ? rec.startedAt + rt.limits.minutesLimit * 60_000 : null;
+		// The time limit is checked when the subagent reaches for a tool. One waiting for an approval nobody answers
+		// reaches for nothing: it held its slot (and kept queued ones out) past its limit, for good. At the limit the
+		// question is withdrawn; the next tool call then meets the limit and the subagent reports what it has.
+		if (rt.deadlineMs !== null) {
+			rt.deadlineTimer = setTimeout(() => {
+				if (rt.record.status === "waiting_approval") rt.guard.cancelAll();
+			}, rt.deadlineMs - Date.now() + 50);
+			rt.deadlineTimer.unref?.();
+		}
 		this.emitStatus(rt);
 		const probe: SubagentBudgetProbe = {
 			credits: () => rt.cachedCredits,
@@ -759,6 +786,7 @@ export class SubagentManager {
 	private finish(rt: Runtime, status: "done" | "failed" | "stopped", reason?: string, code?: SubagentStopCode): SubagentRecord {
 		const rec = rt.record;
 		if (rec.status === "done" || rec.status === "failed" || rec.status === "stopped") return rec;
+		clearTimeout(rt.deadlineTimer);
 		rec.status = status;
 		rec.finishedAt = Date.now();
 		rec.currentTool = undefined;

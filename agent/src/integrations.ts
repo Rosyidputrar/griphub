@@ -246,6 +246,10 @@ export class Integrations {
 			fallbackModels: fallbackModels ?? [],
 			dailyBudget: dailyBudget ?? 0,
 			compactAt: this.settings.compactAt ?? COMPACT_AT_DEFAULT,
+			// Public by design (an OAuth App's Client ID is no secret). It was left out, so the app never showed the one
+			// saved, and said "built-in" for a build that has none.
+			githubClientId: (this.settings.githubClientId ?? "").trim(),
+			githubClientIdBuiltIn: !!GITHUB_CLIENT_ID,
 			subagentCreditLimit: subagentCreditLimit ?? 50,
 			subagentMinutesLimit: subagentMinutesLimit ?? 30,
 			subagentApprovalMode: subagentApprovalMode ?? approvalMode ?? "ask_risky",
@@ -565,7 +569,9 @@ export class Integrations {
 	 * App with "Enable Device Flow" ticked (the ID is public; there is no secret).
 	 */
 	async githubDeviceStart() {
-		if (!this.githubClientId) throw new Error("GitHub login belum dikonfigurasi (missing OAuth Client ID). Isi Client ID di Settings atau pakai token.");
+		if (!this.githubClientId) {
+			throw new Error("Sign-in with a code needs a GitHub OAuth Client ID. Paste one under Advanced, or sign in with a token.");
+		}
 		const r = await this.githubOAuth("/login/device/code", { client_id: this.githubClientId, scope: "repo workflow read:org" });
 		if (r.error || !r.device_code) {
 			// "device_flow_disabled" means the OAuth App exists but the Device Flow box is not ticked.

@@ -272,6 +272,10 @@ class CompactionEntry extends ChatEntry {
   int? tokensBefore;
   int? tokensAfter;
 
+  /// What the summary cost: it is a model request too. Null when unknown (the host's estimate has no price for the
+  /// model, or the chat is from before the host said).
+  double? credits;
+
   /// How long it took, once it ended.
   Duration? took;
 

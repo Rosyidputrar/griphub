@@ -6,6 +6,7 @@ import 'package:griphub_agent/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:re_editor/re_editor.dart';
 
 import 'files_ui_suite.dart';
@@ -50,8 +51,20 @@ void editorUiSuite(FsVariant variant) {
   /// The dialog about a file changed underneath ("on disk" on the phone, "on the server" there).
   final conflict = find.textContaining(RegExp(r'^File changed on (disk|the server)$'));
 
+  /// Taps Save and waits for the save to end, however long the file system takes (over ssh on a slow machine, more
+  /// than [settle]'s fixed wait): saved (the button has nothing left to save), the dialog about a file changed
+  /// underneath, or an error said in a snackbar.
   Future<void> tapSave(WidgetTester tester) async {
     await tester.tap(find.byTooltip('Save'));
+    final end = DateTime.now().add(const Duration(seconds: 10));
+    bool ended() =>
+        tester.widget<IconButton>(find.widgetWithIcon(IconButton, LucideIcons.save).hitTestable()).onPressed == null ||
+        conflict.evaluate().isNotEmpty ||
+        find.byType(SnackBar).evaluate().isNotEmpty;
+    do {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
+      await tester.pump(const Duration(milliseconds: 50));
+    } while (!_safe(ended) && DateTime.now().isBefore(end));
     await settle(tester);
   }
 
@@ -185,4 +198,13 @@ void editorUiSuite(FsVariant variant) {
       expect(File(p('w.txt')).readAsStringSync(), 'one\r\ntwo\r\nthree\r\n');
     });
   });
+}
+
+/// [check], or false while what it looks for is not on screen (the Save icon is a spinner while it writes).
+bool _safe(bool Function() check) {
+  try {
+    return check();
+  } catch (_) {
+    return false;
+  }
 }

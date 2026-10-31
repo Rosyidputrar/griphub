@@ -148,6 +148,50 @@ test("a new chat rebuilt for a setting stays in its folder, not wherever the hos
 	assert.equal((await call("state")).data.cwd, ws, "still the workspace");
 });
 
+test("opening a chat that has no file yet keeps the folder the app says it was in", async (t) => {
+	const dir = home(t);
+	const elsewhere = mkdtempSync(join(tmpdir(), "gh-started-in-"));
+	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
+	const project = join(dir, "workspace", "shop");
+	mkdirSync(project, { recursive: true });
+	const child = spawn(process.execPath, [hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	let id = 0;
+	const call = async (type, args = {}) => {
+		const n = ++id;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	// The app asks for a chat by its file: one that never got a message has none on disk (pi writes it on the first).
+	const r = await call("open_session", { path: join(dir, "no-such-chat.jsonl"), cwd: project });
+	assert.equal(r.ok, true, r.error);
+	assert.equal((await call("state")).data.cwd, project, "not the folder the host was started in");
+});
+
+test("GitHub sign-in settings: the saved Client ID reaches the app, and a build without one says so", async (t) => {
+	const dir = home(t);
+	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	let id = 0;
+	const call = async (type, args = {}) => {
+		const n = ++id;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	const before = (await call("settings_get")).data;
+	assert.equal(before.githubClientIdBuiltIn, false, "no build ships one unless built with it");
+	assert.equal(before.githubClientId, "");
+	const refused = await call("github_device_start");
+	assert.equal(refused.ok, false);
+	assert.match(refused.error, /needs a GitHub OAuth Client ID/);
+	const saved = await call("settings_set", { settings: { githubClientId: " Iv1.abc123 " } });
+	assert.equal(saved.data.githubClientId, "Iv1.abc123", "the app sees what it saved");
+});
+
 test("phone mode: files_find gives the composer's @ list from the chat's folder, best match first", async (t) => {
 	const dir = home(t);
 	const ws = join(dir, "workspace");
@@ -755,13 +799,16 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 // ---------------------------------------------------------------------------
 // The context limit: past it the chat is summarized, long before a large model's own limit
 
-/** A phone host on the mock router with a model of [contextWindow] tokens and the context limit set to [compactAt]. */
-async function phoneWithModel(t, contextWindow, compactAt) {
+/**
+ * A phone host on the mock router with a model of [contextWindow] tokens and the context limit set to [compactAt].
+ * [extra]: more environment for the host; [model]: the model's id (one with a known price, for a test of costs).
+ */
+async function phoneWithModel(t, contextWindow, compactAt, extra = {}, model = "mock-model") {
 	const dir = home(t);
 	writeFileSync(join(dir, "release"), "");
 	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
 		cwd: join(dir, "workspace"),
-		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Oke." }),
+		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Oke.", ...extra }),
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	t.after(() => child.kill("SIGKILL"));
@@ -773,8 +820,8 @@ async function phoneWithModel(t, contextWindow, compactAt) {
 		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
 		return until((r) => r.type === "response" && r.id === n);
 	};
-	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: "mock-model", name: "Mock", contextWindow }] } })).ok, true);
-	assert.equal((await call("set_model", { provider: "griphub", model: "mock-model" })).ok, true);
+	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk", models: [{ id: model, name: "Mock", contextWindow }] } })).ok, true);
+	assert.equal((await call("set_model", { provider: "griphub", model })).ok, true);
 	const before = (await call("settings_get")).data;
 	assert.equal(before.compactAt, 300_000, "the default the app shows");
 	const set = await call("settings_set", { settings: { compactAt } });
@@ -862,6 +909,42 @@ test("past the context limit the chat is summarized, well before the model's own
 	assert.ok(history.some((m) => m.role === "compactionSummary"), "the older turns are a summary now");
 	// A prompt sent right after goes through (it waits for a summary rather than being refused).
 	await h.say(9);
+});
+
+test("a summary says what it cost, and the turns it replaced can still be read", async (t) => {
+	const h = await phoneWithModel(t, 200_000, 25_000, {}, "claude-haiku-4.5");
+	assert.deepEqual((await h.call("summarized_messages")).data, [], "nothing summarized yet");
+	for (let i = 0; i < 4; i++) await h.say(i);
+	const end = await h.until((r) => r.type === "event" && r.event.type === "compaction_end", 30_000, "for the summary");
+	const cost = end.event.result.griphubCost;
+	assert.ok(cost?.credits > 0, `a summary is a paid request: ${JSON.stringify(cost)}`);
+
+	const history = (await h.call("messages")).data;
+	const line = history.find((m) => m.role === "compactionSummary");
+	assert.equal(line.griphubCost?.credits, cost.credits, "the chat opened again says the same");
+
+	const gone = (await h.call("summarized_messages")).data;
+	assert.ok(gone.length > 0);
+	assert.ok(gone.every((m) => m.role !== "compactionSummary"), "the turns themselves, not a summary of them");
+	const asked = (list) => list.filter((m) => m.role === "user").map((m) => m.content[0].text.split(":")[0]);
+	assert.equal(asked(gone)[0], "Langkah 0", "from the start of the chat");
+	assert.deepEqual([...asked(gone), ...asked(history)], ["Langkah 0", "Langkah 1", "Langkah 2", "Langkah 3"], "each turn once: replaced or kept");
+	assert.ok(gone.some((m) => m.role === "assistant" && m.griphubCost), "replies with their cost, like messages");
+});
+
+test("a summary that fails is not bought again after every turn, and gives up after a few in a row", async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "gh-fail-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const log = join(dir, "requests.log");
+	const h = await phoneWithModel(t, 200_000, 25_000, { MOCK_FAIL_SUMMARY: "1", MOCK_LOG: log });
+	const summaries = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter((l) => l === "summary").length : 0);
+	// Ten turns of about 10k tokens each: past the limit from the third. Without a brake that is a paid summary after
+	// each of the last eight; with it, a try only when the chat grew by a quarter, and none after three failures.
+	for (let i = 0; i < 10; i++) await h.say(i);
+	await new Promise((r) => setTimeout(r, 300));
+	const tried = summaries();
+	assert.ok(tried >= 1, "it did try once the chat passed the limit");
+	assert.ok(tried <= 3, `tried ${tried} times over eight turns past the limit`);
 });
 
 test("a context limit of 0 leaves it to the model's own limit", async (t) => {

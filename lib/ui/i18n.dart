@@ -959,6 +959,15 @@ const _id = <String, String>{
   'Waiting': 'Antre',
   'Done': 'Selesai',
   'Loading…': 'Memuat…',
+  'Not set: sign-in with a code is off': 'Belum diisi: login dengan kode nonaktif',
+  'Only for your own GitHub OAuth App (Device Flow enabled): paste its Client ID here. It is public, not a secret. Leave empty to sign in with the built-in app.':
+      'Hanya untuk OAuth App GitHub milikmu sendiri (Device Flow aktif): tempel Client ID-nya di sini. Ini publik, bukan rahasia. Kosongkan untuk login dengan app bawaan.',
+  'Sign-in with a code needs the Client ID of a GitHub OAuth App with Device Flow enabled: paste it here (it is public, not a secret). Without one, sign in with a token instead.':
+      'Login dengan kode butuh Client ID dari OAuth App GitHub dengan Device Flow aktif: tempel di sini (ini publik, bukan rahasia). Tanpa itu, login dengan token.',
+  'Sign-in with a code needs a GitHub OAuth Client ID. Paste one under Advanced, or sign in with a token.':
+      'Login dengan kode butuh Client ID OAuth GitHub. Tempel di bagian Lanjutan, atau login dengan token.',
+  "Lost: the server's agent was restarted while this subagent was at work.":
+      'Hilang: agent server di-restart saat subagent ini sedang bekerja.',
   'The connection dropped while the message was being sent. Once it is back, check whether it arrived before sending it again.':
       'Koneksi putus saat pesan sedang dikirim. Setelah tersambung lagi, cek apakah pesannya sampai sebelum mengirim ulang.',
   'Recently edited': 'Terakhir diedit',
@@ -1695,8 +1704,21 @@ const _id = <String, String>{
       'Notifikasi tidak masuk',
   'On the server, as root, paste it into the terminal. It takes a few minutes and prints a setup code (griphub1:…). Run it again any time: it only repairs and updates.':
       'Di server, sebagai root, tempel ke terminal. Prosesnya beberapa menit lalu mencetak setup code (griphub1:…). Boleh dijalankan lagi kapan saja: hanya memperbaiki dan memperbarui.',
-  'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built.':
-      'Nyala: setiap perintah agent berjalan di dalam box. Mati: perintah langsung berjalan di server sebagai akun griphub, tanpa dinding box. Biarkan menyala kecuali box tidak bisa dibangun.',
+  'On: every command the agent runs happens inside the box. Off: commands run directly on the server as the griphub account, without the box\'s walls. Leave it on unless the box cannot be built, or its commands hang (see When something goes wrong).':
+      'Nyala: setiap perintah agent berjalan di dalam box. Mati: perintah langsung berjalan di server sebagai akun griphub, tanpa dinding box. Biarkan menyala kecuali box tidak bisa dibangun, atau perintahnya macet (lihat Bila ada masalah).',
+  'Background jobs': 'Pekerjaan latar',
+  'this chat': 'chat ini',
+  'Summarized turns': 'Giliran yang diringkas',
+  'Turns copied': 'Giliran disalin',
+  'Read the earlier turns': 'Baca giliran sebelumnya',
+  'Nothing to show: this chat has not been summarized, or its older turns are no longer in its file.':
+      'Tidak ada yang ditampilkan: chat ini belum pernah diringkas, atau giliran lamanya sudah tidak ada di file-nya.',
+  'These turns were replaced by a summary to keep the chat affordable: the model no longer gets them. They are shown as they were, to read.':
+      'Giliran ini diganti ringkasan agar chat tetap hemat: model tidak lagi menerimanya. Ditampilkan apa adanya, untuk dibaca.',
+  'Commands hang and never answer':
+      'Perintah macet dan tidak pernah selesai',
+  'With the box on, a command that waits for ever with no output means the box is stuck, not the agent. Stop the box in Settings > The agent\'s box and try again; if it hangs again, turn the box off there: commands then run on the server itself.':
+      'Dengan box menyala, perintah yang menunggu terus tanpa keluaran berarti box-nya macet, bukan agent-nya. Hentikan box di Pengaturan > Box agent lalu coba lagi; kalau macet lagi, matikan box di sana: perintah lalu berjalan langsung di server.',
   'Paste the setup code in the app, then tap "Install / update agent".':
       'Tempel setup code di aplikasi, lalu ketuk "Pasang / perbarui agent".',
   'Read the server guide':

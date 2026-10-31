@@ -4,11 +4,13 @@ import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/features.dart';
+import '../agent/jobs.dart';
 import 'chat_screen.dart';
 import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
+import 'message_views.dart' show JobClock;
 import 'theme.dart';
 
 String _basename(String path) {
@@ -53,7 +55,12 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
   void initState() {
     super.initState();
     f.refreshRuns().catchError((Object e) => _error(e));
+    _refreshJobs();
   }
+
+  /// Re-reads every chat's background jobs. Quietly: the jobs the app already knows stay on screen if it fails, and
+  /// the runs (this screen's own) say when the host cannot be reached.
+  Future<void> _refreshJobs() => agent.refreshJobs().catchError((Object _) {});
 
   @override
   void dispose() {
@@ -125,6 +132,15 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
     }
   }
 
+  Future<void> _openJob(JobState job) async {
+    try {
+      if (job.sessionFile != agent.sessionFile && (!await agent.openSession(job.sessionFile) || !mounted)) return;
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
+    } catch (e) {
+      _error(e);
+    }
+  }
+
   Future<void> _editSchedule([ScheduleInfo? existing]) async {
     // The sheet saves itself and only closes on success: the old flow
     // popped with the edits first and saved afterwards, so a failed save
@@ -187,14 +203,20 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
-      listenable: f,
+      listenable: Listenable.merge([f, agent]),
       builder: (context, _) {
         final runs = f.runs.where((r) => !_hidden.contains(r.id)).toList();
         final finished = runs.where((r) => !r.active).length;
+        // Every chat's background jobs: one started in another chat goes on after the user moved on, and its card is
+        // only in that chat. Running first, then the newest.
+        final jobs = agent.jobStore.all.toList()
+          ..sort((a, b) => a.running != b.running ? (a.running ? -1 : 1) : b.startedAt.compareTo(a.startedAt));
         return Scaffold(
           appBar: AppBar(title: Text(tr('Tasks'))),
           body: RefreshIndicator(
-            onRefresh: () => _guard(f.refreshRuns),
+            onRefresh: () => _guard(() async {
+              await Future.wait([f.refreshRuns(), _refreshJobs()]);
+            }),
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
               children: [
@@ -293,6 +315,20 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
                               ),
                             ),
                     ),
+                if (jobs.isNotEmpty) ...[
+                  SectionLabel(tr('Background jobs')),
+                  for (final j in jobs)
+                    Padding(
+                      key: ValueKey('job-${j.id}'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _JobCard(
+                        job: j,
+                        here: j.sessionFile == agent.sessionFile,
+                        onStop: j.running ? () => _guard(() => agent.stopJob(j.id)) : null,
+                        onOpen: j.sessionFile.isEmpty ? null : () => _openJob(j),
+                      ),
+                    ),
+                ],
                 SectionLabel(
                   tr('Schedules'),
                   trailing: TextButton.icon(
@@ -350,6 +386,59 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
           ),
         );
       },
+    );
+  }
+}
+
+/// A background job of any chat: its clock (with Stop while it runs), its command and where it runs. A tap opens its
+/// chat.
+class _JobCard extends StatelessWidget {
+  const _JobCard({required this.job, required this.here, this.onStop, this.onOpen});
+  final JobState job;
+
+  /// Its chat is the one open.
+  final bool here;
+  final VoidCallback? onStop;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final text = Theme.of(context).textTheme;
+    return SurfaceCard(
+      padding: const EdgeInsets.fromLTRB(14, 8, 8, 12),
+      onTap: onOpen,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // As tall with Stop as without, so a running card and an ended one line up.
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 40),
+            child: Align(alignment: Alignment.centerLeft, child: JobClock(job: job, onStop: onStop)),
+          ),
+          if (job.command != job.label)
+            Text(
+              job.command,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: text.bodySmall?.copyWith(fontFamily: mono),
+            ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(LucideIcons.folder, size: 14, color: p.muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${job.cwd.isEmpty ? 'workspace' : _basename(job.cwd)} · ${here ? tr('this chat') : tr('another chat')}',
+                  overflow: TextOverflow.ellipsis,
+                  style: text.bodySmall?.copyWith(color: p.muted),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
