@@ -541,11 +541,16 @@ class _ChatScreenState extends State<ChatScreen> {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(agent: agent)));
   }
 
+  /// With a server set up the bar also holds the connection badge, and on a narrow phone (or with large text) the chat's
+  /// title was squeezed to a few letters or nothing: the three tools then go into one menu.
+  bool _compactBar(BuildContext context) =>
+      agent.remote.configured && MediaQuery.sizeOf(context).width / MediaQuery.textScalerOf(context).scale(1) < 430;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return ListenableBuilder(
-      listenable: agent,
+      listenable: Listenable.merge([agent, agent.remote]),
       builder: (context, _) => Scaffold(
         appBar: AppBar(
           leading: Navigator.of(context).canPop()
@@ -559,6 +564,29 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: [
             // Phone or server, and whether the server can be reached; only once a server is set up.
             ConnectionChip(agent: agent),
+            if (_compactBar(context))
+              ValueListenableBuilder<bool>(
+                valueListenable: deployPreparing,
+                builder: (context, preparing, _) => PopupMenuButton<String>(
+                  tooltip: tr('More'),
+                  icon: const Icon(LucideIcons.ellipsisVertical, size: 20),
+                  onSelected: (v) => switch (v) {
+                    'terminal' => Navigator.of(context).push(MaterialPageRoute(builder: (_) => TerminalScreen(agent: agent))),
+                    'deploy' => showDeploySheet(context, agent),
+                    _ => showProjectTools(context, agent, onPrompt: _prefill),
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(value: 'terminal', child: _MenuLine(LucideIcons.squareTerminal, tr('Terminal'))),
+                    PopupMenuItem(
+                      value: 'deploy',
+                      enabled: !agent.busy && !preparing,
+                      child: _MenuLine(LucideIcons.rocket, tr('Deploy')),
+                    ),
+                    PopupMenuItem(value: 'tools', child: _MenuLine(LucideIcons.layoutGrid, tr('Project tools'))),
+                  ],
+                ),
+              )
+            else ...[
             IconButton(
               tooltip: tr('Terminal'),
               icon: const Icon(LucideIcons.squareTerminal, size: 20),
@@ -578,6 +606,7 @@ class _ChatScreenState extends State<ChatScreen> {
               icon: const Icon(LucideIcons.layoutGrid, size: 20),
               onPressed: () => showProjectTools(context, agent, onPrompt: _prefill),
             ),
+            ],
             const SizedBox(width: 4),
           ],
         ),
@@ -1420,4 +1449,20 @@ class _RoundButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// An icon and a label, for a menu item.
+class _MenuLine extends StatelessWidget {
+  const _MenuLine(this.icon, this.label);
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 18),
+      const SizedBox(width: 12),
+      Flexible(child: Text(label)),
+    ],
+  );
 }

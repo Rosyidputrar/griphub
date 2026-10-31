@@ -130,6 +130,7 @@ const _id = <String, String>{
   'Connect GripHub': 'Hubungkan GripHub',
   'Add API key': 'Tambah API key',
   'Not connected': 'Belum terhubung',
+  'More': 'Lainnya',
   'Invalid name': 'Nama tidak valid',
   '{name} already exists': '{name} sudah ada',
   'name': 'nama',

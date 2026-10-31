@@ -64,11 +64,31 @@ class ConnectionChip extends StatelessWidget {
             child: InkWell(
               borderRadius: BorderRadius.circular(99),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
-              child: Pill(
-                label,
-                color: server ? _stateColor(p, c) : p.muted,
-                icon: server ? LucideIcons.server : LucideIcons.smartphone,
-              ),
+              // With very large text on a narrow phone the word would take the title's room: the icon alone, its colour
+              // still saying the state (the words are in the tooltip, and read out).
+              child: MediaQuery.sizeOf(context).width / MediaQuery.textScalerOf(context).scale(1) < 220
+                  ? Semantics(
+                      label: full,
+                      child: ExcludeSemantics(
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: (server ? _stateColor(p, c) : p.muted).withValues(alpha: 0.12),
+                          ),
+                          child: Icon(
+                            server ? LucideIcons.server : LucideIcons.smartphone,
+                            size: 14,
+                            color: server ? _stateColor(p, c) : p.muted,
+                          ),
+                        ),
+                      ),
+                    )
+                  : Pill(
+                      label,
+                      color: server ? _stateColor(p, c) : p.muted,
+                      icon: server ? LucideIcons.server : LucideIcons.smartphone,
+                    ),
             ),
           ),
         );
