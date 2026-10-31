@@ -50,7 +50,7 @@ class UserMessageView extends StatelessWidget {
     return Align(
       alignment: Alignment.centerRight,
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+        constraints: BoxConstraints(maxWidth: bubbleWidth(context)),
         child: Builder(
           builder: (bubbleContext) => GestureDetector(
             onLongPress: onLongPress == null || working != null ? null : () => onLongPress!(bubbleContext),
@@ -278,7 +278,7 @@ class _QueuedMessageViewState extends State<QueuedMessageView> with SingleTicker
         child: Align(
           alignment: Alignment.centerRight,
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
+            constraints: BoxConstraints(maxWidth: bubbleWidth(context)),
             child: Semantics(
               label: widget.error ?? widget.status ?? tr('Waiting for its turn'),
               child: Column(
@@ -1808,3 +1808,6 @@ class _AgentActivityState extends State<AgentActivity> with SingleTickerProvider
     );
   }
 }
+
+/// How wide a message bubble may be: most of a phone's width, and no wider than reads well on a tablet.
+double bubbleWidth(BuildContext context) => (MediaQuery.sizeOf(context).width * 0.82).clamp(0.0, 560.0);

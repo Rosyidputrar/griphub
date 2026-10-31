@@ -614,7 +614,10 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(width: 4),
           ],
         ),
-        body: Column(
+        // A readable column on a wide screen; the bar above stays full width.
+        body: ContentWidth(
+          max: 760,
+          child: Column(
           children: [
             ConnectionBanner(agent: agent),
             ServerUpdateBanner(agent: agent),
@@ -719,6 +722,7 @@ class _ChatScreenState extends State<ChatScreen> {
               onPickModel: () => showModelSheet(context, agent),
             ),
           ],
+        ),
         ),
       ),
     );

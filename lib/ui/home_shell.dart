@@ -338,7 +338,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       // and drifts in, the others fade out and stop ticking.
       body: Stack(
         children: [
-          for (var i = 0; i < tabs.length; i++) _TabLayer(active: i == tab, forward: i >= tab, child: tabs[i]),
+          for (var i = 0; i < tabs.length; i++)
+            _TabLayer(active: i == tab, forward: i >= tab, child: ContentWidth(child: tabs[i])),
         ],
       ),
       bottomNavigationBar: _NavBar(index: tab, onTap: (i) => setState(() => tab = i), onCreate: _newChat),
@@ -413,6 +414,11 @@ class _NavBar extends StatelessWidget {
     (LucideIcons.folders, 'Projects'),
   ];
 
+  static double _side(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    return w > 600 ? (w - 564) / 2 : 18;
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -427,8 +433,9 @@ class _NavBar extends StatelessWidget {
           alignment: Alignment.bottomCenter,
           children: [
             Positioned(
-              left: 18,
-              right: 18,
+              // A bar the width of a tablet is a long reach between its tabs: it stays phone-sized, centred.
+              left: _side(context),
+              right: _side(context),
               bottom: 12,
               child: Container(
                 height: 68,
@@ -1663,8 +1670,9 @@ class _ProjectsTabState extends State<_ProjectsTab> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 130),
                     sliver: SliverGrid.builder(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
+                      // Two tiles across on a phone, more on a wider screen, instead of two huge ones.
+                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 230,
                         mainAxisSpacing: 18,
                         crossAxisSpacing: 14,
                         childAspectRatio: 0.82,

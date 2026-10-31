@@ -792,3 +792,18 @@ Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilde
 /// A filled button that deletes or stops something: the danger colour, with text that reads on it in either theme.
 ButtonStyle dangerButtonStyle(BuildContext context) =>
     FilledButton.styleFrom(backgroundColor: context.palette.danger, foregroundColor: context.palette.onDanger);
+
+/// Keeps content to a readable width on a tablet, a foldable or a phone on its side (lists and the chat used the whole
+/// width: an 880 dp line of text, 430 dp project tiles). Below [max] it changes nothing.
+class ContentWidth extends StatelessWidget {
+  const ContentWidth({super.key, required this.child, this.max = 720});
+  final Widget child;
+  final double max;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => box.maxWidth.isFinite && box.maxWidth > max
+        ? Padding(padding: EdgeInsets.symmetric(horizontal: (box.maxWidth - max) / 2), child: child)
+        : child,
+  );
+}

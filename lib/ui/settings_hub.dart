@@ -194,7 +194,8 @@ class _SettingsHubState extends State<SettingsHub> {
         };
         return Scaffold(
           appBar: AppBar(title: Text(tr('Settings'))),
-          body: ListView(
+          body: ContentWidth(
+            child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
             children: [
               SurfaceCard(
@@ -562,6 +563,7 @@ class _SettingsHubState extends State<SettingsHub> {
                 ],
               ),
             ],
+          ),
           ),
         );
       },

@@ -37,6 +37,7 @@ void main() {
   group('UI-16: the chat list', chatsListTests);
   group('UI-17: announcements', announcementTests);
   group('UI-18: switch rows', switchRowTests);
+  group('UI-19: wide screens', wideScreenTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -427,5 +428,41 @@ void switchRowTests() {
     expect(switches.evaluate(), isNotEmpty, reason: 'the switch is its own control: ${labels(tester)}');
     expect(find.semantics.byPredicate((n) => n.tooltip == 'More').evaluate(), isNotEmpty, reason: 'and so is the menu');
     handle.dispose();
+  });
+}
+
+void wideScreenTests() {
+  testWidgets('UI-19: on a wide screen the Home content and the nav bar keep a readable width', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(width: 880), HomeShell(agent: newAgent()), height: 1000);
+    await frames(tester);
+    final content = tester.getSize(find.byType(ContentWidth).first);
+    expect(content.width, 880);
+    // The tab inside it: no wider than 720.
+    final tab = tester.getRect(find.descendant(of: find.byType(ContentWidth).first, matching: find.byType(SafeArea)).first);
+    expect(tab.width, lessThanOrEqualTo(720));
+    expect(tab.center.dx, closeTo(440, 1), reason: 'centred');
+  });
+
+  testWidgets('UI-19: a message bubble stops at a readable width', (tester) async {
+    FakeHost();
+    late double wide;
+    late double phone;
+    await pumpLook(tester, const Look(width: 880), Builder(builder: (c) {
+      wide = bubbleWidth(c);
+      return const SizedBox();
+    }));
+    await pumpLook(tester, const Look(width: 390), Builder(builder: (c) {
+      phone = bubbleWidth(c);
+      return const SizedBox();
+    }));
+    expect(wide, 560);
+    expect(phone, closeTo(390 * 0.82, 0.01), reason: 'a phone is as before');
+  });
+
+  testWidgets('UI-19: below its width ContentWidth changes nothing', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(width: 390), const ContentWidth(child: SizedBox.expand(key: ValueKey('c'))));
+    expect(tester.getSize(find.byKey(const ValueKey('c'))).width, 390);
   });
 }
