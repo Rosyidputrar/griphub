@@ -206,9 +206,13 @@ Future<void> pumpLook(WidgetTester tester, Look look, Widget child, {double heig
   collectLayoutErrors(tester, look.name);
 }
 
-/// Layout errors (overflows) are findings, not test failures: record them so
-/// the golden still renders with Flutter's yellow/black overflow stripes.
+/// Layout errors (overflows) seen while pumping. An overflow fails the test: it used to only be recorded here, and
+/// several broke on real phones while every test passed (the UI audit found three that way). A test that means to show
+/// one sets [allowOverflow] and reads [layoutErrors] itself.
 final layoutErrors = <String>[];
+
+/// Set (and reset) by a test that expects an overflow; otherwise one fails the test where it is seen.
+bool allowOverflow = false;
 
 void collectLayoutErrors(WidgetTester tester, String where) {
   final e = tester.takeException();
@@ -217,6 +221,7 @@ void collectLayoutErrors(WidgetTester tester, String where) {
     layoutErrors.add(line);
     // ignore: avoid_print
     print('LAYOUT $line');
+    if (!allowOverflow) fail('Layout error while pumping $line');
   }
 }
 

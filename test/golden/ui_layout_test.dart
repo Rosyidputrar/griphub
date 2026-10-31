@@ -34,6 +34,7 @@ void main() {
   group('UI-03: first run', firstRunTests);
   group('UI-06: accent colour', accentTests);
   group('UI-07: copy button', copyButtonTests);
+  group('the golden harness', harnessTests);
 
   group('UI-01: the suggestions on an empty chat', () {
     const looks = [
@@ -214,5 +215,27 @@ void copyButtonTests() {
     await pumpLook(tester, const Look(), const Scaffold(body: Center(child: CopyButton(text: 'x'))));
     expect(find.text('Copy'), findsOneWidget);
     expect(find.byTooltip('Copy'), findsNothing);
+  });
+}
+
+void harnessTests() {
+  Widget overflowing() => const Directionality(
+    textDirection: TextDirection.ltr,
+    child: Center(child: SizedBox(width: 40, child: Row(children: [SizedBox(width: 100, height: 10)]))),
+  );
+
+  testWidgets('the harness fails a test on an overflow', (tester) async {
+    await tester.pumpWidget(overflowing());
+    expect(() => collectLayoutErrors(tester, 'probe'), throwsA(isA<TestFailure>()));
+    layoutErrors.clear();
+  });
+
+  testWidgets('a test that means to show an overflow can say so', (tester) async {
+    allowOverflow = true;
+    addTearDown(() => allowOverflow = false);
+    await tester.pumpWidget(overflowing());
+    collectLayoutErrors(tester, 'probe');
+    expect(layoutErrors.single, contains('overflowed'));
+    layoutErrors.clear();
   });
 }
