@@ -92,6 +92,6 @@ test("an address of this machine is refused before anything is sent (a real serv
 		}
 		assert.equal(hits, 0, "the server was never reached");
 	} finally {
-		server.close();
+		await new Promise((done) => server.close(done));
 	}
 });

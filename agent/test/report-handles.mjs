@@ -9,6 +9,6 @@ process.on("exit", () => {
 	if (open.length && process.exitCode === undefined) {
 		const counts = {};
 		for (const r of open) counts[r] = (counts[r] ?? 0) + 1;
-		console.error(`[handles] ${basename(process.argv[1] ?? "test")} ended with ${JSON.stringify(counts)} still open (a child process that ended an instant ago still counts; a timer or socket that stays is a leak)`);
+		console.error(`[handles] ${basename(process.argv[1] ?? "test")} ended with ${JSON.stringify(counts)} still open (a child process that ended an instant ago, or a server that was just closed, still counts: Node lists them; a timer or socket that stays is a leak)`);
 	}
 });

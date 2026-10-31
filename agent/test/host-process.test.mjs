@@ -34,11 +34,38 @@ before(async () => {
 });
 after(() => rmSync(out, { recursive: true, force: true }));
 
+/** Every host this file starts, with the home it runs in, so a home is only removed once its hosts are gone. */
+const hosts = new Map();
+
+/** Starts a host (node with [args]) and remembers it under the home in [opts.env.HOME]. */
+function spawnHost(args, opts) {
+	const child = spawn(process.execPath, args, opts);
+	hosts.set(child, opts?.env?.HOME);
+	child.once("exit", () => hosts.delete(child));
+	return child;
+}
+
 /** A fresh phone-or-server home for one host. Short, because unix socket paths are limited to about 100 bytes. */
 function home(t) {
 	const dir = mkdtempSync(join(tmpdir(), "gh-"));
 	mkdirSync(join(dir, "workspace"));
-	t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+	// t.after hooks run in the order they were added, and this one is added before the host's own kill: removing the
+	// folder first raced a host still writing into it (installing the starter skills) and failed with ENOTEMPTY on a
+	// busy runner. The hosts living in this home are stopped, and waited for, first.
+	t.after(async () => {
+		const mine = [...hosts].filter(([, h]) => h === dir).map(([c]) => c);
+		await Promise.all(
+			mine.map((c) =>
+				c.exitCode !== null || c.signalCode !== null
+					? null
+					: new Promise((done) => {
+							c.once("exit", done);
+							c.kill("SIGKILL");
+						}),
+			),
+		);
+		rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+	});
 	return dir;
 }
 
@@ -101,7 +128,7 @@ async function waitFor(check, ms = 60_000) {
 
 test("phone mode: ready, then commands; no hello_server and no seq; closing stdin ends it", async (t) => {
 	const dir = home(t);
-	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	let stderr = "";
 	child.stderr.on("data", (d) => (stderr += d));
@@ -137,7 +164,7 @@ test("a new chat rebuilt for a setting stays in its folder, not wherever the hos
 	// Started somewhere else than the workspace, as a server daemon is (systemd: / or home).
 	const elsewhere = mkdtempSync(join(tmpdir(), "gh-started-in-"));
 	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
-	const child = spawn(process.execPath, [hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -161,7 +188,7 @@ test("opening a chat that has no file yet keeps the folder the app says it was i
 	t.after(() => rmSync(elsewhere, { recursive: true, force: true }));
 	const project = join(dir, "workspace", "shop");
 	mkdirSync(project, { recursive: true });
-	const child = spawn(process.execPath, [hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: elsewhere, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -179,7 +206,7 @@ test("opening a chat that has no file yet keeps the folder the app says it was i
 
 test("GitHub sign-in settings: the saved Client ID reaches the app, and a build without one says so", async (t) => {
 	const dir = home(t);
-	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -205,7 +232,7 @@ test("phone mode: files_find gives the composer's @ list from the chat's folder,
 	mkdirSync(join(ws, "src", "ui"), { recursive: true });
 	mkdirSync(join(ws, "node_modules", "app"), { recursive: true });
 	for (const f of ["src/ui/app_bar.dart", "src/app.dart", "README.md", "node_modules/app/index.js"]) writeFileSync(join(ws, f), "");
-	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -221,7 +248,7 @@ test("phone mode: files_find gives the composer's @ list from the chat's folder,
 function daemon(t, dir, extra = {}, nodeArgs = []) {
 	const sock = join(dir, ".griphub", "host.sock");
 	// systemd gives a daemon /dev/null for stdin; its end must not stop the host.
-	const child = spawn(process.execPath, [...nodeArgs, hostFile, "--listen", sock], {
+	const child = spawnHost([...nodeArgs, hostFile, "--listen", sock], {
 		cwd: join(dir, "workspace"),
 		env: env(dir, extra),
 		stdio: ["ignore", "pipe", "pipe"],
@@ -625,7 +652,7 @@ test("server mode: with nobody looking, a finished subagent is pushed to ntfy; w
 test("phone mode: the notes are exactly as before, sync is offered, and files work the same way", async (t) => {
 	const dir = home(t);
 	const ws = join(dir, "workspace");
-	const child = spawn(process.execPath, [hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: ws, env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready");
@@ -764,7 +791,7 @@ test("server mode: automatic backups are off until the phone gives its key, then
 test("phone mode: automatic backups into its own folder, no secrets in them, and the recovery code only here", async (t) => {
 	const dir = home(t);
 	const backupsDir = join(dir, "download", "GripHub", "auto");
-	const child = spawn(process.execPath, [hostFile], {
+	const child = spawnHost([hostFile], {
 		cwd: join(dir, "workspace"),
 		env: env(dir, { GRIPHUB_PHONE_BACKUP_DIR: backupsDir }),
 		stdio: ["pipe", "pipe", "pipe"],
@@ -803,7 +830,7 @@ test("phone mode: automatic backups into its own folder, no secrets in them, and
 
 	// The backup restores on a fresh "other phone" with the code alone: chats and files back, and no keys in it to leak.
 	const other = home(t);
-	const child2 = spawn(process.execPath, [hostFile], { cwd: join(other, "workspace"), env: env(other), stdio: ["pipe", "pipe", "pipe"] });
+	const child2 = spawnHost([hostFile], { cwd: join(other, "workspace"), env: env(other), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child2.kill("SIGKILL"));
 	const h2 = collect(child2.stdout);
 	await h2.until((r) => r.type === "ready", 60_000, "for ready");
@@ -844,7 +871,7 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 	const dir = home(t);
 	mkdirSync(join(dir, ".pi", "agent", "griphub"), { recursive: true });
 	writeFileSync(join(dir, ".pi", "agent", "griphub", "restore-123.zip"), "leftover");
-	const child = spawn(process.execPath, [hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
+	const child = spawnHost([hostFile], { cwd: join(dir, "workspace"), env: env(dir), stdio: ["pipe", "pipe", "pipe"] });
 	t.after(() => child.kill("SIGKILL"));
 	const { until } = collect(child.stdout);
 	await until((r) => r.type === "ready", 60_000, "for ready");
@@ -882,7 +909,7 @@ test("phone mode: a server's backup is restored on the phone's own agent with th
 async function phoneWithModel(t, contextWindow, compactAt, extra = {}, model = "mock-model") {
 	const dir = home(t);
 	writeFileSync(join(dir, "release"), "");
-	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
+	const child = spawnHost(["--import", mockRouter, hostFile], {
 		cwd: join(dir, "workspace"),
 		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Oke.", ...extra }),
 		stdio: ["pipe", "pipe", "pipe"],
@@ -930,7 +957,7 @@ test("review before a commit: lines per file against the last commit, and a mess
 	writeFileSync(join(ws, "notes.md"), "one\ntwo\nthree");
 	writeFileSync(join(dir, "release"), "");
 	const bodies = join(dir, "bodies.jsonl");
-	const child = spawn(process.execPath, ["--import", mockRouter, hostFile], {
+	const child = spawnHost(["--import", mockRouter, hostFile], {
 		cwd: ws,
 		env: env(dir, { MOCK_RELEASE: join(dir, "release"), MOCK_TEXT: "Trim the email before signing in", MOCK_BODIES: bodies }),
 		stdio: ["pipe", "pipe", "pipe"],
