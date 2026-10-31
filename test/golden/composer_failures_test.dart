@@ -1,6 +1,5 @@
 // UX-02: Stop, Plan mode and the thinking level used to fail without a word when the host did not take them or the link
 // to a server was down (an unhandled async error, and a tap that looked like it did nothing).
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:griphub_agent/agent/agent_client.dart';
