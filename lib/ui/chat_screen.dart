@@ -990,33 +990,41 @@ class _EmptyState extends StatelessWidget {
                   child: PrimaryButton(label: tr('Connect a model'), icon: LucideIcons.sparkles, onPressed: onConnect),
                 )
               else
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.35,
-                  children: [
-                    for (final (icon, color, title, blurb, prompt) in suggestions)
-                      SurfaceCard(
-                        padding: const EdgeInsets.all(14),
-                        onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            IconTile(icon: icon, color: color, size: 32),
-                            // Text from the top, so titles line up across a row whatever the blurb length.
-                            const SizedBox(height: 14),
-                            Text(tr(title), style: text.titleSmall),
-                            const SizedBox(height: 2),
-                            Text(tr(blurb), maxLines: 2, overflow: TextOverflow.ellipsis, style: text.bodySmall),
-                            const Spacer(),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
+                // Two cards a row, each row as tall as its taller card. A grid with a fixed aspect ratio cut the blurb off
+                // (and drew overflow stripes) on a 360 dp phone at the default text size.
+                for (var i = 0; i < suggestions.length; i += 2) ...[
+                  if (i > 0) const SizedBox(height: 10),
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final (j, (icon, color, title, blurb, prompt)) in suggestions.skip(i).take(2).indexed) ...[
+                          if (j > 0) const SizedBox(width: 10),
+                          Expanded(
+                            child: SurfaceCard(
+                              padding: const EdgeInsets.all(14),
+                              onTap: prompt == null ? onClone : () => onPrompt(tr(prompt)),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconTile(icon: icon, color: color, size: 32),
+                                  // Text from the top, so titles line up across a row whatever the blurb length.
+                                  const SizedBox(height: 14),
+                                  Text(tr(title), style: text.titleSmall),
+                                  const SizedBox(height: 2),
+                                  Text(tr(blurb), maxLines: 3, overflow: TextOverflow.ellipsis, style: text.bodySmall),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                        // An odd one out keeps half the width.
+                        if (suggestions.length - i == 1) ...[const SizedBox(width: 10), const Expanded(child: SizedBox())],
+                      ],
+                    ),
+                  ),
+                ],
             ],
           ),
         ),
