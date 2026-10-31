@@ -52,6 +52,14 @@
 - Review & commit: tiap file punya kotak centang, dan commit hanya memuat file yang dicentang (dulu `git add -A` memasukkan semuanya, termasuk `.env` yang belum pernah dilihat). File yang tampak berisi rahasia (`.env`, kunci privat, kredensial) tidak tercentang dan diberi tanda. Tombol push menyebut tujuannya: "Commit & push ke origin/<cabang>".
 - Batas anggaran harian dan batas panggilan tool kini tampil sebagai kesalahan berbahasa Indonesia dengan angka berformat Indonesia, dengan tombol "Naikkan batas" yang membuka Pemakaian. Merencanakan lalu menjalankan, memulai subagent, dan membuat gambar kini juga menghormati anggaran harian (dulu hanya pesan dan coba lagi yang memeriksa).
 - Keamanan: web_fetch tidak lagi menjangkau mesin ini, jaringan pribadi, atau layanan metadata server cloud, termasuk lewat pengalihan (redirect). Membaca file yang menyimpan rahasia (kunci penyimpanan, token, kunci ssh, `/proc/<pid>/environ`) kini ditanyakan dulu, dan ditolak pada tugas tanpa pengawas. Ini daftar, bukan tembok: perintah shell yang cerdik masih bisa lolos.
+- Kartu saran di chat kosong tidak lagi terpotong di HP 360 dp atau dengan teks besar.
+- Menu bawah (menu chat dan proyek, menu file, Bagikan chat, lampiran) kini bisa digulir sampai baris terakhir, juga saat HP dimiringkan; dulu "Hapus" terpotong dan tidak terjangkau.
+- Layar pengenalan dan layar API key tidak lagi meluap di HP kecil, HP miring, atau teks besar. Tombol Lewati lebih mudah disentuh, dan titik halaman menyebut halaman ke berapa untuk pembaca layar.
+- Teks yang masih berbahasa Inggris di mode Indonesia (pesan layar File, "Committed", daftar chat kosong, jumlah server, "preparing…", jumlah langkah CI dan baris database) kini diterjemahkan.
+- Saat server sudah diatur, judul chat tidak lagi terjepit di HP sempit atau teks besar: Terminal, Deploy, dan Alat proyek pindah ke menu Lainnya, dan lencana koneksi menjadi ikon saja bila sangat sempit.
+- Pilihan warna aksen bisa dipakai dengan pembaca layar (menyebut nama warna dan mana yang terpilih) dan punya area sentuh 48 dp; judulnya tidak lagi patah per suku kata.
+- Tombol salin di bawah jawaban kini punya label, tooltip, area sentuh 48 dp, dan mengumumkan "Disalin".
+- Tombol berbahaya (hapus, hentikan) terbaca di mode gelap, dan warna aksen hijau, oranye, merah muda, dan toska kini terbaca sebagai teks di mode terang.
 
 ## English
 
@@ -105,3 +113,11 @@
 - Review & commit: every file has a checkbox, and the commit contains only the ticked files (it used to run `git add -A` and take everything, including a `.env` never looked at). A file that looks like a secret (`.env`, private keys, credentials) starts unticked and is flagged. The push button names its target: "Commit and push to origin/<branch>".
 - The daily budget and tool-call limits now show as errors in your language with your number format, with a "Raise limit" button that opens Usage. Carrying out a plan, starting a subagent and generating a picture now respect the daily budget too (before, only sending a message and retrying checked it).
 - Security: web_fetch no longer reaches this machine, private networks or a cloud server's metadata service, including through redirects. Reading files that hold secrets (the store key, tokens, ssh keys, `/proc/<pid>/environ`) is now asked about first, and refused in an unattended run. These are lists, not a wall: a clever shell command can still get past them.
+- The suggestion cards on an empty chat are no longer cut off on a 360 dp phone or with large text.
+- Bottom menus (the chat and project menus, file menus, Share chat, attachments) now scroll to their last row, also with the phone on its side; "Delete" used to be cut off and out of reach.
+- The welcome screens and the API key screen no longer overflow on a small phone, a phone on its side or with large text. Skip is easier to hit, and the page dots tell a screen reader which page this is.
+- Text that was still English in the Indonesian UI (Files messages, "Committed", the empty chat list, server counts, "preparing…", CI step and database row counts) is now translated.
+- With a server set up, the chat's title is no longer squeezed on a narrow phone or with large text: Terminal, Deploy and Project tools move into a More menu, and the connection badge becomes an icon when space is very tight.
+- The accent colour choices work with a screen reader (each says its colour and which is chosen) and have 48 dp touch targets; their title no longer breaks into syllables.
+- The copy button under a reply now has a label, a tooltip, a 48 dp touch target, and announces "Copied".
+- Danger buttons (delete, stop) read in the dark theme, and the green, orange, pink and teal accents now read as text in the light theme.
