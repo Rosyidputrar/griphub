@@ -753,6 +753,68 @@ test("server mode: automatic backups are off until the phone gives its key, then
 	assert.deepEqual(offAgain.data.backups, []);
 });
 
+test("phone mode: automatic backups into its own folder, no secrets in them, and the recovery code only here", async (t) => {
+	const dir = home(t);
+	const backupsDir = join(dir, "download", "GripHub", "auto");
+	const child = spawn(process.execPath, [hostFile], {
+		cwd: join(dir, "workspace"),
+		env: env(dir, { GRIPHUB_PHONE_BACKUP_DIR: backupsDir }),
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	t.after(() => child.kill("SIGKILL"));
+	const { until } = collect(child.stdout);
+	await until((r) => r.type === "ready", 60_000, "for ready");
+	let id = 0;
+	const call = async (type, args = {}) => {
+		const n = ++id;
+		child.stdin.write(`${JSON.stringify({ id: n, type, ...args })}\n`);
+		return until((r) => r.type === "response" && r.id === n);
+	};
+	writeFileSync(join(dir, "workspace", "notes.md"), "catatan penting");
+	// A secret on the phone, as saved keys are (the secure store).
+	assert.equal((await call("custom_provider_save", { provider: { apiKey: "sk-phone-key", models: [{ id: "m", name: "M" }] } })).ok, true);
+
+	const off = await call("auto_backup_status");
+	assert.equal(off.data.enabled, false, "off until turned on");
+	const key = "ab".repeat(32);
+	const on = await call("auto_backup_configure", { key });
+	assert.equal(on.ok, true, on.error);
+	const now = await call("auto_backup_now");
+	assert.equal(now.ok, true, now.error);
+	const [latest] = now.data.backups;
+	assert.match(latest.name, /^auto-\d+\.ghb$/);
+	assert.ok(latest.path.startsWith(backupsDir), "written to the shared folder, where it survives the app");
+	const raw = readFileSync(latest.path);
+	assert.equal(raw.subarray(0, 4).toString(), "GHB1", "encrypted");
+	assert.equal(raw.includes(Buffer.from("sk-phone-key")), false, "no secret readable in it");
+
+	// The recovery code: this phone's own host tells it (to show once); a server must never (the phone holds its key).
+	const told = await call("auto_backup_key");
+	assert.equal(told.ok, true, told.error);
+	assert.equal(told.data.key, key);
+
+	// The backup restores on a fresh "other phone" with the code alone: chats and files back, and no keys in it to leak.
+	const other = home(t);
+	const child2 = spawn(process.execPath, [hostFile], { cwd: join(other, "workspace"), env: env(other), stdio: ["pipe", "pipe", "pipe"] });
+	t.after(() => child2.kill("SIGKILL"));
+	const h2 = collect(child2.stdout);
+	await h2.until((r) => r.type === "ready", 60_000, "for ready");
+	child2.stdin.write(`${JSON.stringify({ id: 1, type: "backup_restore_server", path: latest.path, key })}\n`);
+	const restored = await h2.until((r) => r.type === "response" && r.id === 1);
+	assert.equal(restored.ok, true, restored.error);
+	assert.equal(readFileSync(join(other, "workspace", "notes.md"), "utf8"), "catatan penting");
+	assert.equal(existsSync(join(other, ".pi", "agent", "griphub", "custom-providers.json")), false, "no API keys came along: they were never in it");
+});
+
+test("server mode: the backup key is never told", async (t) => {
+	const dir = home(t);
+	const { c } = await connected(t, dir);
+	await c.call("auto_backup_configure", { key: "cd".repeat(32) });
+	const refused = await c.call("auto_backup_key");
+	assert.equal(refused.ok, false);
+	assert.match(refused.error, /never tells/);
+});
+
 test("phone mode: a server's backup is restored on the phone's own agent with the key, and refused with another", async (t) => {
 	// The server makes it.
 	const srvDir = home(t);

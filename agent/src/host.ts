@@ -1179,19 +1179,32 @@ async function deleteProject(path: string, deleteChats: boolean) {
 // ---------------------------------------------------------------------------
 // Backups
 
-function backupTarget() {
-	const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+/**
+ * Where a phone writes a backup that must survive the app: the shared Download folder (synced or copied off the
+ * phone, it survives the phone too), or the workspace when Download cannot be written (no "all files" permission).
+ */
+function sharedBackupDir(): string {
 	const shared = "/storage/emulated/0/Download";
 	const dir = existsSync(shared) ? join(shared, "GripHub") : join(workspace, "backups");
 	try {
 		mkdirSync(dir, { recursive: true });
 		writeFileSync(join(dir, ".probe"), "");
 		unlinkSync(join(dir, ".probe"));
-		return join(dir, `griphub-backup-${stamp}.zip`);
+		return dir;
 	} catch {
 		mkdirSync(join(workspace, "backups"), { recursive: true });
-		return join(workspace, "backups", `griphub-backup-${stamp}.zip`);
+		return join(workspace, "backups");
 	}
+}
+
+/** The phone's automatic backups go next to the manual ones, in a folder of their own (pruning only ever deletes there). */
+function phoneBackupDir(): string {
+	return process.env.GRIPHUB_PHONE_BACKUP_DIR ?? join(sharedBackupDir(), "auto");
+}
+
+function backupTarget() {
+	const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+	return join(sharedBackupDir(), `griphub-backup-${stamp}.zip`);
 }
 
 function createBackup(includeWorkspace: boolean) {
@@ -1788,17 +1801,22 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 
 		// Backups.
-		// Automatic backups on a server (autobackup.ts): the app turns them on with its key, and fetches the newest.
+		// Automatic backups (autobackup.ts): the app turns them on with a key it makes, on a server or on the phone.
 		case "auto_backup_status":
 			return autoBackup?.status() ?? { enabled: false, available: false, backups: [] };
 		case "auto_backup_configure":
-			if (!autoBackup) throw new Error("Automatic backups are made by a server agent");
+			if (!autoBackup) throw new Error("The host is still starting; try again");
 			return autoBackup.configure(cmd.key ?? null);
 		case "auto_backup_now": {
-			if (!autoBackup) throw new Error("Automatic backups are made by a server agent");
+			if (!autoBackup) throw new Error("The host is still starting; try again");
 			const made = await autoBackup.tick(cmd.force !== false);
 			return { made, ...autoBackup.status() };
 		}
+		// The phone's own backups are restored with the same door the server's are: decrypt with the key, put in place.
+		// The key comes back as a recovery code only on the phone's own host (see recoveryKey), for the app to show once.
+		case "auto_backup_key":
+			if (server) throw new Error("A server never tells its backup key; the phone that made it has it");
+			return { key: autoBackup?.recoveryKey() ?? null };
 		// A server's backup, on this phone: decrypted with the phone's key, then put in place. The app restarts the host
 		// afterwards, so every part reads what was restored.
 		case "backup_restore_server": {
@@ -2091,20 +2109,23 @@ async function main() {
 		() => send({ type: "mcp", servers: mcp.summary() }),
 		server ? { shell: "/bin/sh", box: () => (box.available ? boxScript : "/bin/sh") } : undefined,
 	);
+	// Automatic backups on both sides, differently placed (autobackup.ts): a server keeps its own in ~/.griphub and
+	// the app fetches the newest to the phone; the phone writes its own straight into the shared Download folder, the
+	// one place that survives the app (and, synced or copied off the phone, the phone itself). Secrets stay out there,
+	// and the key is shown once as a recovery code: a backup must not need the phone it was made on.
+	autoBackup = new AutoBackup({
+		dir: server ? join(griphubDir, "backups") : phoneBackupDir(),
+		configFile: join(stateDir, "auto-backup.json"),
+		agentDir,
+		workspace,
+		home: process.env.HOME ?? agentDir,
+		intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
+		noSecrets: !server,
+		log: (m) => log(m),
+	});
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
 	// read its disk any other way; on the phone the same commands work too, inside the same folders.
 	// On a server the app also fetches the automatic backups from here (read-only).
-	autoBackup = server
-		? new AutoBackup({
-				dir: join(griphubDir, "backups"),
-				configFile: join(stateDir, "auto-backup.json"),
-				agentDir,
-				workspace,
-				home: process.env.HOME ?? agentDir,
-				intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
-				log: (m) => log(m),
-			})
-		: undefined;
 	fsService = new Fs([
 		{ path: workspace },
 		{ path: join(agentDir, "skills"), readOnly: true },

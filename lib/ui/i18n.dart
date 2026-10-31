@@ -1653,6 +1653,21 @@ const _id = <String, String>{
   'Unstaged changes': 'Perubahan yang belum di-stage',
   // Automatic server backup
   'Automatic server backup': 'Backup otomatis server',
+  'Automatic backup on this phone': 'Backup otomatis di HP ini',
+  'Every hour when something changed: chats, projects, skills and schedules, encrypted into Download/GripHub/auto (the newest three). API keys and accounts are never in it. To survive a lost phone, the folder must leave it — a sync app or a copy — and the recovery code must be written down somewhere safe.':
+      'Setiap jam bila ada yang berubah: chat, proyek, skill, dan jadwal, terenkripsi ke Download/GripHub/auto (tiga terbaru). Kunci API dan akun tidak pernah ikut. Agar selamat saat HP hilang, foldernya harus keluar dari HP — aplikasi sinkronisasi atau salinan — dan kode pemulihan dicatat di tempat aman.',
+  'Could not read the backup status': 'Status backup tidak terbaca',
+  'Turn automatic backups off?': 'Matikan backup otomatis?',
+  'The backups made so far are deleted, and the recovery code stops working.': 'Backup yang sudah dibuat dihapus, dan kode pemulihan berhenti berlaku.',
+  'Turn off': 'Matikan',
+  'Recovery code': 'Kode pemulihan',
+  'Restoring a backup on another phone needs this code. Write it down somewhere that is not this phone; without it the backups cannot be read.':
+      'Memulihkan backup di HP lain butuh kode ini. Catat di tempat selain HP ini; tanpa kode itu backup tidak bisa dibaca.',
+  'I wrote it down': 'Sudah kucatat',
+  'The code the backups were made with (64 characters).': 'Kode yang dipakai saat backup dibuat (64 karakter).',
+  'Restored {n} files.': '{n} file dipulihkan.',
+  'API keys are not in a phone backup; enter them again.': 'Kunci API tidak ada di backup HP; isi lagi.',
+  'Newest': 'Terbaru',
   'Back up now': 'Backup sekarang',
   'Every hour when something changed: chats, projects with their .git, skills, API keys and accounts. Dependencies such as node_modules are left out. Encrypted with a key only this phone and your server have; the newest one comes to this phone while the app is open.':
       'Setiap jam bila ada perubahan: chat, proyek beserta .git-nya, skill, API key dan akun. Dependensi seperti node_modules tidak ikut. Dienkripsi dengan kunci yang hanya dimiliki HP ini dan server kamu; backup terbaru dibawa ke HP ini selama aplikasi terbuka.',

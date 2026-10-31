@@ -106,6 +106,13 @@ export interface AutoBackupOptions {
 	intervalMs?: number;
 	log?: (line: string) => void;
 	now?: () => number;
+	/**
+	 * Leave the saved secrets (API keys, tokens, MCP servers) out of the backups. On the phone they stay out: its
+	 * backups go to the shared Download folder, which other apps read, and the key that encrypts them lives in the
+	 * same app the secrets do, so a backup with them in it protects nothing and risks them. A server's backups keep
+	 * them (the phone holds that key).
+	 */
+	noSecrets?: boolean;
 }
 
 export class AutoBackup {
@@ -143,12 +150,23 @@ export class AutoBackup {
 	status() {
 		return {
 			enabled: this.enabled,
+			dir: this.o.dir,
 			intervalMinutes: Math.round((this.o.intervalMs ?? BACKUP_INTERVAL_MS) / 60_000),
 			running: this.making !== null,
 			lastCheck: this.config.lastAt ?? null,
 			lastError: this.config.lastError ?? null,
 			backups: this.list().map(({ name, path, at, size }) => ({ name, path, at, size })),
 		};
+	}
+
+	/**
+	 * The key the backups are encrypted with, for the phone's own agent only: there the app and this host are one
+	 * process tree in one app sandbox, and the app shows it once as a recovery code to write down (the point of a
+	 * phone backup is surviving the phone, so the key must live outside it too). A server never tells its key: the
+	 * phone made it and is the only place it belongs.
+	 */
+	recoveryKey(): string | null {
+		return this.enabled ? (this.config.key ?? null) : null;
 	}
 
 	/** The backups on disk, newest first. */
@@ -227,6 +245,7 @@ export class AutoBackup {
 		walk(this.o.agentDir, agentSkip, (abs, st) => {
 			const rel = relative(this.o.agentDir, abs).split(sep).join("/");
 			const secure = isSecureFile(abs);
+			if (secure && this.o.noSecrets) return;
 			out.push({ abs, name: `${secure ? "secure" : "agent"}/${rel}`, size: st.size, mtimeMs: st.mtimeMs, secure });
 		});
 		walk(this.o.workspace, wsSkip, (abs, st) => {
