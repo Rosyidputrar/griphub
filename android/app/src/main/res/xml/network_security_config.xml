@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The preview opens pages and dev servers over plain http on this phone's own loopback (127.0.0.1, and localhost for a
+     dev server the agent started). Android refuses cleartext traffic by default, so without this every such preview
+     failed before it connected. Only the loopback is allowed: nothing that leaves the phone may go in the clear. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

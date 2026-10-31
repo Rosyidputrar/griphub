@@ -32,14 +32,41 @@ CONF=${GRIPHUB_BOX_CONF:-$GRIPHUB_DIR/box.conf}
 MEMORY=${BOX_MEMORY:-2g}
 SWAP=${BOX_SWAP:-3g}
 CPUS=${BOX_CPUS:-1.5}
+# How long podman may take before the box is called stuck. A container can show "Running" while every `podman exec`
+# hangs; every command the agent ran then hung with it, for as long as the tool's own time limit, saying nothing. Each
+# call into podman that comes before the command is bounded, and the exec path is probed before the command goes in.
+PROBE_SECS=${BOX_PROBE_SECS:-30}
+START_SECS=${BOX_START_SECS:-120}
+# How long an answer to the probe counts, so a burst of commands does not probe each time.
+ALIVE_SECS=${BOX_ALIVE_SECS:-30}
+ALIVE="$GRIPHUB_DIR/box.alive"
 
 if [ "${1:-}" = "--reset" ]; then
 	podman rm -f "$NAME" >/dev/null 2>&1 || true
+	rm -f "$ALIVE"
 	exit 0
 fi
 
+# timeout(1) says 124 when it stopped a command, or 137 when it had to kill it.
+timed_out() {
+	[ "$1" -eq 124 ] || [ "$1" -eq 137 ]
+}
+
+# The agent reads this (it is the output of its command) and passes it on. The command is refused, never run outside the
+# box: the box is what keeps the agent's commands off the rest of the server, and that is not given up unasked.
+stuck() {
+	echo "box: the agent's box did not answer ($1), so its container may be stuck. The command was not run." >&2
+	echo "     In the app: Settings > The agent's box > Reset the box. Or turn off \"Run the agent's commands in the box\"" >&2
+	echo "     to run commands on the server itself. On the server: box --reset" >&2
+	exit 70
+}
+
+# The container's status, or nothing when there is none. Returns 124 when podman did not answer.
 state() {
-	podman container inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || true
+	local rc=0
+	timeout -k 5 "$PROBE_SECS" podman container inspect --format '{{.State.Status}}' "$NAME" 2>/dev/null || rc=$?
+	if timed_out "$rc"; then return 124; fi
+	return 0
 }
 
 # Starts podman for a container that outlives this call. conmon, the process podman leaves behind to watch the container,
@@ -55,17 +82,30 @@ detached() {
 }
 
 create() {
-	if ! podman image exists "$IMAGE"; then
+	local rc=0
+	timeout -k 5 "$PROBE_SECS" podman image exists "$IMAGE" || rc=$?
+	if timed_out "$rc"; then stuck "podman did not answer in ${PROBE_SECS}s"; fi
+	if [ "$rc" -ne 0 ]; then
 		# The agent reads this (it is the output of its command) and passes it on, so it says what the user can do.
 		echo "box: the agent's box (the container its commands run in) has not been built on this server yet, so no" >&2
 		echo "     command can run. Build it in the app: Settings > The agent's box > Build the box. Or on the server:" >&2
 		echo "     podman build -t $IMAGE -f ~/.griphub/box/Containerfile ~/.griphub/box" >&2
 		exit 127
 	fi
-	detached podman run -d --name "$NAME" --hostname "$NAME" --init --network=host \
+	rc=0
+	detached timeout -k 5 "$START_SECS" podman run -d --name "$NAME" --hostname "$NAME" --init --network=host \
 		--memory "$MEMORY" --memory-swap "$SWAP" --cpus "$CPUS" \
 		-v "$BOXHOME:$HOME_DIR" -v "$WS:$WS" -e "HOME=$HOME_DIR" -w "$WS" \
-		"$IMAGE" sleep infinity >/dev/null 9>&-
+		"$IMAGE" sleep infinity >/dev/null 9>&- || rc=$?
+	if timed_out "$rc"; then stuck "making the container took more than ${START_SECS}s"; fi
+	[ "$rc" -eq 0 ] || exit "$rc"
+}
+
+start_box() {
+	local rc=0
+	detached timeout -k 5 "$START_SECS" podman start "$NAME" >/dev/null 9>&- || rc=$?
+	if timed_out "$rc"; then stuck "starting the container took more than ${START_SECS}s"; fi
+	[ "$rc" -eq 0 ] || exit "$rc"
 }
 
 # Two calls arriving together on first use must not both try to create the container.
@@ -74,12 +114,27 @@ ensure_running() {
 	( umask 077; mkdir -p "$BOXHOME" )
 	exec 9>"$GRIPHUB_DIR/box.lock"
 	flock -w 60 9 || { echo "box: another box operation is still running; try again in a minute" >&2; exit 75; }
-	case "$(state)" in
+	local status rc=0
+	status=$(state) || rc=$?
+	if timed_out "$rc"; then stuck "podman did not answer in ${PROBE_SECS}s"; fi
+	case "$status" in
 		running) ;;
-		"") create ;;
-		*) detached podman start "$NAME" >/dev/null 9>&- ;;
+		"") rm -f "$ALIVE"; create ;;
+		*) rm -f "$ALIVE"; start_box ;;
 	esac
 	exec 9>&-
+}
+
+# Proves that `podman exec` answers before the agent's command goes in: "Running" says nothing about that. It is not
+# repeated for ALIVE_SECS after it answered. Only a probe that timed out refuses the command; one that failed some other
+# way is left to the command itself, which then fails with podman's own message.
+probe() {
+	local at now rc=0
+	if at=$(stat -c %Y "$ALIVE" 2>/dev/null) && now=$(date +%s) && [ $((now - at)) -lt "$ALIVE_SECS" ]; then return 0; fi
+	timeout -k 5 "$PROBE_SECS" podman exec "$NAME" true >/dev/null 2>&1 || rc=$?
+	if timed_out "$rc"; then stuck "a command in it did not start in ${PROBE_SECS}s"; fi
+	if [ "$rc" -eq 0 ]; then ( umask 077; : > "$ALIVE" ); fi
+	return 0
 }
 
 # The app keeps the git and ssh settings in the server's real home; the container's home is a separate folder, so
@@ -102,6 +157,7 @@ sync_settings() {
 
 ensure_running
 sync_settings
+probe
 
 # Run where the caller is when that is inside the workspace; anywhere else the container has nothing to show.
 cwd=$WS

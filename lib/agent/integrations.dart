@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
+import 'clock.dart';
 import 'router_account.dart';
 
 class GithubAccount {
@@ -258,6 +259,11 @@ class AppSettings {
 
 /// Accounts, repositories, SSH and deploys, backed by the host's
 /// integrations module (agent/src/integrations.ts).
+/// A sign-in with a code (GitHub's device flow): what the user types at [verificationUri], and until when ([expiresAt],
+/// milliseconds since the epoch, by the clock of the app: the host says how long is left, not a time) the host waits
+/// for the approval.
+typedef GithubDeviceFlow = ({String deviceCode, String userCode, String verificationUri, int expiresAt, int interval});
+
 class Integrations extends ChangeNotifier {
   Integrations(this.client) {
     client.records.listen((r) {
@@ -363,26 +369,70 @@ class Integrations extends ChangeNotifier {
   // GitHub
   Future<void> githubLogin(String token) async => _apply(await client.call('github_login', {'token': token}));
 
-  /// Starts GitHub's device flow: returns the code the user types at [verificationUri].
-  Future<({String deviceCode, String userCode, String verificationUri, int expiresIn, int interval})>
-  githubDeviceStart() async {
+  /// Starts GitHub's device flow: returns the code the user types at [verificationUri]. The host then waits for the
+  /// approval itself ([githubDeviceStatus]); [githubDeviceWait] only watches it.
+  Future<GithubDeviceFlow> githubDeviceStart() async {
     final r = (await client.call<Map>('github_device_start')).cast<String, dynamic>();
+    final expiresIn = (r['expiresIn'] as num).toInt();
     return (
       deviceCode: r['deviceCode'] as String,
       userCode: r['userCode'] as String,
       verificationUri: r['verificationUri'] as String,
-      expiresIn: (r['expiresIn'] as num).toInt(),
+      expiresAt: clock().millisecondsSinceEpoch + expiresIn * 1000,
       interval: (r['interval'] as num).toInt(),
     );
   }
 
-  /// Polls until the user approves, denies or the code expires. Returns true once signed in.
-  Future<bool> githubDeviceWait(String deviceCode, int interval, {required bool Function() cancelled}) async {
-    var wait = interval;
+  /// The sign-in with a code the host is still waiting on, or null. The host waits for the approval, so it goes on when
+  /// the app is closed or its screen is left; coming back, the app picks it up again with this. A host from before this
+  /// has no such command, and then there is nothing to pick up. Asked when a screen opens and never awaited there, so
+  /// whatever goes wrong (a link that is down, an answer of a shape nobody expected) is "nothing", not an error.
+  Future<GithubDeviceFlow?> githubDeviceStatus() async {
+    try {
+      final r = await client.call<Object?>('github_device_status');
+      if (r is! Map || r['status'] != 'pending') return null;
+      return (
+        deviceCode: r['deviceCode'] as String,
+        userCode: r['userCode'] as String,
+        verificationUri: r['verificationUri'] as String,
+        expiresAt: clock().millisecondsSinceEpoch + (r['expiresIn'] as num).toInt() * 1000,
+        interval: (r['interval'] as num).toInt(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The user gave up: the host stops waiting for the approval. Best effort, and not awaited by the button: an older
+  /// host does not know the command, and a link that is down cannot take it.
+  Future<void> githubDeviceCancel() async {
+    try {
+      await client.call<Object?>('github_device_cancel');
+    } catch (_) {
+      // Nothing to stop, or a host that cannot.
+    }
+  }
+
+  /// Watches the sign-in until the host has it done, denied or expired. Returns true once signed in. The wait is the
+  /// host's, so a link that drops meanwhile (a server over a phone network) is waited out, up to the code's expiry,
+  /// not taken for a failure.
+  Future<bool> githubDeviceWait(
+    GithubDeviceFlow flow, {
+    required bool Function() cancelled,
+  }) async {
+    var wait = flow.interval;
     while (!cancelled()) {
       await Future<void>.delayed(Duration(seconds: wait));
       if (cancelled()) return false;
-      final r = (await client.call<Map>('github_device_poll', {'deviceCode': deviceCode})).cast<String, dynamic>();
+      final Map<String, dynamic> r;
+      try {
+        r = (await client.call<Map>('github_device_poll', {'deviceCode': flow.deviceCode})).cast<String, dynamic>();
+      } on AgentError catch (e) {
+        final link = e.code == 'offline' || e.code == 'not_sent' || e.code == 'connection_lost';
+        if (link && clock().millisecondsSinceEpoch < flow.expiresAt) continue;
+        if (link) throw 'The code expired. Try again.';
+        rethrow;
+      }
       switch (r['status']) {
         case 'done':
           _apply(r['state']);

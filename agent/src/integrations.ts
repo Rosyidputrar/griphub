@@ -211,6 +211,39 @@ const FAILED = new Set(["failure", "cancelled", "timed_out", "startup_failure", 
 export type KeyService = "brave" | "tavily" | "s1" | "tinyfish";
 const KEY_FIELD = { brave: "braveKey", tavily: "tavilyKey", s1: "s1Key", tinyfish: "tinyfishKey" } as const;
 
+/**
+ * A sign-in with a code that is under way (GitHub's device flow). The HOST waits for the approval, not the app: the app
+ * used to poll, so leaving the app, locking the screen or cancelling the wait before the user had approved on github.com
+ * ended the polling for good, the code expired after 15 minutes and no token was ever saved. On a server the host also
+ * outlives the app's connection, so an approval given later still completes the sign-in.
+ */
+interface DeviceFlow {
+	deviceCode: string;
+	userCode: string;
+	verificationUri: string;
+	expiresAt: number;
+	/** Seconds between polls: GitHub's, raised when it says to slow down. */
+	interval: number;
+	status: "pending" | "done" | "expired" | "denied" | "error";
+	error?: string;
+	/** The token GitHub gave once the user approved. The code is spent then, so a failed sign-in retries with this. */
+	grant?: Record<string, unknown> & { access_token: string };
+	loginFailures: number;
+	timer?: NodeJS.Timeout;
+}
+
+/** What one question to GitHub's token endpoint came to. */
+type DeviceExchange =
+	| { status: "grant"; grant: Record<string, unknown> & { access_token: string } }
+	| { status: "pending" }
+	| { status: "slow_down"; interval?: number }
+	| { status: "expired" }
+	| { status: "denied" }
+	| { status: "error"; error: string };
+
+/** Failed sign-ins with a token GitHub has already given, before the flow stops and says so. */
+const DEVICE_LOGIN_ATTEMPTS = 5;
+
 export class Integrations {
 	private store: Store = { sshHosts: [] };
 	private readonly file: string;
@@ -596,6 +629,7 @@ export class Integrations {
 	 * GitHub device flow: the user types a short code at github.com/login/device
 	 * instead of creating and pasting a token. Needs the Client ID of an OAuth
 	 * App with "Enable Device Flow" ticked (the ID is public; there is no secret).
+	 * Starting it also starts the host waiting for the approval (see [DeviceFlow]); one flow at a time.
 	 */
 	async githubDeviceStart() {
 		if (!this.githubClientId) {
@@ -606,25 +640,131 @@ export class Integrations {
 			// "device_flow_disabled" means the OAuth App exists but the Device Flow box is not ticked.
 			throw new Error((r.error_description as string) ?? (r.error as string) ?? "GitHub did not return a device code");
 		}
-		return {
+		const expiresIn = (r.expires_in as number) ?? 900;
+		const flow: DeviceFlow = {
 			deviceCode: r.device_code as string,
 			userCode: r.user_code as string,
 			verificationUri: (r.verification_uri as string) ?? "https://github.com/login/device",
-			expiresIn: (r.expires_in as number) ?? 900,
+			expiresAt: Date.now() + expiresIn * 1000,
 			interval: (r.interval as number) ?? 5,
+			status: "pending",
+			loginFailures: 0,
+		};
+		this.cancelDeviceFlow();
+		this.deviceFlow = flow;
+		this.waitForDeviceApproval(flow);
+		return {
+			deviceCode: flow.deviceCode,
+			userCode: flow.userCode,
+			verificationUri: flow.verificationUri,
+			expiresIn,
+			interval: flow.interval,
 		};
 	}
 
-	/** One poll of the device flow. The app calls this every `interval` seconds until it is not pending. */
+	private deviceFlow: DeviceFlow | null = null;
+
+	private waitForDeviceApproval(flow: DeviceFlow) {
+		flow.timer = setTimeout(() => void this.pollDeviceFlow(flow), flow.interval * 1000);
+		flow.timer.unref();
+	}
+
+	private cancelDeviceFlow() {
+		if (this.deviceFlow) clearTimeout(this.deviceFlow.timer);
+		this.deviceFlow = null;
+	}
+
+	/** One round of the host's wait: ask GitHub, and sign in once the user has approved. */
+	private async pollDeviceFlow(flow: DeviceFlow) {
+		if (this.deviceFlow !== flow || flow.status !== "pending") return;
+		if (Date.now() >= flow.expiresAt) {
+			flow.status = "expired";
+			return;
+		}
+		try {
+			if (!flow.grant) {
+				const r = await this.githubDeviceExchange(flow.deviceCode);
+				if (this.deviceFlow !== flow) return;
+				if (r.status === "grant") flow.grant = r.grant;
+				else if (r.status === "slow_down") flow.interval = r.interval ?? flow.interval + 5;
+				else if (r.status === "expired" || r.status === "denied") {
+					flow.status = r.status;
+					return;
+				} else if (r.status === "error") {
+					flow.status = "error";
+					flow.error = r.error;
+					return;
+				}
+			}
+			if (flow.grant) {
+				await this.githubLogin(flow.grant.access_token, { ...flow.grant, clientId: this.githubClientId });
+				if (this.deviceFlow !== flow) return;
+				flow.status = "done";
+				// Nobody may be waiting for the answer any more: tell the app, so it shows the account by itself.
+				this.onChange?.();
+				return;
+			}
+		} catch (e) {
+			// No network, or GitHub is down: keep asking until the code expires. Once GitHub has given the token, though,
+			// a sign-in that keeps failing is a real problem, said rather than retried for ever.
+			if (this.deviceFlow !== flow) return;
+			if (flow.grant && ++flow.loginFailures >= DEVICE_LOGIN_ATTEMPTS) {
+				flow.status = "error";
+				flow.error = (e as Error).message;
+				return;
+			}
+		}
+		this.waitForDeviceApproval(flow);
+	}
+
+	/** Where the sign-in with a code stands, for an app that came back to it (or was away while it went on). */
+	githubDeviceStatus() {
+		const f = this.deviceFlow;
+		if (!f) return { status: "none" as const };
+		if (f.status === "pending" && Date.now() >= f.expiresAt) f.status = "expired";
+		return {
+			status: f.status,
+			deviceCode: f.deviceCode,
+			userCode: f.userCode,
+			verificationUri: f.verificationUri,
+			// Seconds left, not a time: the app's clock and a server's may differ.
+			expiresIn: Math.max(0, Math.round((f.expiresAt - Date.now()) / 1000)),
+			interval: f.interval,
+			...(f.error ? { error: f.error } : {}),
+		};
+	}
+
+	/** The user gave up on the sign-in: the host stops asking. */
+	githubDeviceCancel() {
+		this.cancelDeviceFlow();
+		return { status: "none" as const };
+	}
+
+	/**
+	 * What the app that polls for itself (an older one) gets: the host's own wait answers it, so GitHub is asked once
+	 * per interval, not twice. A code the host has no flow for (it was restarted since) is asked about once, as before.
+	 */
 	async githubDevicePoll(deviceCode: string) {
+		const flow = this.deviceFlow;
+		if (flow?.deviceCode === deviceCode) {
+			if (flow.status === "done") return { status: "done", state: this.summary() };
+			if (flow.status === "error") throw new Error(flow.error ?? "GitHub login failed");
+			return { status: flow.status === "pending" ? "pending" : flow.status };
+		}
+		const r = await this.githubDeviceExchange(deviceCode);
+		if (r.status === "grant") return { status: "done", state: await this.githubLogin(r.grant.access_token, { ...r.grant, clientId: this.githubClientId }) };
+		if (r.status === "error") throw new Error(r.error);
+		return r;
+	}
+
+	/** One question to GitHub's token endpoint: has the user approved the code yet? */
+	private async githubDeviceExchange(deviceCode: string): Promise<DeviceExchange> {
 		const r = await this.githubOAuth("/login/oauth/access_token", {
 			client_id: this.githubClientId,
 			device_code: deviceCode,
 			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 		});
-		if (r.access_token) {
-			return { status: "done", state: await this.githubLogin(r.access_token as string, { ...r, clientId: this.githubClientId }) };
-		}
+		if (typeof r.access_token === "string" && r.access_token) return { status: "grant", grant: r as Record<string, unknown> & { access_token: string } };
 		switch (r.error) {
 			case "authorization_pending":
 				return { status: "pending" };
@@ -635,7 +775,7 @@ export class Integrations {
 			case "access_denied":
 				return { status: "denied" };
 			default:
-				throw new Error((r.error_description as string) ?? (r.error as string) ?? "GitHub login failed");
+				return { status: "error", error: (r.error_description as string) ?? (r.error as string) ?? "GitHub login failed" };
 		}
 	}
 
@@ -658,6 +798,7 @@ export class Integrations {
 	}
 
 	async githubLogout() {
+		this.cancelDeviceFlow();
 		delete this.store.github;
 		this.save();
 		await this.configureGit();

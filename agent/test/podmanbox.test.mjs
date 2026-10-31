@@ -18,7 +18,7 @@ const { defaultExec, PodmanBox } = await bundle("podmanbox");
 // with the answers it is given.
 
 const ORIGINAL_ENV = Object.fromEntries(
-	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
+	["PATH", "HOME", "GRIPHUB_WORKSPACE", "STUB_DIR", "GRIPHUB_DIR", "GRIPHUB_BOX_HOME", "GRIPHUB_BOX_CONF", "STUB_EXEC_EXIT", "STUB_BUILD_EXIT", "STUB_BUILD_DELAY", "STUB_USAGE_FAIL", "STUB_HOLD", "STUB_EXEC_HANG", "STUB_PROBE_EXIT", "STUB_INSPECT_HANG", "STUB_START_HANG", "BOX_PROBE_SECS", "BOX_START_SECS", "BOX_ALIVE_SECS", "XDG_RUNTIME_DIR"].map((k) => [k, process.env[k]]),
 );
 
 const BOX = fileURLToPath(new URL("../../server/box/box", import.meta.url));
@@ -40,10 +40,13 @@ case "$cmd" in
   --version) echo "podman version 4.9.3" ;;
   image) [ -f "$dir/image" ] ;;
   container)
+    [ -n "\${STUB_INSPECT_HANG:-}" ] && exec sleep 30
     [ -f "$dir/state" ] || { echo "Error: no such container griphub-box" >&2; exit 125; }
     s=$(cat "$dir/state")
     case "$*" in *"|"*) echo "$s|2026-10-18T09:00:00.123456Z" ;; *) echo "$s" ;; esac ;;
   exec)
+    [ -n "\${STUB_EXEC_HANG:-}" ] && exec sleep 30
+    if [ -n "\${STUB_PROBE_EXIT:-}" ] && [ "$*" = "griphub-box true" ]; then echo "Error: crun: cannot start" >&2; exit "$STUB_PROBE_EXIT"; fi
     case "$*" in
       *box-works*) [ "\${STUB_EXEC_EXIT:-0}" = 0 ] || { echo "Error: crun: cannot start" >&2; exit "$STUB_EXEC_EXIT"; }; echo box-works ;;
       *memory.current*) [ -n "\${STUB_USAGE_FAIL:-}" ] && exit 1; cat "$dir/usage" 2>/dev/null ;;
@@ -53,7 +56,8 @@ case "$cmd" in
   rm) rm -f "$dir/state" ;;
   run) echo running > "$dir/state"; echo id
     if [ -n "\${STUB_HOLD:-}" ]; then sleep 60 >/dev/null 2>&1 & echo $! >> "$dir/holders"; fi ;;
-  start) echo running > "$dir/state"
+  start) [ -n "\${STUB_START_HANG:-}" ] && exec sleep 30
+    echo running > "$dir/state"
     if [ -n "\${STUB_HOLD:-}" ]; then sleep 60 >/dev/null 2>&1 & echo $! >> "$dir/holders"; fi ;;
   build)
     echo "STEP 1/3: FROM ubuntu"; echo "STEP 2/3: RUN apt-get install"; sleep "\${STUB_BUILD_DELAY:-0}"
@@ -249,7 +253,7 @@ test("the container is started in a scope of its own when there is a user sessio
 	assert.equal(run("echo started").status, 0);
 	const scoped = readFileSync(join(r.stub, "systemd-run.log"), "utf8").trim().split("\n");
 	assert.equal(scoped.length, 2, "podman run and podman start, and nothing else, go through a scope");
-	for (const line of scoped) assert.match(line, /--user --scope .* -- podman (run|start) /);
+	for (const line of scoped) assert.match(line, /--user --scope .* -- timeout -k 5 120 podman (run|start) /);
 	assert.deepEqual(r.calls().filter((c) => c[0] === "run" || c[0] === "start").map((c) => c[0]), ["run", "start"]);
 });
 
@@ -273,6 +277,76 @@ test("without an image every command is refused, saying what to do, and nothing 
 	const c = await r.box.check();
 	assert.equal(c.ok, false);
 	assert.match(c.message, /has not been built/);
+});
+
+// A box that says "Running" while nothing in it answers (the state it was in on the owner's server, 28 Oct): every command
+// used to hang until the tool's own time limit, saying nothing. Now the exec path is probed before the command goes in.
+const runBox = (r, cmd, env = {}) => {
+	const t0 = Date.now();
+	const out = spawnSync(BOX, ["-c", cmd], { cwd: r.home, encoding: "utf8", env: { ...process.env, ...env }, timeout: 20_000 });
+	return { ...out, secs: (Date.now() - t0) / 1000 };
+};
+const probes = (r) => r.calls().filter((c) => c[0] === "exec" && c[2] === "true").length;
+
+test("a box that is Running but does not answer refuses the command, quickly and saying what to do, and runs nothing", async (t) => {
+	const r = rig(t, { state: "running" });
+	process.env.STUB_EXEC_HANG = "1";
+	const ran = runBox(r, "touch ran-outside", { BOX_PROBE_SECS: "1" });
+	assert.equal(ran.status, 70, `${ran.stderr} (signal ${ran.signal})`);
+	assert.ok(ran.secs < 10, `refused after ${ran.secs}s, not left hanging`);
+	assert.match(ran.stderr, /the agent's box did not answer/);
+	assert.match(ran.stderr, /The command was not run/);
+	assert.match(ran.stderr, /Reset the box/);
+	assert.match(ran.stderr, /Run the agent's commands in the box/);
+	assert.ok(!existsSync(join(r.home, "ran-outside")), "not run anywhere, the server itself included");
+	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "a box that did not answer is not remembered as alive");
+	// The host's own test says the same, through the same launcher.
+	process.env.BOX_PROBE_SECS = "1";
+	const c = await r.box.check();
+	assert.equal(c.ok, false);
+	assert.match(c.message, /did not answer/);
+});
+
+test("podman that does not answer when asked about the container is called stuck, not 'no container'", (t) => {
+	const r = rig(t, { state: "running" });
+	process.env.STUB_INSPECT_HANG = "1";
+	const ran = runBox(r, "true", { BOX_PROBE_SECS: "1" });
+	assert.equal(ran.status, 70, ran.stderr);
+	assert.match(ran.stderr, /podman did not answer in 1s/);
+	assert.ok(!r.calls().some((c) => c[0] === "run"), "no second container is made over one that may exist");
+});
+
+test("a container that will not start is refused with the same words, after its own limit", (t) => {
+	const r = rig(t, { state: "exited" });
+	process.env.STUB_START_HANG = "1";
+	const ran = runBox(r, "true", { BOX_START_SECS: "1" });
+	assert.equal(ran.status, 70, ran.stderr);
+	assert.match(ran.stderr, /starting the container took more than 1s/);
+});
+
+test("a healthy box is probed once, not before every command, and again after a reset", (t) => {
+	const r = rig(t, { state: "running" });
+	assert.equal(runBox(r, "echo one").status, 0);
+	assert.equal(runBox(r, "echo two").status, 0);
+	assert.equal(probes(r), 1, "the second command went in on the first one's answer");
+	assert.ok(existsSync(join(r.griphubDir, "box.alive")));
+	assert.equal(spawnSync(BOX, ["--reset"], { cwd: r.home, env: process.env }).status, 0);
+	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "a reset forgets it");
+	assert.equal(runBox(r, "echo three").status, 0);
+	assert.equal(probes(r), 2);
+	// And with no memory of it (BOX_ALIVE_SECS=0) every command probes.
+	assert.equal(runBox(r, "echo four", { BOX_ALIVE_SECS: "0" }).status, 0);
+	assert.equal(probes(r), 3);
+});
+
+test("a probe that fails some other way does not refuse: the command meets podman's own message", (t) => {
+	const r = rig(t, { state: "running" });
+	process.env.STUB_PROBE_EXIT = "126"; // podman answers the probe, with an error: not a hang
+	const ran = runBox(r, "echo ok");
+	assert.equal(ran.status, 0, ran.stderr);
+	assert.doesNotMatch(ran.stderr, /did not answer/);
+	assert.equal(probes(r), 1, "it did probe");
+	assert.ok(!existsSync(join(r.griphubDir, "box.alive")), "an error is not an answer to remember");
 });
 
 test("resetting throws the container away and keeps the image and the home folder", async (t) => {
