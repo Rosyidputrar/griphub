@@ -93,4 +93,10 @@ void main() {
     expect(find.byTooltip('More'), findsNothing);
     expect(find.byTooltip('Terminal'), findsOneWidget);
   });
+
+  testWidgets('UI-14: the connection badge is 48 dp to touch', (tester) async {
+    await open(tester, const Look(width: 480));
+    final s = tester.getSize(find.ancestor(of: find.text('Server'), matching: find.byType(InkWell)).first);
+    expect(s.width >= 48 && s.height >= 48, isTrue, reason: 'the badge is $s');
+  });
 }

@@ -64,6 +64,12 @@ class ConnectionChip extends StatelessWidget {
             child: InkWell(
               borderRadius: BorderRadius.circular(99),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ServerScreen(agent: agent))),
+              // A 48 dp touch box around the small badge.
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                child: Center(
+                  widthFactor: 1,
+                  heightFactor: 1,
               // With very large text on a narrow phone the word would take the title's room: the icon alone, its colour
               // still saying the state (the words are in the tooltip, and read out).
               child: MediaQuery.sizeOf(context).width / MediaQuery.textScalerOf(context).scale(1) < 220
@@ -89,6 +95,8 @@ class ConnectionChip extends StatelessWidget {
                       color: server ? _stateColor(p, c) : p.muted,
                       icon: server ? LucideIcons.server : LucideIcons.smartphone,
                     ),
+                ),
+              ),
             ),
           ),
         );

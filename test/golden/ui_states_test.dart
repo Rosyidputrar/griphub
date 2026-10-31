@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/main.dart';
 import 'package:griphub_agent/ui/diff_view.dart';
 import 'package:griphub_agent/ui/home_shell.dart';
+import 'package:griphub_agent/ui/kit.dart';
+import 'package:griphub_agent/ui/search_screen.dart';
 import 'package:griphub_agent/ui/message_views.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
@@ -26,6 +28,7 @@ void main() {
   group('UI-11: a streaming reply', streamingTests);
   group('UI-12: long diffs', diffTests);
   group('UI-13: status bar', statusBarTests);
+  group('UI-14: touch targets', touchTargetTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -196,4 +199,50 @@ void statusBarTests() {
       expect(region.value.statusBarColor, Colors.transparent);
     });
   }
+}
+
+void touchTargetTests() {
+  void atLeast48(WidgetTester tester, Finder f, String what) {
+    final s = tester.getSize(f);
+    expect(s.width >= 48 && s.height >= 48, isTrue, reason: '$what is $s');
+  }
+
+  testWidgets('UI-14: Home\'s category chips are 48 dp to touch', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(width: 360), HomeShell(agent: newAgent()), height: 1600);
+    await frames(tester);
+    for (final label in ['All types', 'Make', 'Code']) {
+      atLeast48(tester, find.ancestor(of: find.text(label), matching: find.byType(TapTarget)).first, label);
+    }
+  });
+
+  testWidgets('UI-14: the search toggles are 48 dp to touch, and say whether they are on', (tester) async {
+    final handle = tester.ensureSemantics();
+    FakeHost();
+    await pumpLook(tester, const Look(width: 360), SearchScreen(agent: newAgent()));
+    await frames(tester);
+    for (final label in ['Regex', 'Match case']) {
+      atLeast48(tester, find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first, label);
+    }
+    expect(tester.getSemantics(find.ancestor(of: find.text('Regex'), matching: find.byType(Semantics)).first), isSemantics(hasToggledState: true));
+    handle.dispose();
+  });
+
+  testWidgets('UI-14: the Chats selection bar keeps 48 dp buttons', (tester) async {
+    final host = FakeHost();
+    host.answers['sessions'] = (_) => [
+      {'path': '/s/a.jsonl', 'id': 'a', 'name': 'Nota toko', 'cwd': '/w', 'messageCount': 3, 'modified': 1761900000000},
+    ];
+    await pumpLook(tester, const Look(width: 360), HomeShell(agent: newAgent()), height: 1600);
+    await frames(tester);
+    await tester.tap(find.bySemanticsLabel(RegExp('^Chats')).first);
+    await frames(tester, 12);
+    await tester.longPress(find.text('Nota toko'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Select'));
+    await tester.pumpAndSettle();
+    // The IconButton itself (its 48 dp touch padding is outside the tooltip it draws).
+    atLeast48(tester, find.ancestor(of: find.byTooltip('Cancel'), matching: find.byType(IconButton)).first, 'Cancel');
+    atLeast48(tester, find.ancestor(of: find.byTooltip('Delete'), matching: find.byType(IconButton)).first, 'Delete');
+  });
 }

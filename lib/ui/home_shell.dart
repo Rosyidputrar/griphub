@@ -1048,17 +1048,25 @@ class _PillChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    return Material(
-      color: selected ? p.text : Colors.transparent,
-      shape: const StadiumBorder(),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
+    // A 48 dp touch box around the 38 dp pill it draws.
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: TapTarget(
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-          child: Text(
-            label,
-            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.muted),
+        child: Material(
+          color: selected ? p.text : Colors.transparent,
+          shape: const StadiumBorder(),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+              child: Text(
+                label,
+                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: selected ? p.inverse : p.muted),
+              ),
+            ),
           ),
         ),
       ),
@@ -1382,7 +1390,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 130),
                 children: [
                   if (selecting)
-                    SizedBox(height: text.displaySmall!.fontSize! * 1.25, child: _selectionBar(all))
+                    // At least the title's height (no jump between the two), and room for 48 dp buttons at any text size.
+                    ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: text.displaySmall!.fontSize! * 1.25),
+                      child: _selectionBar(all),
+                    )
                   else
                     Text(tr('Chats'), style: text.displaySmall),
                   const SizedBox(height: 16),

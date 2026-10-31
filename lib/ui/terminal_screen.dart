@@ -951,14 +951,21 @@ class _TerminalScreenState extends State<TerminalScreen> {
                     ),
                   ),
                 ],
-                child: Container(
-                  height: 32,
-                  width: 40,
-                  decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
-                  alignment: Alignment.center,
-                  child: starting
-                      ? const BusySpinner(size: 14)
-                      : Icon(LucideIcons.plus, size: 16, color: p.text),
+                // A 48 dp touch box around the 40 x 32 button it draws.
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Center(
+                    child: Container(
+                      height: 32,
+                      width: 40,
+                      decoration: BoxDecoration(color: p.surface, borderRadius: BorderRadius.circular(Radii.lg)),
+                      alignment: Alignment.center,
+                      child: starting
+                          ? const BusySpinner(size: 14)
+                          : Icon(LucideIcons.plus, size: 16, color: p.text),
+                    ),
+                  ),
                 ),
               ),
             ],
