@@ -60,6 +60,19 @@
 - Pilihan warna aksen bisa dipakai dengan pembaca layar (menyebut nama warna dan mana yang terpilih) dan punya area sentuh 48 dp; judulnya tidak lagi patah per suku kata.
 - Tombol salin di bawah jawaban kini punya label, tooltip, area sentuh 48 dp, dan mengumumkan "Disalin".
 - Tombol berbahaya (hapus, hentikan) terbaca di mode gelap, dan warna aksen hijau, oranye, merah muda, dan toska kini terbaca sebagai teks di mode terang.
+- Daftar chat yang gagal dimuat kini menampilkan pesan dan tombol Coba lagi, tidak lagi kosong atau berputar selamanya.
+- Jawaban panjang yang sedang mengalir tidak lagi makin berat seiring panjangnya: bagian yang sudah selesai tidak diurai ulang setiap frame, dan tampilan diperbarui sekitar 30 kali per detik.
+- Diff yang sangat panjang (ribuan baris) kini langsung terbuka: hanya baris yang tampil di layar yang dibangun.
+- Ikon status bar kini mengikuti tema di setiap layar, termasuk Beranda dan layar pengenalan.
+- Kontrol kecil (chip kategori Beranda, tombol pencarian, tab baru Terminal, lencana koneksi, bilah pilihan Chats) kini punya area sentuh 48 dp.
+- Animasi di seluruh aplikasi kini mengikuti pengaturan sistem "hapus animasi".
+- Tab Chats tetap ringan dengan ratusan chat: hanya baris yang tampil yang dibangun, dan baris tidak dibangun ulang setiap kali agent memberi kabar.
+- Pembaca layar kini membacakan apa yang sedang dikerjakan agent, hasil tool (selesai, gagal, berjalan), apakah panel terbuka, nama lampiran dan foto, dan judul baris bersakelar cukup sekali.
+- Di tablet, perangkat lipat, dan HP miring, isi aplikasi tetap selebar yang nyaman dibaca, gelembung pesan tidak melebar penuh, dan kartu proyek menambah kolom.
+- Tombol Kembali di tab Chats, Skill, atau Proyek kini kembali ke Beranda, tidak langsung menutup aplikasi.
+- Teks pill, ikon di kotak berwarna, komentar kode, kartu Hubungkan di mode gelap, dan spinner CI kini cukup kontras.
+- Ukuran teks dibatasi 2,2× (pengaturan aplikasi dikali pengaturan sistem dulu bisa mencapai 2,5×).
+- Ilustrasi kini selalu tampil setelah dimuat sekali, tidak kadang hilang.
 
 ## English
 
@@ -121,3 +134,16 @@
 - The accent colour choices work with a screen reader (each says its colour and which is chosen) and have 48 dp touch targets; their title no longer breaks into syllables.
 - The copy button under a reply now has a label, a tooltip, a 48 dp touch target, and announces "Copied".
 - Danger buttons (delete, stop) read in the dark theme, and the green, orange, pink and teal accents now read as text in the light theme.
+- A chat list that fails to load now shows the error with Try again, instead of staying blank or spinning forever.
+- A long streaming reply no longer gets heavier as it grows: finished parts are not re-parsed every frame, and it updates about 30 times a second.
+- Very long diffs (thousands of lines) open at once: only the rows on screen are built.
+- The status bar icons follow the theme on every screen, Home and the welcome screens included.
+- Small controls (Home's category chips, the search toggles, the terminal's new tab, the connection badge, the Chats selection bar) have 48 dp touch targets.
+- Animations across the app follow the system's remove-animations setting.
+- The Chats tab stays light with hundreds of chats: only the rows on screen are built, and they are not rebuilt every time the agent reports.
+- Screen readers now hear what the agent is doing, how a tool went (done, failed, running), whether a panel is open, the names of attachments and photos, and a switch row's title only once.
+- On tablets, foldables and phones on their side the content keeps a readable width, message bubbles stop widening, and project tiles add columns.
+- Back on the Chats, Skills or Projects tab now goes to Home instead of closing the app.
+- Pill text, icons on coloured tiles, code comments, the Connect card in the dark theme and the CI spinner now have enough contrast.
+- Text size is held to 2.2x (the app's setting times the system's used to reach 2.5x).
+- Illustrations always show once loaded, instead of sometimes missing.
