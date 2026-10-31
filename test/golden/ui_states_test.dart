@@ -6,11 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/main.dart';
+import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/code_view.dart';
 import 'package:griphub_agent/ui/diff_view.dart';
 import 'package:griphub_agent/ui/home_shell.dart';
 import 'package:griphub_agent/ui/kit.dart';
 import 'package:griphub_agent/ui/search_screen.dart';
+import 'package:griphub_agent/ui/settings_hub.dart';
 import 'package:griphub_agent/ui/message_views.dart';
 import 'package:griphub_agent/ui/theme.dart';
 
@@ -40,6 +42,7 @@ void main() {
   group('UI-19: wide screens', wideScreenTests);
   group('UI-20: Back', backTests);
   group('UI-21: pills', pillTests);
+  group('UI-22: text size', textScaleTests);
 
   group('UI-10: a list that cannot be read says so', () {
     testWidgets('Home\'s Recent and the Chats tab show the error with a retry, and the retry works', (tester) async {
@@ -513,5 +516,42 @@ void pillTests() {
     final bg = Color.alphaBlend(Palette.light.danger.withValues(alpha: 0.12), Palette.light.surface);
     final ratio = contrastRatio(text.style!.color!, bg);
     expect(ratio, greaterThanOrEqualTo(4.5), reason: '$ratio:1');
+  });
+}
+
+void textScaleTests() {
+  test('UI-22: the app\'s and the system\'s text sizes multiply, up to 2.2x', () {
+    expect(effectiveTextScale(1.25, 2.0), maxTextScale);
+    expect(effectiveTextScale(1.0, 1.3), closeTo(1.3, 1e-9));
+    expect(effectiveTextScale(1.25, 1.0), 1.25);
+    expect(effectiveTextScale(0.9, 1.0), 0.9, reason: 'smaller text is left alone');
+  });
+
+  for (final look in const [Look(textScale: 2.0), Look(language: 'id', textScale: 2.0, width: 360)]) {
+    testWidgets('UI-22: the chat and Settings are laid out at 2x text (${look.name})', (tester) async {
+      FakeHost();
+      final agent = newAgent()..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});
+      await pumpLook(tester, look, ChatScreen(agent: agent), height: 1400);
+      await frames(tester);
+      collectLayoutErrors(tester, 'chat ${look.name}');
+      await pumpLook(tester, look, SettingsHub(agent: newAgent()), height: 2400);
+      await frames(tester);
+      collectLayoutErrors(tester, 'settings ${look.name}');
+    });
+  }
+
+  testWidgets('UI-22: golden at 2x text: the chat', (tester) async {
+    FakeHost();
+    final agent = newAgent()..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});
+    await pumpLook(tester, const Look(textScale: 2.0), ChatScreen(agent: agent));
+    await frames(tester);
+    await expectLater(find.byType(ChatScreen), matchesGoldenFile(golden('chat_text_x2.0')));
+  });
+
+  testWidgets('UI-22: golden at 2x text: Settings', (tester) async {
+    FakeHost();
+    await pumpLook(tester, const Look(language: 'id', textScale: 2.0), SettingsHub(agent: newAgent()));
+    await frames(tester);
+    await expectLater(find.byType(SettingsHub), matchesGoldenFile(golden('settings_text_x2.0_id')));
   });
 }
