@@ -12,7 +12,7 @@ const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEKEYONEEXAMPLEKEYONEEXAM
 
 function scratch(t) {
 	const dir = mkdtempSync(join(tmpdir(), "gh-installer-"));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 	return dir;
 }
 

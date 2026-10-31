@@ -24,7 +24,9 @@ export async function bundle(name) {
 /** A fresh temporary directory that is removed when the test finishes. Short: unix socket paths are limited. */
 export function tempDir(t, prefix = "gh-") {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
-	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	// Retried: t.after hooks run in registration order, so this runs while the test's host process (killed by a
+	// later hook) may still be writing its seed files - the first sweep then races a growing directory (ENOTEMPTY).
+	t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 	return dir;
 }
 
