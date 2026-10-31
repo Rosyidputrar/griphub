@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'errors.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -82,8 +83,9 @@ class _GripHubScreenState extends State<GripHubScreen> {
         SnackBar(content: Text('${tr('GripHub connected')} · ${found.length} ${tr('models available')}')),
       );
       Navigator.of(context).pop(true);
-    } on AgentError catch (e) {
-      if (mounted) setState(() => _problem = e.message);
+    } catch (e) {
+      // Any failure, not only the host's: a platform error used to leave the button idle with nothing said.
+      if (mounted) setState(() => _problem = griphubKeyProblem(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -279,4 +281,22 @@ class _GripHubScreenState extends State<GripHubScreen> {
             ),
     );
   }
+}
+
+/// What to tell someone whose key did not work. The host's text is an HTTP status and up to 300 characters of the
+/// router's reply (`401 Unauthorized: {"error":...}`); a mistyped or half-pasted key is the commonest first-run failure,
+/// and it should read like one.
+String griphubKeyProblem(Object e) {
+  final raw = e is AgentError ? e.message : '$e';
+  final lower = raw.toLowerCase();
+  if (RegExp(r'^\s*(401|403)\b').hasMatch(raw) || lower.contains('invalid api key') || lower.contains('incorrect api key')) {
+    return tr('The key was not accepted. Check that you copied all of it, with no spaces.');
+  }
+  if (lower.contains('timeout') || lower.contains('timed out') || lower.contains('aborted') || lower.contains('fetch failed')) {
+    return tr('GripHub did not answer. Check your connection and try again.');
+  }
+  if (e is AgentError && e.code == 'offline') return friendlyError(e);
+  // Some other status: the number and the router's JSON are for a log, not for a first-time user.
+  if (RegExp(r'^\s*\d{3}\b').hasMatch(raw)) return tr('GripHub could not load the models. Try again in a moment.');
+  return e is AgentError ? tr(raw) : friendlyError(e);
 }
