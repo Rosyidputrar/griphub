@@ -49,6 +49,7 @@ import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
 import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
+import { startWatchdog } from "./watchdog.js";
 import { Skills } from "./skills.js";
 import {
 	FULL_TOOLS,
@@ -2076,6 +2077,9 @@ async function main() {
 	process.on("unhandledRejection", (reason) => {
 		console.error("[host] unhandled rejection (kept alive):", reason);
 	});
+	// A server host stuck in one loop never answers and never exits, so the service manager has nothing to restart:
+	// a watchdog thread kills it after two minutes without a sign of life (watchdog.ts).
+	if (server) startWatchdog({ staleMs: Number(process.env.GRIPHUB_WATCHDOG_MS) || 120_000 });
 	// A public tunnel (ssh -R) outlives its parent process: stop tunnels on
 	// every shutdown path, not just stdin end. (A SIGKILL orphan cannot be
 	// reaped by the app — the OS or user must kill that ssh.)
