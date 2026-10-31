@@ -251,20 +251,47 @@ void main() {
     }
   });
 
-  testWidgets('the limit is set in Usage: 300k until changed, 0 leaves it to the model', (tester) async {
+  testWidgets('the limit is set in Usage: the default follows the model, 0 leaves it to the model', (tester) async {
     final host = FakeHost();
+    // A chat on a large model: the default and the choices follow its window.
+    host.answers['session_stats'] = (_) => {
+      'tokens': {'total': 400000},
+      'cost': 0,
+      'context': {'tokens': 400000, 'contextWindow': 872000, 'percent': 45.9},
+    };
     final agent = newAgent();
     await pumpLook(tester, const Look(), UsageScreen(agent: agent), height: 2600);
     await frames(tester);
     expect(find.text('Summarize the chat at'), findsOneWidget);
-    expect(find.text('300k tokens'), findsOneWidget);
+    expect(find.textContaining("65% of the model's window"), findsOneWidget);
+    expect(find.textContaining('567k'), findsOneWidget, reason: "the row also says what that is for this chat's model");
     await tester.tap(find.text('Summarize the chat at'));
     await frames(tester);
     expect(find.text('Recommended'), findsOneWidget);
+    expect(find.text('700k tokens'), findsOneWidget, reason: 'the choices climb with the window');
+    expect(find.text('1M tokens'), findsNothing, reason: 'nothing at or past the window: the host never summarizes there');
     await tester.tap(find.text("At the model's limit"));
     await frames(tester);
     expect(host.sent('settings_set').last['settings'], {'compactAt': 0});
     expect(host.stored['compactAt'], 0, reason: 'kept as 0 (off), not cleared back to the default');
     expect(find.text("At the model's limit"), findsOneWidget, reason: 'the row says what is in force now');
+
+    // Back to the default: the setting is cleared on the host, not saved as a number.
+    await tester.tap(find.text('Summarize the chat at'));
+    await frames(tester);
+    await tester.tap(find.textContaining("65% of the model's window"));
+    await frames(tester);
+    expect(host.sent('settings_set').last['settings'], {'compactAt': null});
+    expect(host.stored.containsKey('compactAt'), isFalse, reason: 'cleared: the default follows the model again');
+    expect(find.textContaining("65% of the model's window"), findsOneWidget);
+  });
+
+  testWidgets('a host too old to say its default follows the window: the old flat figure shows', (tester) async {
+    final host = FakeHost();
+    host.answers['settings_get'] = (_) => {'dns': 'cloudflare', 'compactAt': 300000};
+    final agent = newAgent();
+    await pumpLook(tester, const Look(), UsageScreen(agent: agent), height: 2600);
+    await frames(tester);
+    expect(find.text('300k tokens'), findsOneWidget);
   });
 }

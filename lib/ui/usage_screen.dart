@@ -144,19 +144,49 @@ class _UsageScreenState extends State<UsageScreen> {
 
   num get _budget => _num(agent.integrations.settings?.json['dailyBudget']);
 
-  /// The context limit's choices (tokens); 0 leaves it to the model's own limit.
-  static const compactChoices = [100000, 200000, 300000, 500000, 0];
+  /// The fixed limits offered (tokens); of those past the open model's window only the first is kept, as "anything
+  /// the model allows" (the host never summarizes past the window anyway).
+  static const compactLadder = [100000, 200000, 300000, 500000, 700000, 1000000, 1500000, 2000000];
 
-  /// The limit being saved: shown at once, with a spinner, until the host has it.
+  /// The open chat's context window, told by the host with the session's stats; null before that or with no chat.
+  int? get _window {
+    final ctx = _session?['context'];
+    return ctx is Map && ctx['contextWindow'] is num ? (ctx['contextWindow'] as num).toInt() : null;
+  }
+
+  /// The choices: the default (null, follows the model), the ladder up to the window, and 0 (the model's own limit).
+  List<int?> get compactChoices {
+    final w = _window;
+    final within = [
+      for (final v in compactLadder)
+        if (w == null ? v <= 500000 : v < w) v,
+    ];
+    return [null, ...within, 0];
+  }
+
+  /// The limit being saved: shown at once, with a spinner, until the host has it. [_savingDefault] tells a null that
+  /// means "saving the default" apart from one that means "nothing is being saved".
   int? _compactSaving;
+  bool _savingDefault = false;
 
-  String _compactText(int v) => v == 0
-      ? tr('At the model\'s limit')
-      : tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(v)));
+  String _compactText(int? v) {
+    if (v == null) {
+      final share = agent.integrations.settings?.compactAtShare;
+      if (share == null) return _compactText(AppSettings.compactAtDefault);
+      final inForce = agent.integrations.settings?.compactLimit(_window);
+      return tr('{p}% of the model\'s window')
+              .replaceAll('{p}', (share * 100).round().toString()) +
+          (inForce != null && _window != null ? ' (${localNumber(formatTokens(inForce))})' : '');
+    }
+    return v == 0
+        ? tr('At the model\'s limit')
+        : tr('{n} tokens').replaceAll('{n}', localNumber(formatTokens(v)));
+  }
 
   Future<void> _editCompactAt() async {
-    if (_compactSaving != null) return;
-    final current = agent.integrations.settings?.compactAt ?? AppSettings.compactAtDefault;
+    if (_savingDefault || _compactSaving != null) return;
+    final current = agent.integrations.settings?.compactAt;
+    // null is the dialog's "dismissed"; the default choice comes back as -1.
     final picked = await showDialog<int>(
       context: context,
       builder: (context) => SimpleDialog(
@@ -174,21 +204,32 @@ class _UsageScreenState extends State<UsageScreen> {
           for (final v in compactChoices)
             ListTile(
               title: Text(_compactText(v)),
-              subtitle: v == AppSettings.compactAtDefault ? Text(tr('Recommended')) : null,
+              subtitle: v == null ? Text(tr('Recommended')) : null,
               trailing: v == current ? const Icon(LucideIcons.check, size: 18) : null,
-              onTap: () => Navigator.pop(context, v),
+              onTap: () => Navigator.pop(context, v ?? -1),
             ),
         ],
       ),
     );
-    if (picked == null || picked == current || !mounted) return;
-    setState(() => _compactSaving = picked);
+    if (picked == null || !mounted) return;
+    final value = picked == -1 ? null : picked;
+    if (value == current) return;
+    setState(() {
+      _compactSaving = value;
+      _savingDefault = value == null;
+    });
     try {
-      await agent.integrations.updateSettings({'compactAt': picked});
+      // null clears the setting on the host: the default (the share of the model's window) is in force again.
+      await agent.integrations.updateSettings({'compactAt': value});
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
     } finally {
-      if (mounted) setState(() => _compactSaving = null);
+      if (mounted) {
+        setState(() {
+          _compactSaving = null;
+          _savingDefault = false;
+        });
+      }
     }
   }
 
@@ -300,10 +341,10 @@ class _UsageScreenState extends State<UsageScreen> {
                   color: p.accentAlt,
                   title: tr('Summarize the chat at'),
                   subtitle: _compactText(
-                    _compactSaving ?? agent.integrations.settings?.compactAt ?? AppSettings.compactAtDefault,
+                    _savingDefault ? null : (_compactSaving ?? agent.integrations.settings?.compactAt),
                   ),
-                  trailing: _compactSaving != null ? const BusySpinner() : null,
-                  onTap: _compactSaving != null ? null : _editCompactAt,
+                  trailing: _savingDefault || _compactSaving != null ? const BusySpinner() : null,
+                  onTap: _savingDefault || _compactSaving != null ? null : _editCompactAt,
                 ),
               ],
             ),
