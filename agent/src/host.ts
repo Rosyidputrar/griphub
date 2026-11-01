@@ -120,6 +120,7 @@ const guard = new Guard({
 		await checkpoints.snapshot(cwd, label);
 	},
 	cwd: () => session?.sessionManager.getCwd() ?? workspace,
+	chat: () => session?.sessionFile ?? session?.sessionId ?? "",
 });
 
 // ---------------------------------------------------------------------------
