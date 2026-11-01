@@ -34,6 +34,8 @@ export interface GuardHooks {
 	/** Snapshot the working tree before the agent's first file change in a run. */
 	checkpoint(cwd: string, label: string): Promise<void>;
 	cwd(): string;
+	/** Which chat the call belongs to (its session file), for what is asked once per chat. */
+	chat?(): string;
 }
 
 /** Whether [path] is [dir] or somewhere inside it (lexically; resolve links first where they matter). */
@@ -276,9 +278,14 @@ export async function proposedPatch(toolName: string, input: Record<string, unkn
 /** Summary line for the approval card. */
 function describe(toolName: string, input: Record<string, unknown>) {
 	if (toolName === "bash" || toolName === "background_job") return String(input.command ?? "");
+	// The task it is handed, not the JSON around it.
+	if (toolName === "subagent") return `${input.profile === "full" ? "full" : "read"}: ${String(input.task ?? "").slice(0, 400)}`;
 	if (typeof input.path === "string") return input.path;
 	return JSON.stringify(input).slice(0, 400);
 }
+
+/** Why the first subagent of a chat is asked about: it works on its own and spends credits and time while it does. */
+export const SUBAGENT_RISK = "This starts a subagent that works on its own and spends credits";
 
 export class Guard {
 	mode: ApprovalMode = "ask_risky";
@@ -292,6 +299,8 @@ export class Guard {
 	private readonly epoch = Math.random().toString(36).slice(2, 8);
 	private next = 1;
 	private changedThisRun = false;
+	/** Chats where the person has already said yes to a subagent: the next ones there are not asked again. */
+	private subagentChats = new Set<string>();
 
 	constructor(private readonly hooks: GuardHooks) {}
 
@@ -374,7 +383,11 @@ export class Guard {
 						: this.mode === "deny_risky"
 							? riskOf(event.toolName, input, cwd, false)
 							: null;
-			const risk = secret ?? byMode;
+			// A subagent can spend up to its limits, three at a time, and nothing in its call looks risky: the first one
+			// of a chat is asked about (every one in "Ask all", as for any change), the person's yes covers the chat.
+			const chat = this.hooks.chat?.() ?? "";
+			const firstSubagent = event.toolName === "subagent" && this.mode === "ask_risky" && !this.subagentChats.has(chat);
+			const risk = secret ?? byMode ?? (firstSubagent ? SUBAGENT_RISK : null);
 			if (risk && this.mode === "deny_risky") {
 				return {
 					block: true,
@@ -391,11 +404,15 @@ export class Guard {
 						? `${event.toolName}:${String(input.command ?? "").trim().replace(/\s+/g, " ")}`
 						: event.toolName === "write" || event.toolName === "edit"
 							? `${event.toolName}:${String(input.path ?? "")}`
-							: `${event.toolName}:${JSON.stringify(input).slice(0, 400)}`;
+							: // "Always" for subagents means subagents, not this one task text.
+								event.toolName === "subagent"
+								? "subagent"
+								: `${event.toolName}:${JSON.stringify(input).slice(0, 400)}`;
 				if (!this.allowed.has(key)) {
 					const ok = await this.ask(event.toolName, input, risk, key);
 					if (!ok) return { block: true, reason: "The user declined this action. Ask what they would like instead." };
 				}
+				if (event.toolName === "subagent") this.subagentChats.add(chat);
 			}
 
 			// First change in this run: snapshot so the user can undo the whole run.

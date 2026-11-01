@@ -13,6 +13,7 @@ import 'i18n.dart';
 import 'chat_extras.dart';
 import 'deploy_sheet.dart';
 import 'errors.dart';
+import 'rewind_confirm.dart';
 import 'message_menu.dart';
 import 'message_views.dart';
 
@@ -524,12 +525,23 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     if (_rewinding != null) return;
-    setState(() => _rewinding = (entry: entry, label: tr(action == 'edit' ? 'Rewinding…' : 'Forking…')));
+    var how = action;
+    if (action == 'edit') {
+      // Going back takes the rest of the chat out, and the files stay as they are: asked first, with Fork on offer.
+      final choice = await confirmRewind(context, messages: messagesAfter(agent.entries, entry));
+      if (choice == null || !mounted) return;
+      how = choice == RewindChoice.fork ? 'fork' : 'edit';
+      if (agent.busy) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Wait for the agent to finish first'))));
+        return;
+      }
+    }
+    setState(() => _rewinding = (entry: entry, label: tr(how == 'edit' ? 'Rewinding…' : 'Forking…')));
     try {
       final points = await agent.features.forkPoints();
       if (userIndex >= points.length) throw tr('This message cannot be edited');
       final entryId = points[userIndex].entryId;
-      final text = action == 'edit' ? await agent.editMessage(entryId) : await agent.forkAt(entryId);
+      final text = how == 'edit' ? await agent.editMessage(entryId) : await agent.forkAt(entryId);
       _prefill(text.isEmpty ? entry.text : text);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));

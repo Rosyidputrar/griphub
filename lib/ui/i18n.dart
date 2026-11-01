@@ -257,6 +257,15 @@ const _id = <String, String>{
   'Deploy': 'Deploy',
   'Edit & resend': 'Edit & kirim ulang',
   'Rewind to this message and change it': 'Kembali ke pesan ini dan ubah',
+  'Go back to this message?': 'Kembali ke pesan ini?',
+  'The {n} messages after it leave this chat, and the agent forgets them. There is no undo.':
+      '{n} pesan sesudahnya keluar dari chat ini, dan agent melupakannya. Tidak bisa di-undo.',
+  'What comes after it leaves this chat, and the agent forgets it. There is no undo.':
+      'Yang ada sesudahnya keluar dari chat ini, dan agent melupakannya. Tidak bisa di-undo.',
+  'Files the agent already changed stay changed. Use Changes & undo for those.':
+      'File yang sudah diubah agent tetap berubah. Pakai Perubahan & undo untuk itu.',
+  'Fork instead: keep this chat': 'Cabangkan saja: chat ini tetap utuh',
+  'Go back and edit': 'Kembali dan ubah',
   'Fork from here': 'Cabangkan dari sini',
   'A new chat that branches off before this message': 'Chat baru yang bercabang sebelum pesan ini',
   'Project tools': 'Alat proyek',
@@ -979,6 +988,17 @@ const _id = <String, String>{
   'Writes outside the project folder': 'Menulis di luar folder proyek',
   'Writes inside a .git folder: git runs what is written there': 'Menulis di dalam folder .git: git menjalankan apa yang tertulis di sana',
   'External tool from an MCP server': 'Tool eksternal dari server MCP',
+  'This starts a subagent that works on its own and spends credits':
+      'Ini memulai subagent yang bekerja sendiri dan memakai kredit',
+  'Set a daily limit?': 'Atur batas harian?',
+  'The agent stops starting requests once a day\'s spend reaches it. 1 credit = Rp 300. You can change it later in Settings, under Usage & budget.':
+      'Agent berhenti memulai permintaan begitu pengeluaran sehari mencapainya. 1 kredit = Rp 300. Bisa diubah nanti di Pengaturan, di Pemakaian & anggaran.',
+  'a day': 'per hari',
+  'No daily limit: tap to set one': 'Tanpa batas harian: ketuk untuk mengatur',
+  'No cost limit: a subagent keeps spending until its time limit or your daily budget stops it. Up to 3 run at once.':
+      'Tanpa batas biaya: subagent terus memakai kredit sampai batas waktunya atau anggaran hariannya menghentikannya. Maksimal 3 berjalan bersamaan.',
+  'Each subagent can spend up to {n}, and up to 3 run at once. Costs are estimates.':
+      'Tiap subagent bisa memakai sampai {n}, dan maksimal 3 berjalan bersamaan. Biaya hanya perkiraan.',
   'Approval required for every change': 'Setiap perubahan butuh persetujuan',
   'Enter a number, like 2 or 1.5': 'Masukkan angka, misalnya 2 atau 1,5',
   'Advanced': 'Lanjutan',
@@ -1220,7 +1240,6 @@ const _id = <String, String>{
   'min': 'mnt',
   'another chat': 'chat lain',
   "Subagent running in chat '{name}'": "Subagent berjalan di chat '{name}'",
-  'Limits apply to every subagent. Costs are estimates.': 'Batas berlaku untuk semua subagent. Biaya adalah perkiraan.',
   'Full access': 'Akses penuh',
   'Subagent running': 'Subagent berjalan',
   '{n} subagents running': '{n} subagent berjalan',
