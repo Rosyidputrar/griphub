@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_client.dart';
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'daily_limit_offer.dart';
 import 'errors.dart';
 import 'kit.dart';
 import 'i18n.dart';
@@ -82,6 +83,9 @@ class _GripHubScreenState extends State<GripHubScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('${tr('GripHub connected')} · ${found.length} ${tr('models available')}')),
       );
+      // A first key starts with no daily limit: say so, and offer one (not when only the key was replaced).
+      if (_existing == null) await offerDailyLimit(context, widget.agent);
+      if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (e) {
       // Any failure, not only the host's: a platform error used to leave the button idle with nothing said.

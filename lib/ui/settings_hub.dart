@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/integrations.dart' show AppSettings;
 import '../agent/pricing.dart';
 import '../agent/updater.dart';
 import 'accounts_screen.dart';
@@ -371,12 +372,7 @@ class _SettingsHubState extends State<SettingsHub> {
                     icon: LucideIcons.chartColumn,
                     color: const Color(0xFF10B981),
                     title: tr('Usage & budget'),
-                    subtitle: (it.settings?.dailyBudget ?? 0) > 0
-                        ? tr('{n} per day').replaceAll(
-                            '{n}',
-                            '${localNumber(formatCredits(it.settings!.dailyBudget))} ${tr('credits')}',
-                          )
-                        : tr('Tokens, cost and a daily limit'),
+                    subtitle: budgetSubtitle(it.settings),
                     onTap: () => _open(UsageScreen(agent: agent)),
                   ),
                   SettingsRow(
@@ -759,4 +755,9 @@ class _LinkChip extends StatelessWidget {
 }
 
 /// "1 server" / "3 servers" in the app's language (an English plural used to be built in place).
+/// The Usage & budget row's second line: the daily limit, or that there is none (spending is not capped by default).
+String budgetSubtitle(AppSettings? s) => (s?.dailyBudget ?? 0) > 0
+    ? tr('{n} per day').replaceAll('{n}', '${localNumber(formatCredits(s!.dailyBudget))} ${tr('credits')}')
+    : tr('No daily limit: tap to set one');
+
 String serverCount(int n) => n == 1 ? tr('1 server') : tr('{n} servers').replaceAll('{n}', '$n');

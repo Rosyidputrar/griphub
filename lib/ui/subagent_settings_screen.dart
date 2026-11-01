@@ -26,6 +26,14 @@ String _minutes(double v) => '${v.toInt()} ${tr('min')}';
 
 /// One line for both limits ("50 credits • 30 min", "No cost limit • No time limit"),
 /// shared by this screen and its row in Settings.
+/// What the limits add up to, in words: each subagent's own ceiling, and that three run at once.
+String subagentSpendNote(AppSettings? s) {
+  final cost = s?.subagentCreditLimit ?? subagentDefaultCredits;
+  return cost == 0
+      ? tr('No cost limit: a subagent keeps spending until its time limit or your daily budget stops it. Up to 3 run at once.')
+      : tr('Each subagent can spend up to {n}, and up to 3 run at once. Costs are estimates.').replaceAll('{n}', _credits(cost));
+}
+
 String subagentLimitsSummary(AppSettings? s) {
   final cost = s?.subagentCreditLimit ?? subagentDefaultCredits;
   final time = s?.subagentMinutesLimit ?? subagentDefaultMinutes;
@@ -135,7 +143,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text(tr('Limits apply to every subagent. Costs are estimates.'), style: text.bodySmall),
+                          Text(subagentSpendNote(s), style: text.bodySmall),
                         ],
                       ),
                     ),
