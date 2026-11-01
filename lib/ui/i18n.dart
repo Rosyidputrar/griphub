@@ -257,6 +257,15 @@ const _id = <String, String>{
   'Deploy': 'Deploy',
   'Edit & resend': 'Edit & kirim ulang',
   'Rewind to this message and change it': 'Kembali ke pesan ini dan ubah',
+  'Go back to this message?': 'Kembali ke pesan ini?',
+  'The {n} messages after it leave this chat, and the agent forgets them. There is no undo.':
+      '{n} pesan sesudahnya keluar dari chat ini, dan agent melupakannya. Tidak bisa di-undo.',
+  'What comes after it leaves this chat, and the agent forgets it. There is no undo.':
+      'Yang ada sesudahnya keluar dari chat ini, dan agent melupakannya. Tidak bisa di-undo.',
+  'Files the agent already changed stay changed. Use Changes & undo for those.':
+      'File yang sudah diubah agent tetap berubah. Pakai Perubahan & undo untuk itu.',
+  'Fork instead: keep this chat': 'Cabangkan saja: chat ini tetap utuh',
+  'Go back and edit': 'Kembali dan ubah',
   'Fork from here': 'Cabangkan dari sini',
   'A new chat that branches off before this message': 'Chat baru yang bercabang sebelum pesan ini',
   'Project tools': 'Alat proyek',
