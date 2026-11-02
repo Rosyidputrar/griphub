@@ -1019,7 +1019,7 @@ test("past the context limit the chat is summarized, well before the model's own
 });
 
 test("a summary says what it cost, and the turns it replaced can still be read", async (t) => {
-	const h = await phoneWithModel(t, 200_000, 25_000, {}, "claude-haiku-4.5");
+	const h = await phoneWithModel(t, 200_000, 25_000, {}, "deepseek-v4-flash");
 	assert.deepEqual((await h.call("summarized_messages")).data, [], "nothing summarized yet");
 	for (let i = 0; i < 4; i++) await h.say(i);
 	const end = await h.until((r) => r.type === "event" && r.event.type === "compaction_end", 30_000, "for the summary");
@@ -1109,4 +1109,64 @@ test("server mode: with no budget set (or room left) the same commands go ahead"
 	// Let both finish, so the host is not writing into the folder while it is removed.
 	writeFileSync(m.mock.MOCK_RELEASE, "");
 	for (const id of [off.data.id, room.data.id]) await m.c.until((x) => x.type === "subagent_finished" && x.subagent.id === id, 30_000, "for a subagent to finish");
+});
+
+// ---------------------------------------------------------------------------
+// Pictures: the agent's generate_image tool, with the user's own limits
+
+test("the agent makes pictures with the cheapest image model; they are saved, reported as they land, and counted", async (t) => {
+	const tool = { name: "generate_image", arguments: { prompt: "A minimal coffee shop logo", count: 2, size: "1:1" } };
+	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool), MOCK_IMAGES: "1" });
+	const sent = await m.c.call("prompt", { text: "buatkan logo kedai kopi, 2 variasi" });
+	assert.equal(sent.ok, true, sent.error);
+	const end = await m.c.until((r) => r.type === "event" && r.event.type === "tool_execution_end" && r.event.toolName === "generate_image", 30_000, "for the tool");
+	assert.equal(end.event.isError, false, JSON.stringify(end.event.result));
+	const details = end.event.result.details;
+	assert.equal(details.model, "gemini-3.1-flash-image", "the cheapest by the rates");
+	assert.equal(details.cheapest, true);
+	assert.equal(details.credits, 5);
+	assert.deepEqual(details.slots.map((s) => s.status), ["done", "done"]);
+	for (const s of details.slots) {
+		assert.ok(s.file.startsWith(join(m.dir, "workspace", ".images")), s.file);
+		assert.ok(existsSync(s.file));
+	}
+	// Progress came before the end: one update with nothing done, and one with a picture done and one still running.
+	const updates = m.c.records.filter((r) => r.type === "event" && r.event.type === "tool_execution_update" && r.event.toolName === "generate_image");
+	assert.ok(updates.some((u) => u.event.partialResult.details.slots.every((s) => s.status === "running")));
+	assert.ok(updates.some((u) => u.event.partialResult.details.slots.map((s) => s.status).sort().join() === "done,running"));
+	const log = readFileSync(m.mock.MOCK_LOG, "utf8");
+	assert.equal(log.split("\n").filter((l) => l === "image gemini-3.1-flash-image 1024x1024").length, 2);
+	// The agent was given the paths as text, and the turn went on.
+	await m.c.until((r) => r.type === "event" && r.event.type === "message_end" && /Tool said: Made 2 of 2 pictures/.test(JSON.stringify(r.event.message.content)), 30_000, "for the reply");
+	// Settings → Pictures sees them.
+	const usage = (await m.c.call("image_usage")).data;
+	assert.deepEqual([usage.count, usage.credits, usage.cheapest], [2, 5, "gemini-3.1-flash-image"]);
+	assert.deepEqual(usage.models.map((x) => x.id), ["gpt-image", "gemini-3.1-flash-image"]);
+});
+
+test("over the picture limit the user is asked, with no Always; declining makes nothing", async (t) => {
+	const tool = { name: "generate_image", arguments: { prompt: "A logo", count: 3, model: "gpt-image" } };
+	const m = await withModel(t, { MOCK_TOOL: JSON.stringify(tool), MOCK_IMAGES: "1" });
+	// Bypass all does not skip a spending limit.
+	await m.c.call("settings_set", { settings: { approvalMode: "auto" } });
+	await m.c.call("prompt", { text: "buat 3 logo" });
+	const card = await m.c.until((r) => r.type === "approval" && r.toolName === "generate_image", 30_000, "for the approval card");
+	assert.equal(card.key, "", "nothing to remember: no Always");
+	assert.match(card.summary, /^3 × gpt-image \(1024x1024\) ≈ 12 credits/);
+	assert.equal(card.reason, "Over your picture limit without asking");
+	await m.c.call("approval_reply", { approvalId: card.approvalId, allow: false });
+	const end = await m.c.until((r) => r.type === "event" && r.event.type === "tool_execution_end" && r.event.toolName === "generate_image", 30_000, "for the tool");
+	assert.equal(end.event.isError, true);
+	assert.match(JSON.stringify(end.event.result.content), /The user declined/);
+	assert.ok(!readFileSync(m.mock.MOCK_LOG, "utf8").includes("image "), "no picture was bought");
+});
+
+test("pictures turned off: the open chat is rebuilt without the tool; on again brings it back", async (t) => {
+	const m = await withModel(t, { MOCK_IMAGES: "1" });
+	const tools = async () => (await m.c.call("hello")).data.tools;
+	assert.ok((await tools()).includes("generate_image"), "on by default");
+	await m.c.call("settings_set", { settings: { imageAgentTool: false } });
+	assert.ok(!(await tools()).includes("generate_image"));
+	await m.c.call("settings_set", { settings: { imageAgentTool: true } });
+	assert.ok((await tools()).includes("generate_image"));
 });

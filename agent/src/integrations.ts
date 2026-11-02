@@ -62,6 +62,61 @@ interface GithubGrant {
 const GITHUB_REFRESH_MARGIN_MS = 30 * 60_000;
 
 /** Raised when GitHub no longer accepts the sign-in; the app shows "sign in again". */
+/** Picture limits when the user set none. Kept in step with the app (lib/agent/integrations.dart). */
+export const IMAGE_DEFAULTS = {
+	imageModel: "auto",
+	imageAutoCredits: 10,
+	imageMaxPerCall: 4,
+	imageDailyCredits: 50,
+	imageOverLimit: "ask" as "ask" | "cheapest" | "refuse",
+	imageAgentTool: true,
+	imageUnattended: false,
+};
+
+/** The most pictures one call may ever make, whatever the setting says. */
+export const IMAGE_MAX_PER_CALL_CAP = 8;
+
+export type ImageSettings = typeof IMAGE_DEFAULTS;
+
+/** The picture settings in force (defaults filled in). */
+export function imageSettings(s: AppSettings): ImageSettings {
+	return {
+		imageModel: (s.imageModel ?? "").trim() || IMAGE_DEFAULTS.imageModel,
+		imageAutoCredits: s.imageAutoCredits ?? IMAGE_DEFAULTS.imageAutoCredits,
+		imageMaxPerCall: s.imageMaxPerCall ?? IMAGE_DEFAULTS.imageMaxPerCall,
+		imageDailyCredits: s.imageDailyCredits ?? IMAGE_DEFAULTS.imageDailyCredits,
+		imageOverLimit: s.imageOverLimit ?? IMAGE_DEFAULTS.imageOverLimit,
+		imageAgentTool: s.imageAgentTool ?? IMAGE_DEFAULTS.imageAgentTool,
+		imageUnattended: s.imageUnattended ?? IMAGE_DEFAULTS.imageUnattended,
+	};
+}
+
+/** Refuses picture settings that would break the limits (a negative cap, a count of 0, an unknown mode). */
+function checkImageSettings(s: AppSettings) {
+	const credits = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100_000;
+	if (s.imageAutoCredits !== undefined && !credits(s.imageAutoCredits)) {
+		throw new Error("The picture approval limit must be 0 (always ask) or a positive number of credits");
+	}
+	if (s.imageDailyCredits !== undefined && !credits(s.imageDailyCredits)) {
+		throw new Error("The daily picture limit must be 0 (no limit of its own) or a positive number of credits");
+	}
+	if (
+		s.imageMaxPerCall !== undefined &&
+		!(typeof s.imageMaxPerCall === "number" && Number.isInteger(s.imageMaxPerCall) && s.imageMaxPerCall >= 1 && s.imageMaxPerCall <= IMAGE_MAX_PER_CALL_CAP)
+	) {
+		throw new Error(`Pictures per request must be a whole number from 1 to ${IMAGE_MAX_PER_CALL_CAP}`);
+	}
+	if (s.imageOverLimit !== undefined && !["ask", "cheapest", "refuse"].includes(s.imageOverLimit)) {
+		throw new Error("Unknown choice for what happens over the picture limits");
+	}
+	if (s.imageModel !== undefined && (typeof s.imageModel !== "string" || s.imageModel.length > 200)) {
+		throw new Error("Invalid default image model");
+	}
+	for (const k of ["imageAgentTool", "imageUnattended"] as const) {
+		if (s[k] !== undefined && typeof s[k] !== "boolean") throw new Error(`${k} must be on or off`);
+	}
+}
+
 export class GithubAuthError extends Error {
 	readonly code = "github_auth_expired";
 	constructor() {
@@ -129,6 +184,23 @@ export interface AppSettings {
 	fallbackModels?: { provider: string; model: string }[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
+	/**
+	 * Picture making (image.ts), with limits of its own inside the daily budget. Unset means the defaults in
+	 * IMAGE_DEFAULTS. imageModel "auto" picks the cheapest image model by the live rates.
+	 */
+	imageModel?: string;
+	/** Credits one request of the agent may spend on pictures without asking; 0 = always ask. */
+	imageAutoCredits?: number;
+	/** Pictures one call may make. */
+	imageMaxPerCall?: number;
+	/** Credits a day for pictures; 0 = no cap of their own (the daily budget still applies). */
+	imageDailyCredits?: number;
+	/** Over a limit: ask the user, use the cheapest model instead (when that fits), or refuse. */
+	imageOverLimit?: "ask" | "cheapest" | "refuse";
+	/** Whether the agent has the generate_image tool at all; unset = on. */
+	imageAgentTool?: boolean;
+	/** Whether runs nobody watches (scheduled tasks, a server's runs) may make pictures; unset = off. */
+	imageUnattended?: boolean;
 	/**
 	 * Summarize the chat once its context passes this many tokens (host.ts capContext), on models whose own limit is
 	 * larger: every request re-reads the whole context, so a 1M-token model would otherwise pay for ~850k tokens a
@@ -301,6 +373,7 @@ export class Integrations {
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
 			dailyBudget: dailyBudget ?? 0,
+			...imageSettings(this.settings),
 			// Null while the user set nothing: the limit then follows the open chat's model (compactLimit). An app too old
 			// to know the share shows its old default instead, which only mislabels the row. The floor is the fallback.
 			compactAt: this.settings.compactAt ?? null,
@@ -356,6 +429,7 @@ export class Integrations {
 		if (next.subagentMinutesLimit !== undefined && !limit(next.subagentMinutesLimit, true)) {
 			throw new Error("The subagent time limit must be 0 (no limit) or a whole number of minutes");
 		}
+		checkImageSettings(next);
 		// 0 turns the host's summaries off (pi's own stay); anything else must be a sane token count.
 		if (next.compactAt !== undefined && !(typeof next.compactAt === "number" && Number.isInteger(next.compactAt) && next.compactAt >= 0)) {
 			throw new Error("The context limit must be 0 (the model's own limit) or a whole number of tokens");

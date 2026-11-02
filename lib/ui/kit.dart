@@ -552,6 +552,7 @@ IconData toolIcon(String? name) => switch (name) {
   'web_screenshot' => LucideIcons.camera,
   'todo_write' => LucideIcons.listTodo,
   'background_job' => LucideIcons.hourglass,
+  'generate_image' => LucideIcons.image,
   _ => LucideIcons.wrench,
 };
 

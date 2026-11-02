@@ -19,7 +19,8 @@ import 'kit.dart';
 import 'links.dart';
 import 'i18n.dart';
 import 'illustration.dart';
-import 'image_gen_screen.dart';
+import 'image_settings_screen.dart';
+import 'image_tool_card.dart';
 import 'mcp_screen.dart';
 import 'mesh.dart';
 import 'network_screen.dart';
@@ -267,10 +268,10 @@ class _SettingsHubState extends State<SettingsHub> {
                   ),
                   SettingsRow(
                     icon: LucideIcons.image,
-                    color: const Color(0xFF7C3AED),
-                    title: tr('Generate image'),
-                    subtitle: tr('Make pictures with GripHub image models'),
-                    onTap: () => _open(ImageGenScreen(agent: agent)),
+                    color: imageViolet,
+                    title: tr('Pictures'),
+                    subtitle: imageLimitsSummary(agent.integrations.settings),
+                    onTap: () => _open(ImageSettingsScreen(agent: agent)),
                   ),
                 ],
               ),

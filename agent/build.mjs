@@ -98,7 +98,8 @@ await build({
 	platform: "node",
 	format: "esm",
 	target: "node24",
-	external: ["@earendil-works/pi-coding-agent"],
+	// pi-ai comes with pi (same version, hoisted in the staged node_modules); providers.ts reads its model catalog.
+	external: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
 	// Bundled CommonJS deps (the MCP SDK's cross-spawn) require() Node builtins.
 	banner: { js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);' },
 	logLevel: "warning",

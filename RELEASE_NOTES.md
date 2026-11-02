@@ -2,14 +2,20 @@
 
 ## Bahasa Indonesia
 
-- Edit & kirim ulang kini bertanya dulu. Sebelumnya semua pesan sesudahnya langsung keluar dari chat (dan dilupakan agent) tanpa pertanyaan dan tanpa undo, sementara file yang sudah diubah agent tetap berubah. Sekarang muncul lembar yang menyebut berapa pesan yang keluar, bahwa file tidak ikut dikembalikan (pakai Perubahan & undo), dan menawarkan Cabangkan lebih dulu: chat disalin dan chat ini tetap utuh.
-- Subagent pertama di setiap chat kini meminta persetujuan (bila mode persetujuan Hanya yang berisiko atau Tanya semua). Kartunya menampilkan tugas dan profilnya (baca atau penuh). Sekali kamu mengizinkan, subagent berikutnya di chat itu tidak ditanya lagi, dan Selalu berarti semua subagent. Sebelumnya subagent, yang bisa memakai sampai 50 kredit (sekitar Rp 15.000) masing-masing dan tiga sekaligus, mulai tanpa kabar.
-- Setelah key GripHub pertama disimpan, aplikasi menawarkan batas harian (10, 25, 50, atau 100 kredit, lengkap dengan nilai rupiahnya) atau tanpa batas. Pemakaian tidak dibatasi secara bawaan, dan sebelumnya tidak ada yang menyebutnya. Batas ini bisa diubah di Pengaturan, Pemakaian & anggaran.
-- Baris Pemakaian & anggaran di Pengaturan kini menyebut "Tanpa batas harian: ketuk untuk mengatur" bila belum ada batas. Layar Subagent menyebut berapa kredit yang bisa dipakai tiap subagent dan bahwa tiga bisa berjalan sekaligus.
+- Agent kini bisa membuat gambar langsung di chat. Minta saja, misalnya "buatkan logo kedai kopi, 2 variasi", dengan model chat apa pun. Secara bawaan dipakai model gambar termurah (menurut tarif saat itu, termasuk promo), kecuali kamu menyebut modelnya. Hasilnya berupa gambar asli (bukan SVG), disimpan di folder `.images` proyek.
+- Selama gambar dibuat, kotaknya berkilau dengan ukuran akhirnya, lalu gambar muncul halus begitu jadi, satu per satu. Ketuk untuk layar penuh; tekan lama untuk simpan ke HP, bagikan, salin path, atau salin prompt. Bila animasi dikurangi di HP, gambar langsung tampil.
+- Gambar yang gagal disebut jelas: tidak ditagih, atau mungkin tetap ditagih (cek Pemakaian sebelum mencoba lagi). Tidak ada percobaan ulang otomatis.
+- Pengaturan baru, Gambar, punya batas sendiri: sampai berapa kredit tanpa bertanya (bawaan 10), berapa gambar per permintaan (bawaan 4), batas harian gambar (bawaan 50 kredit), dan apa yang terjadi bila lewat batas (tanya dulu, pakai termurah, atau tolak). Di sana juga terlihat pemakaian gambar hari ini.
+- Bila lewat batas, muncul kartu "Buat gambar ini?" dengan model, jumlah, dan perkiraan kreditnya. Kartu ini sengaja tanpa Selalu, dan mode Lewati semua izin tidak melewatinya.
+- Gambar kini ikut dihitung dalam batas harian akun, baik dari agent maupun dari layar Buat gambar.
+- Model Anthropic dan OpenAI di GripHub Router kini dipanggil dengan format aslinya masing-masing, tetap lewat router dan key GripHub yang sama.
 
 ## English
 
-- Edit & resend now asks first. Before, every message after it left the chat (and the agent forgot it) with no question and no undo, while the files the agent had changed stayed changed. A sheet now says how many messages leave, that files are not put back (use Changes & undo), and offers Fork first: the chat is copied and this one stays as it is.
-- The first subagent of each chat now asks for approval (in the Risky only and Ask all modes). The card shows the task and its profile (read or full). Once you allow it, later subagents in that chat are not asked, and Always means every subagent. Before, a subagent, which can spend up to 50 credits (about Rp 15,000) each and three at a time, started without a word.
-- After the first GripHub key is saved, the app offers a daily limit (10, 25, 50 or 100 credits, with each one's rupiah value) or no limit. Spending is not capped by default, and nothing said so. The limit can be changed in Settings, under Usage & budget.
-- The Usage & budget row in Settings now says "No daily limit: tap to set one" when there is none. The Subagent screen says how many credits each subagent can spend and that three can run at once.
+- The agent can now make pictures right in the chat. Just ask, for example "make a coffee shop logo, 2 variations", with any chat model. By default it uses the cheapest picture model (at the current rate, promos included) unless you name one. The result is a real picture (not SVG), saved in the project's `.images` folder.
+- While a picture is made, its tile shimmers at its final size, then the picture comes in smoothly as soon as it is done, one by one. Tap for full screen; long-press to save to the phone, share, copy the path or copy the prompt. With reduced animations on the phone, pictures show at once.
+- A picture that fails says so plainly: not billed, or maybe billed (check Usage before trying again). Nothing is retried on its own.
+- A new Settings screen, Pictures, has its own limits: up to how many credits without asking (10 by default), how many pictures per request (4), a daily picture limit (50 credits), and what happens over a limit (ask first, use the cheapest, or refuse). It also shows today's picture spending.
+- Over a limit, a "Make these pictures?" card shows the model, the count and the estimated credits. It has no Always on purpose, and Bypass all permissions does not skip it.
+- Pictures now count toward the account's daily limit, from the agent and from the Generate image screen.
+- Anthropic and OpenAI models on GripHub Router are now called in their own formats, still through the router with the same GripHub key.

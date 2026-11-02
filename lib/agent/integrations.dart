@@ -250,6 +250,19 @@ class AppSettings {
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;
 
+  /// Pictures (agent/src/image.ts), with limits of their own inside the daily budget. Defaults as the host's
+  /// IMAGE_DEFAULTS, for a host too old to send them.
+  String get imageModel => json['imageModel'] as String? ?? 'auto';
+  double get imageAutoCredits => (json['imageAutoCredits'] as num?)?.toDouble() ?? 10;
+  int get imageMaxPerCall => (json['imageMaxPerCall'] as num?)?.toInt() ?? 4;
+  double get imageDailyCredits => (json['imageDailyCredits'] as num?)?.toDouble() ?? 50;
+  String get imageOverLimit => json['imageOverLimit'] as String? ?? 'ask';
+  bool get imageAgentTool => json['imageAgentTool'] != false;
+  bool get imageUnattended => json['imageUnattended'] == true;
+
+  /// Whether the host knows about picture settings at all (an older one does not: the screen says so).
+  bool get hasImageSettings => json.containsKey('imageMaxPerCall');
+
   /// ntfy pushes from a server agent while the app is closed (agent/src/notify.ts). Off until turned on.
   Map<String, dynamic> get _notify => (json['notify'] as Map?)?.cast<String, dynamic>() ?? const {};
   bool get notifyEnabled => _notify['enabled'] == true;

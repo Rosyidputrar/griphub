@@ -317,6 +317,16 @@ export class Guard {
 	}
 
 	/**
+	 * Asked from inside a tool about spending (generate_image over the user's picture limit). A spending limit, not a
+	 * permission: "Bypass all" does not skip it, and there is no "Always" (the empty key is never remembered), else
+	 * one tap would turn the limit off for good.
+	 */
+	askSpend(toolName: string, summary: string, reason: string): Promise<boolean> {
+		if (this.mode === "deny_risky") return Promise.resolve(false);
+		return this.request({ toolName, summary, reason, key: "" });
+	}
+
+	/**
 	 * The approvals still waiting for an answer, as the records that asked for them. A server agent's app may have been
 	 * away when they were sent (and the replay buffer may no longer hold them); it asks for these after reconnecting.
 	 */

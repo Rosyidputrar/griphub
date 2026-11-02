@@ -109,6 +109,13 @@ class FakeHost {
     'subagentNotifyApproval': stored['subagentNotifyApproval'] ?? true,
     'subagentNotifyRunning': stored['subagentNotifyRunning'] ?? true,
     'subagentApprovalOverride': stored.containsKey('subagentApprovalMode'),
+    'imageModel': stored['imageModel'] ?? 'auto',
+    'imageAutoCredits': stored['imageAutoCredits'] ?? 10,
+    'imageMaxPerCall': stored['imageMaxPerCall'] ?? 4,
+    'imageDailyCredits': stored['imageDailyCredits'] ?? 50,
+    'imageOverLimit': stored['imageOverLimit'] ?? 'ask',
+    'imageAgentTool': stored['imageAgentTool'] ?? true,
+    'imageUnattended': stored['imageUnattended'] ?? false,
   };
 
   /// Answers for the app's other calls to the platform side ('clipboardImage', ...), by method name.

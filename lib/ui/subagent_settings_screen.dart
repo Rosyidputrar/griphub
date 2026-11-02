@@ -151,7 +151,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                 ),
               ),
               SectionLabel(tr('Cost limit'), padding: label()),
-              _LimitChooser(
+              LimitChooser(
                 key: const ValueKey('cost'),
                 value: cost,
                 presets: const [10, 25, 50],
@@ -169,7 +169,7 @@ class _SubagentSettingsScreenState extends State<SubagentSettingsScreen> {
                 ),
               ),
               SectionLabel(tr('Time limit'), padding: label()),
-              _LimitChooser(
+              LimitChooser(
                 key: const ValueKey('time'),
                 value: time,
                 presets: const [15, 30, 60],
@@ -345,8 +345,9 @@ class _Toggle extends StatelessWidget {
 /// value's preset, No limit, or Custom (also while the custom field is open).
 /// The custom field opens prefilled with the current value and checks the
 /// number inline.
-class _LimitChooser extends StatefulWidget {
-  const _LimitChooser({
+/// Presets, "no limit" and a custom number for one limit (Settings → Subagent, Settings → Pictures).
+class LimitChooser extends StatefulWidget {
+  const LimitChooser({
     super.key,
     required this.value,
     required this.presets,
@@ -355,7 +356,21 @@ class _LimitChooser extends StatefulWidget {
     required this.decimals,
     required this.max,
     required this.onSave,
+    this.zeroLabel,
+    this.zeroIcon = LucideIcons.infinity,
+    this.zeroFirst = false,
+    this.wholeError,
   });
+
+  /// Said for a value that is not a whole number above 0, where [decimals] is false ("minutes" when null).
+  final String? wholeError;
+
+  /// What 0 means here ("No limit" when null).
+  final String? zeroLabel;
+  final IconData zeroIcon;
+
+  /// The 0 chip comes before the presets (where it is the strictest choice, "Always ask").
+  final bool zeroFirst;
 
   final double value;
   final List<int> presets;
@@ -366,10 +381,10 @@ class _LimitChooser extends StatefulWidget {
   final Future<bool> Function(num value) onSave;
 
   @override
-  State<_LimitChooser> createState() => _LimitChooserState();
+  State<LimitChooser> createState() => LimitChooserState();
 }
 
-class _LimitChooserState extends State<_LimitChooser> {
+class LimitChooserState extends State<LimitChooser> {
   final _field = TextEditingController();
   final _focus = FocusNode();
   bool _open = false;
@@ -413,9 +428,9 @@ class _LimitChooserState extends State<_LimitChooser> {
     final v = parseLocalNumber(_field.text);
     String? error;
     if (v == null || v <= 0) {
-      error = widget.decimals ? tr('Enter a number above 0.') : tr('Enter a whole number of minutes, 1 or more.');
+      error = widget.decimals ? tr('Enter a number above 0.') : widget.wholeError ?? tr('Enter a whole number of minutes, 1 or more.');
     } else if (!widget.decimals && v != v.roundToDouble()) {
-      error = tr('Enter a whole number of minutes, 1 or more.');
+      error = widget.wholeError ?? tr('Enter a whole number of minutes, 1 or more.');
     } else if (v > widget.max) {
       error = tr('At most {n}.').replaceAll('{n}', localNumber(formatCredits(widget.max)));
     }
@@ -453,9 +468,10 @@ class _LimitChooserState extends State<_LimitChooser> {
         Wrap(
           spacing: 8,
           children: [
+            if (widget.zeroFirst) chip(widget.zeroLabel ?? tr('No limit'), !_open && _isNone, () => _pick(0), icon: widget.zeroIcon),
             for (final preset in widget.presets)
               chip(widget.format(preset.toDouble()), !_open && widget.value == preset, () => _pick(preset)),
-            chip(tr('No limit'), !_open && _isNone, () => _pick(0), icon: LucideIcons.infinity),
+            if (!widget.zeroFirst) chip(widget.zeroLabel ?? tr('No limit'), !_open && _isNone, () => _pick(0), icon: widget.zeroIcon),
             chip(
               _isCustom && !_open ? '${tr('Custom')}: ${widget.format(widget.value)}' : tr('Custom'),
               customSelected,

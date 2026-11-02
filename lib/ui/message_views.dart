@@ -18,6 +18,7 @@ import '../agent/updater.dart';
 import 'attachment_viewer.dart';
 import 'code_view.dart';
 import 'errors.dart';
+import 'image_tool_card.dart';
 import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
@@ -391,6 +392,42 @@ class _QueuedMessageViewState extends State<QueuedMessageView> with SingleTicker
   }
 }
 
+/// generate_image's card: its pictures are on the agent's machine (the phone, or a server); saving or sharing one
+/// copies it to this phone first when it is on a server.
+Widget _imageCard(BuildContext context, ToolRun run, {AgentController? agent}) {
+  final fs = agent?.fs ?? const LocalFs();
+
+  void say(String text) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  return ImageToolCard(
+    job: run.imageJob!,
+    status: run.status,
+    output: run.output,
+    fs: fs,
+    onSave: agent == null
+        ? null
+        : (path) async {
+            try {
+              final landed = await agent.client.saveToDownloads(await fs.toPhoneFile(path));
+              say('${tr('Saved to')} $landed');
+            } catch (_) {
+              say(tr('Could not save the image.'));
+            }
+          },
+    onShare: agent == null
+        ? null
+        : (path) async {
+            try {
+              await agent.client.shareFile(await fs.toPhoneFile(path));
+            } catch (e) {
+              say(friendlyError(e));
+            }
+          },
+  );
+}
+
 class AssistantMessageView extends StatelessWidget {
   const AssistantMessageView(
     this.entry, {
@@ -454,6 +491,8 @@ class AssistantMessageView extends StatelessWidget {
             card ??
                 (b.toolName == 'todo_write'
                     ? TodoCard(block: b, run: tools[b.toolCallId])
+                    : b.toolName == 'generate_image' && tools[b.toolCallId]?.imageJob != null
+                    ? _imageCard(context, tools[b.toolCallId]!, agent: agent)
                     : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, agent: agent, live: live)),
           );
       }
