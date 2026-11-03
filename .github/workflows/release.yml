@@ -20,6 +20,11 @@
 # cannot be fetched, the pubspec math stands on its own.
 # Pull request builds use run numbers too, so release numbers can skip; they still only go up.
 #
+# The users' notes follow the release (tool/release_notes.py): before the build, CHANGELOG.md's "Belum dirilis" section
+# is named after the version, so the APK's own changelog screen has it; RELEASE_NOTES.md is the release's body. Once
+# published, the "finalize" job does the same to the repository (a version heading for the entries, a new empty section,
+# RELEASE_NOTES.md emptied), so the next release starts clean. That is the one job that can write to the repository.
+#
 # Every APK is signed with the same release key from the repository secrets, so each update installs over the
 # previous one. Without the secrets the run fails instead of publishing an APK signed with another key.
 #   KEYSTORE_BASE64    base64 of the .jks file (base64 -w0 release.jks)
@@ -63,6 +68,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.name }}
+      date: ${{ steps.notes.outputs.date }}
     steps:
       - name: Refuse releases off main
         if: github.event_name != 'pull_request' && github.ref != 'refs/heads/main'
@@ -112,6 +120,16 @@ jobs:
           echo "name=$version" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "Releasing $version ($code)"
+
+      # The version's own heading in the changelog the APK carries (the repository's file is done by "finalize").
+      - name: Version the changelog
+        id: notes
+        run: |
+          date=$(TZ=Asia/Jakarta date +%F)
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+          # A slip in the notes must not hold a release back: the APK then carries the changelog as it is.
+          python3 tool/release_notes.py stamp --version "${{ steps.version.outputs.name }}" --date "$date" \
+            || echo "::warning::CHANGELOG.md could not be versioned; fix it by hand."
 
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
@@ -222,7 +240,7 @@ jobs:
           # Never generate notes from pushed commits: that would publish the           
           # source repository and branch names on the public releases page           
           # (e.g. "Merge pull request #N from ...").
-          if [ -f RELEASE_NOTES.md ]; then cp RELEASE_NOTES.md notes.md; else echo "GripHub ${{ steps.version.outputs.name }}" > notes.md; fi
+          if python3 tool/release_notes.py has-notes; then cp RELEASE_NOTES.md notes.md; else echo "GripHub ${{ steps.version.outputs.name }}" > notes.md; fi
           # A re-run of the same run number replaces the files of its own release.
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
@@ -236,3 +254,40 @@ jobs:
       - name: Remove signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks" android/key.properties
+
+  # After a published release: the repository's CHANGELOG.md gets the version's heading and a new empty section,
+  # RELEASE_NOTES.md is emptied. A separate job so the build above never holds a token that can write.
+  # The files are done on the commit that was released; if main has moved on and the change no longer fits, it says so
+  # and leaves the files for a person (a failure here must not fail a release that is already out).
+  finalize:
+    if: github.event_name != 'pull_request'
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Version the changelog and empty the release notes
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          DATE: ${{ needs.release.outputs.date }}
+        run: |
+          if grep -q "^## v$VERSION " CHANGELOG.md; then echo "CHANGELOG.md already has v$VERSION; nothing to do"; exit 0; fi
+          python3 tool/release_notes.py stamp --version "$VERSION" --date "$DATE" || { echo "::warning::CHANGELOG.md could not be versioned; fix it by hand."; exit 0; }
+          python3 tool/release_notes.py reset
+          if git diff --quiet; then echo "Nothing changed"; exit 0; fi
+          git config user.name Rosyidputrar
+          git config user.email 230941041+Rosyidputrar@users.noreply.github.com
+          git commit -qam "Release v$VERSION: version the changelog, empty the release notes"
+          git fetch -q origin main
+          if ! git rebase origin/main; then
+            git rebase --abort
+            echo "::warning::main moved on and this change no longer fits; version CHANGELOG.md and empty RELEASE_NOTES.md by hand."
+            exit 0
+          fi
+          git push origin HEAD:main || echo "::warning::Could not push; version CHANGELOG.md and empty RELEASE_NOTES.md by hand."
