@@ -335,8 +335,10 @@ const _id = <String, String>{
   // Chat (plain conversation) and Coding
   'Chat': 'Chat',
   'Coding': 'Coding',
-  'Just talk, or build something in a project folder.': 'Ngobrol saja, atau bangun sesuatu di folder proyek.',
-  'Ask anything, look up the news, get help writing': 'Tanya apa saja, cari berita, minta bantuan menulis',
+  'Coding chat': 'Chat coding',
+  'Each chat can have its own folder to work in.': 'Setiap chat bisa punya folder kerjanya sendiri.',
+  'Build in a project folder': 'Bangun di folder proyek',
+  'Ask, look up news, write': 'Tanya, cari berita, menulis',
   'How can I help?': 'Ada yang bisa dibantu?',
   'Ask a question, look something up, or get help with writing. For building apps, start a Coding chat.':
       'Tanya sesuatu, cari informasi, atau minta bantuan menulis. Untuk membuat aplikasi, mulai chat Coding.',

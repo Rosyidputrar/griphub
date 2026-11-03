@@ -14,6 +14,10 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 ## Belum dirilis
 
 ### Baru
+- **Tombol + membuka dua pilihan: Chat dan Coding.**
+  - **Chat** langsung memulai percakapan biasa, tanpa memilih folder. **Coding** membuka lembar untuk memilih proyek, seperti sebelumnya.
+  - Tombol + berubah jadi silang, halaman di belakang meredup, dan pilihan muncul bergantian dari tombol. Kembali atau ketukan di luar menutup menu lebih dulu.
+  - Bila **Kurangi animasi** aktif, pilihan langsung tampil tanpa gerak.
 - **Chat biasa, terpisah dari chat coding.** Ketuk +, lalu pilih **Chat** untuk bertanya, mencari berita, atau minta bantuan menulis, seperti ChatGPT di web.
   - Agent di chat ini hanya punya pencarian web, baca halaman, baca lampiran, dan pembuat gambar (kalau aktif). Tanpa terminal, file proyek, todo, atau subagent, jadi pertanyaan biasa tidak lagi memicu banyak tool.
   - Satu jawaban paling banyak memakai beberapa pencarian. Lewat itu, agent diminta menjawab dengan yang sudah ada.
