@@ -97,8 +97,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   AgentController get agent => widget.agent;
 
-  /// "/par" while typing a command name; null otherwise.
+  /// "/par" while typing a command name; null otherwise. A plain conversation has no commands (they are the skills and
+  /// templates of the coding agent).
   String? get _slashQuery {
+    if (agent.isChat) return null;
     final t = input.text;
     if (t == _suggestionsClosedFor) return null;
     if (!t.startsWith('/') || t.contains(' ') || t.contains('\n')) return null;
@@ -201,13 +203,16 @@ class _ChatScreenState extends State<ChatScreen> {
     if (p != null && input.text.trim().isEmpty) _prefill(p.text);
   }
 
-  /// How many files the project has to commit; none when it isn't a repository or the host can't say.
+  /// How many files the project has to commit; none when it isn't a repository or the host can't say. A plain
+  /// conversation has no project to review.
   Future<void> _checkChanges() async {
     var n = 0;
-    try {
-      final st = await agent.features.gitStatus();
-      n = st.isRepo ? st.files.length : 0;
-    } catch (_) {}
+    if (!agent.isChat) {
+      try {
+        final st = await agent.features.gitStatus();
+        n = st.isRepo ? st.files.length : 0;
+      } catch (_) {}
+    }
     if (mounted && n != _changedFiles) setState(() => _changedFiles = n);
   }
 
@@ -249,8 +254,9 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// The "@" being typed at the cursor, if any. A plain conversation has no project files to name.
   ({int start, String query})? get _mention =>
-      input.selection.isCollapsed ? mentionAt(input.text, input.selection.baseOffset) : null;
+      agent.isChat || !input.selection.isCollapsed ? null : mentionAt(input.text, input.selection.baseOffset);
 
   /// Asks the host for files matching the @ being typed, a moment after the typing stops; an answer for an older query
   /// is dropped. No @ at the cursor (or no project): no list.
@@ -589,7 +595,10 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: [
             // Phone or server, and whether the server can be reached; only once a server is set up.
             ConnectionChip(agent: agent),
-            if (_compactBar(context))
+            // A plain conversation has no terminal, deploy or project to show.
+            if (agent.isChat)
+              const SizedBox.shrink()
+            else if (_compactBar(context))
               ValueListenableBuilder<bool>(
                 valueListenable: deployPreparing,
                 builder: (context, preparing, _) => PopupMenuButton<String>(
@@ -692,18 +701,19 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
-            DevServerBanner(agent: agent),
+            if (!agent.isChat) DevServerBanner(agent: agent),
             ApprovalCards(features: agent.features, agent: agent),
-            BypassBar(agent: agent),
-            if (_changedFiles > 0 && !_reviewClosed && !agent.busy)
+            // A plain conversation has nothing to bypass, review or plan: no bars for them.
+            if (!agent.isChat) BypassBar(agent: agent),
+            if (!agent.isChat && _changedFiles > 0 && !_reviewClosed && !agent.busy)
               ReviewBanner(
                 files: _changedFiles,
                 onReview: _openReview,
                 onClose: () => setState(() => _reviewClosed = true),
               ),
-            PlanBar(agent: agent),
+            if (!agent.isChat) PlanBar(agent: agent),
             // The agent's todo list for the task at hand (todo_write).
-            if (agent.todo != null)
+            if (!agent.isChat && agent.todo != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
                 child: TodoProgressBar(agent: agent),
@@ -956,11 +966,22 @@ class _Title extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        if (project != null || agent.model != null)
+        if (project != null || agent.model != null || agent.isChat)
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (project != null) ...[
+              if (agent.isChat) ...[
+                Icon(LucideIcons.messageCircle, size: 12, color: p.accent),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    agent.model == null ? tr('Chat') : '${tr('Chat')} · ${agent.model!.name}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11.5, color: p.muted, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ] else if (project != null) ...[
                 Icon(LucideIcons.folderGit2, size: 12, color: p.accent),
                 const SizedBox(width: 4),
                 Flexible(
@@ -999,7 +1020,38 @@ class _EmptyState extends StatelessWidget {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final ready = agent.hasModel;
-    final suggestions = [
+    final suggestions = agent.isChat
+        ? [
+            (
+              LucideIcons.newspaper,
+              const Color(0xFFFF7A1A),
+              'Today\'s news',
+              'What happened today',
+              'What are the most important news today? Give me a short summary with sources.',
+            ),
+            (
+              LucideIcons.lightbulb,
+              const Color(0xFF3B82F6),
+              'Explain something',
+              'In plain words',
+              'Explain this in simple words, with an example: ',
+            ),
+            (
+              LucideIcons.penLine,
+              const Color(0xFF14B8A6),
+              'Help me write',
+              'A message, email or post',
+              'Help me write this message: ',
+            ),
+            (
+              LucideIcons.languages,
+              const Color(0xFF8E4EC6),
+              'Translate',
+              'Between any two languages',
+              'Translate this to English: ',
+            ),
+          ]
+        : [
       // Same names, blurbs and colours as the quick starts on Home.
       (
         LucideIcons.layoutTemplate,
@@ -1045,14 +1097,18 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                tr(ready ? 'What should we build?' : 'Connect a model to begin'),
+                tr(ready ? (agent.isChat ? 'How can I help?' : 'What should we build?') : 'Connect a model to begin'),
                 style: text.displaySmall?.copyWith(fontSize: 26),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 10),
               Text(
                 ready
-                    ? tr('The agent codes, runs commands, installs packages and deploys, right here on your phone.')
+                    ? tr(
+                        agent.isChat
+                            ? 'Ask a question, look something up, or get help with writing. For building apps, start a Coding chat.'
+                            : 'The agent codes, runs commands, installs packages and deploys, right here on your phone.',
+                      )
                     : tr('The agent runs on your phone. Sign in to a provider or add an API key to choose its model.'),
                 style: text.bodyMedium?.copyWith(color: p.muted),
                 textAlign: TextAlign.center,
@@ -1237,7 +1293,9 @@ class _Composer extends StatelessWidget {
                 textCapitalization: TextCapitalization.sentences,
                 style: Theme.of(context).textTheme.bodyLarge,
                 decoration: InputDecoration(
-                  hintText: busy ? tr('Queue a follow-up…') : tr('Ask the agent to build, fix or deploy…'),
+                  hintText: busy
+                      ? tr('Queue a follow-up…')
+                      : tr(agent.isChat ? 'Ask anything…' : 'Ask the agent to build, fix or deploy…'),
                   filled: false,
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
@@ -1270,12 +1328,13 @@ class _Composer extends StatelessWidget {
                             const SizedBox(width: 6),
                             _ThinkingChip(agent: agent),
                           ],
-                          _IconChip(
-                            icon: LucideIcons.listChecks,
-                            label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
-                            active: agent.planMode,
-                            onTap: () => tellFailure(context, () => agent.setPlanMode(!agent.planMode)),
-                          ),
+                          if (!agent.isChat)
+                            _IconChip(
+                              icon: LucideIcons.listChecks,
+                              label: tr(agent.planMode ? 'Plan mode on' : 'Plan mode'),
+                              active: agent.planMode,
+                              onTap: () => tellFailure(context, () => agent.setPlanMode(!agent.planMode)),
+                            ),
                         ],
                       ),
                     ),

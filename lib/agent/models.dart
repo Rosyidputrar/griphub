@@ -128,6 +128,10 @@ class SessionSummary {
   int get messageCount => json['messageCount'] as int? ?? 0;
   DateTime get modified => DateTime.fromMillisecondsSinceEpoch(json['modified'] as int);
 
+  /// A plain conversation (agent/src/chatmode.ts), not a coding chat. An older host does not say: coding, as every
+  /// chat was before.
+  bool get isChat => json['chatMode'] == 'chat';
+
   String get title {
     final n = name?.trim();
     if (n != null && n.isNotEmpty) return n;

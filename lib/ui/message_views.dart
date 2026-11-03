@@ -494,7 +494,14 @@ class AssistantMessageView extends StatelessWidget {
                     ? TodoCard(block: b, run: tools[b.toolCallId])
                     : b.toolName == 'generate_image' && tools[b.toolCallId]?.imageJob != null
                     ? _imageCard(context, tools[b.toolCallId]!, agent: agent)
-                    : ToolCallView(block: b, run: tools[b.toolCallId], cwd: cwd, agent: agent, live: live)),
+                    : ToolCallView(
+                        block: b,
+                        run: tools[b.toolCallId],
+                        cwd: cwd,
+                        agent: agent,
+                        live: live,
+                        plain: agent?.isChat ?? false,
+                      )),
           );
       }
     }
@@ -1163,15 +1170,39 @@ class LiveTail extends StatelessWidget {
 }
 
 class ToolCallView extends StatefulWidget {
-  const ToolCallView({super.key, required this.block, required this.run, this.cwd, this.agent, this.live});
+  const ToolCallView({super.key, required this.block, required this.run, this.cwd, this.agent, this.live, this.plain = false});
   final Block block;
   final ToolRun? run;
   final String? cwd;
   final AgentController? agent;
   final Listenable? live;
 
+  /// In a plain conversation (agent/src/chatmode.ts) a web search or page read is one sentence ("Searched the web for
+  /// …") instead of a tool name and its arguments; a tap still opens the input and output.
+  final bool plain;
+
   @override
   State<ToolCallView> createState() => _ToolCallViewState();
+}
+
+/// What a web search or page read says in a plain conversation, as a sentence about what it is doing or did; null for
+/// any other tool, which keeps its card. The query or address is the model's own, shown as written.
+String? plainToolSentence(String? name, Map<String, dynamic>? args, ToolStatus? status) {
+  final running = status == null || status == ToolStatus.running;
+  String arg(String key) => (args?[key] as String?)?.trim() ?? '';
+  switch (name) {
+    case 'web_search':
+      final q = arg('query');
+      if (q.isEmpty) return running ? tr('Searching the web…') : tr('Searched the web');
+      return tr(running ? 'Searching the web for "{x}"' : 'Searched the web for "{x}"').replaceAll('{x}', q);
+    case 'web_fetch':
+      final u = arg('url');
+      final host = Uri.tryParse(u.contains('://') ? u : 'https://$u')?.host ?? '';
+      final shown = host.isEmpty ? u : host;
+      if (shown.isEmpty) return running ? tr('Opening a page…') : tr('Opened a page');
+      return tr(running ? 'Opening {x}' : 'Opened {x}').replaceAll('{x}', shown);
+  }
+  return null;
 }
 
 class _ToolCallViewState extends State<ToolCallView> {
@@ -1271,6 +1302,8 @@ class _ToolCallViewState extends State<ToolCallView> {
     // The background job this call started, while the app knows it.
     final job = b.toolName == 'background_job' ? widget.agent?.jobStore.forToolCall(b.toolCallId) : null;
 
+    final sentence = widget.plain ? plainToolSentence(b.toolName, args, status) : null;
+
     final Widget indicator = switch (status) {
       ToolStatus.done => Icon(LucideIcons.check, size: 15, color: p.success),
       ToolStatus.failed => Icon(LucideIcons.x, size: 15, color: p.danger),
@@ -1308,6 +1341,16 @@ class _ToolCallViewState extends State<ToolCallView> {
                   const SizedBox(width: 10),
                   Icon(toolIcon(b.toolName), size: 15, color: p.accent),
                   const SizedBox(width: 6),
+                  if (sentence != null)
+                    Expanded(
+                      child: Text(
+                        sentence,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+                      ),
+                    )
+                  else ...[
                   Text(
                     b.toolName ?? 'tool',
                     style: TextStyle(fontFamily: mono, fontSize: 12.5, fontWeight: FontWeight.w600, color: p.text),
@@ -1321,6 +1364,7 @@ class _ToolCallViewState extends State<ToolCallView> {
                       style: TextStyle(fontFamily: mono, fontSize: 12.5, color: p.muted),
                     ),
                   ),
+                  ],
                   if (previewable)
                     TextButton.icon(
                       onPressed: () => _preview(path, writing: writing),

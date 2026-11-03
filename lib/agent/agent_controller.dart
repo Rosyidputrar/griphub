@@ -56,6 +56,10 @@ class AgentController extends ChangeNotifier {
   String cwd = '';
   bool busy = false;
 
+  /// The open chat is a plain conversation (agent/src/chatmode.ts): a few tools, no project, no plan mode. False for a
+  /// coding chat, and with a host from before chat mode.
+  bool isChat = false;
+
   /// Set when the current model is billed differently than the user may expect.
   String? billingNotice;
 
@@ -581,8 +585,8 @@ class AgentController extends ChangeNotifier {
   /// Why a switch did not happen, for the user (English; the app translates it).
   final switchProblems = StreamController<String>.broadcast();
 
-  /// The [switchingTo] key of a new chat in [dir].
-  static String newChatKey(String? dir) => 'new:${dir ?? ''}';
+  /// The [switchingTo] key of a new chat in [dir], or of a new plain conversation when [chat].
+  static String newChatKey(String? dir, {bool chat = false}) => chat ? 'new-chat:' : 'new:${dir ?? ''}';
 
   /// Runs one switch to [target]; false when another is already running or the user kept the running turn.
   Future<bool> _switch(String target, Future<void> Function() go) async {
@@ -599,10 +603,13 @@ class AgentController extends ChangeNotifier {
     }
   }
 
-  /// Starts a session, in [dir] when given (a project folder), else the
-  /// workspace. False when the user kept the running turn instead, or another switch is still under way.
-  Future<bool> newSession({String? dir}) => _switch(newChatKey(dir), () async {
-    _applyState(await client.call<Map<String, dynamic>>('new_session', {'cwd': ?dir}));
+  /// Starts a session, in [dir] when given (a project folder), else the workspace. With [chat], a plain conversation
+  /// instead (agent/src/chatmode.ts): the host gives it its own folder, so [dir] does not count then. False when the
+  /// user kept the running turn instead, or another switch is still under way.
+  Future<bool> newSession({String? dir, bool chat = false}) => _switch(newChatKey(dir, chat: chat), () async {
+    _applyState(
+      await client.call<Map<String, dynamic>>('new_session', chat ? {'chatMode': 'chat'} : {'cwd': ?dir}),
+    );
     _resetTranscript();
   });
 
@@ -1230,6 +1237,8 @@ class AgentController extends ChangeNotifier {
     sessionName = s['sessionName'] as String?;
     sessionFile = s['sessionFile'] as String?;
     cwd = s['cwd'] as String? ?? cwd;
+    // Said with every chat's state; an answer without it (an older host) is a coding chat's.
+    isChat = s['chatMode'] == 'chat';
     billingNotice = s['billingNotice'] as String?;
     planMode = s['planMode'] == true;
     approvalMode = s['approvalMode'] as String? ?? approvalMode;

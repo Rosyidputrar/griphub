@@ -12,9 +12,14 @@ import 'theme.dart';
 /// The last path segment, for showing a folder by name.
 String folderName(String path) => path.split('/').where((s) => s.isNotEmpty).lastOrNull ?? path;
 
-/// Folder name to show for a session's cwd, or null for the workspace root.
+/// The folder a plain conversation works in, inside the workspace (agent/src/chatmode.ts CHAT_DIR_NAME).
+const chatFolderName = '.chats';
+
+/// Folder name to show for a session's cwd, or null for the workspace root and for a plain conversation's folder
+/// (which is not a project).
 String? sessionFolder(String cwd, String workspace) {
   if (cwd.isEmpty || cwd == workspace || cwd == '$workspace/') return null;
+  if (cwd == '$workspace/$chatFolderName' || cwd == '$workspace/$chatFolderName/') return null;
   return folderName(cwd);
 }
 

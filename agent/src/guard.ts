@@ -36,6 +36,12 @@ export interface GuardHooks {
 	cwd(): string;
 	/** Which chat the call belongs to (its session file), for what is asked once per chat. */
 	chat?(): string;
+	/**
+	 * Whether the open chat is a coding chat. A chat-mode chat (chatmode.ts) has nothing to plan and no project to
+	 * snapshot: plan mode (one switch for the app) and the checkpoint before the first change are left out there.
+	 * Absent: always a coding chat.
+	 */
+	coding?(): boolean;
 }
 
 /** Whether [path] is [dir] or somewhere inside it (lexically; resolve links first where they matter). */
@@ -363,9 +369,11 @@ export class Guard {
 		pi.on("tool_call", async (event) => {
 			const input = event.input as Record<string, unknown>;
 			const cwd = this.hooks.cwd();
+			const coding = this.hooks.coding?.() ?? true;
+			const planning = this.planMode && coding;
 
 			// The plan in plan mode is the numbered text the user approves; the checklist comes after.
-			if (this.planMode && event.toolName === "todo_write") {
+			if (planning && event.toolName === "todo_write") {
 				return {
 					block: true,
 					reason:
@@ -373,7 +381,7 @@ export class Guard {
 				};
 			}
 
-			if (this.planMode && !READ_ONLY.has(event.toolName)) {
+			if (planning && !READ_ONLY.has(event.toolName)) {
 				return {
 					block: true,
 					reason:
@@ -426,7 +434,7 @@ export class Guard {
 			}
 
 			// First change in this run: snapshot so the user can undo the whole run.
-			if (!READ_ONLY.has(event.toolName) && !this.changedThisRun) {
+			if (coding && !READ_ONLY.has(event.toolName) && !this.changedThisRun) {
 				this.changedThisRun = true;
 				await this.hooks.checkpoint(cwd, "Before the agent's changes").catch(() => {});
 			}
