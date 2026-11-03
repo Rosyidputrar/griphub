@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
@@ -22,6 +23,7 @@ import 'kit.dart';
 import 'illustration.dart';
 import 'mesh.dart';
 import 'new_chat_sheet.dart';
+import 'plus_menu.dart';
 import 'predictive_back.dart';
 import 'repos_screen.dart';
 import 'settings_hub.dart';
@@ -58,6 +60,9 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int tab = 0;
+
+  /// The "+" menu (Chat / Coding) is out. Back closes it before anything else (plus_menu.dart).
+  bool _menuOpen = false;
 
   /// The Chats tab is picking chats: Back leaves that first, and only then the tab.
   final _chatsSelecting = ValueNotifier(false);
@@ -296,7 +301,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
     switch (launch['action']) {
       case 'new_chat':
-        await _newChat();
+        if (mounted) setState(() => _menuOpen = true);
       case 'update':
         if (mounted) await showUpdateSheet(context, agent);
       case 'open_chat':
@@ -323,10 +328,24 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
   }
 
+  /// A coding chat: the sheet asks for its folder (a new project, an existing one, a recent one).
   Future<void> _newChat() async {
     final before = agent.sessionId;
     await showNewChatSheet(context, agent);
     if (mounted && agent.sessionId != before) await openChat(context, agent);
+  }
+
+  /// A plain conversation from the "+" menu: one tap, no folder to name.
+  Future<void> _startChat() async {
+    setState(() => _menuOpen = false);
+    final before = agent.sessionId;
+    await runWithProgress(context, tr('Starting the chat…'), () => agent.newSession(chat: true));
+    if (mounted && agent.sessionId != before) await openChat(context, agent);
+  }
+
+  void _startCoding() {
+    setState(() => _menuOpen = false);
+    _newChat();
   }
 
   @override
@@ -339,9 +358,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     ];
     // Back from Chats, Skills or Projects goes to Home, as in other apps; only Back from Home leaves the app.
     return PopScope(
-      canPop: tab == 0,
+      // The menu goes first, whatever tab it is over; one PopScope, so the tab does not also move.
+      canPop: tab == 0 && !_menuOpen,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && !_chatsSelecting.value) setState(() => tab = 0);
+        if (didPop) return;
+        if (_menuOpen) {
+          setState(() => _menuOpen = false);
+        } else if (!_chatsSelecting.value) {
+          setState(() => tab = 0);
+        }
       },
       child: Scaffold(
       extendBody: true,
@@ -351,9 +376,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         children: [
           for (var i = 0; i < tabs.length; i++)
             _TabLayer(active: i == tab, child: ContentWidth(child: tabs[i])),
+          PlusMenuLayer(
+            open: _menuOpen,
+            onClose: () => setState(() => _menuOpen = false),
+            onChat: _startChat,
+            onCoding: _startCoding,
+          ),
         ],
       ),
-      bottomNavigationBar: _NavBar(index: tab, onTap: (i) => setState(() => tab = i), onCreate: _newChat),
+      bottomNavigationBar: _NavBar(
+        index: tab,
+        onTap: (i) => setState(() {
+          tab = i;
+          _menuOpen = false;
+        }),
+        onCreate: () => setState(() => _menuOpen = !_menuOpen),
+        menuOpen: _menuOpen,
+      ),
       ),
     );
   }
@@ -398,7 +437,16 @@ class _TabLayerState extends State<_TabLayer> {
             ),
             curve: SmoothPageTransitions.curve,
             onEnd: () {
-              if (!widget.active && mounted) setState(() => hidden = true);
+              if (widget.active || !mounted) return;
+              // With animations off the fade has no time, and its end comes while the tree is still being built
+              // (setState is not allowed then): a frame later is as good, nothing shows meanwhile.
+              if (WidgetsBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && !widget.active) setState(() => hidden = true);
+                });
+              } else {
+                setState(() => hidden = true);
+              }
             },
             child: widget.child,
           ),
@@ -412,10 +460,11 @@ class _TabLayerState extends State<_TabLayer> {
 // Navigation bar: two tabs, a raised create button, two tabs.
 
 class _NavBar extends StatelessWidget {
-  const _NavBar({required this.index, required this.onTap, required this.onCreate});
+  const _NavBar({required this.index, required this.onTap, required this.onCreate, required this.menuOpen});
   final int index;
   final void Function(int) onTap;
   final VoidCallback onCreate;
+  final bool menuOpen;
 
   static const _items = [
     (LucideIcons.house, 'Home'),
@@ -483,7 +532,7 @@ class _NavBar extends StatelessWidget {
                 ),
               ),
             ),
-            Positioned(bottom: 30, child: _CreateButton(onTap: onCreate)),
+            Positioned(bottom: 30, child: _CreateButton(onTap: onCreate, open: menuOpen)),
           ],
         ),
       ),
@@ -564,8 +613,11 @@ class _NavItemState extends State<_NavItem> {
 
 /// The raised round "new chat" button in the middle of the bar.
 class _CreateButton extends StatefulWidget {
-  const _CreateButton({required this.onTap});
+  const _CreateButton({required this.onTap, required this.open});
   final VoidCallback onTap;
+
+  /// The menu is out: the plus has turned into a cross.
+  final bool open;
 
   @override
   State<_CreateButton> createState() => _CreateButtonState();
@@ -573,23 +625,20 @@ class _CreateButton extends StatefulWidget {
 
 class _CreateButtonState extends State<_CreateButton> {
   bool pressed = false;
-  double turns = 0;
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
     return Semantics(
       button: true,
+      expanded: widget.open,
       label: tr('New chat'),
       child: GestureDetector(
         onTapDown: (_) => setState(() => pressed = true),
         onTapCancel: () => setState(() => pressed = false),
         onTapUp: (_) {
           HapticFeedback.mediumImpact();
-          setState(() {
-            pressed = false;
-            turns += 0.25;
-          });
+          setState(() => pressed = false);
           widget.onTap();
         },
         child: AnimatedScale(
@@ -608,7 +657,8 @@ class _CreateButtonState extends State<_CreateButton> {
               ],
             ),
             child: AnimatedRotation(
-              turns: turns,
+              // An eighth of a turn makes the plus a cross.
+              turns: widget.open ? 0.125 : 0,
               duration: Motion.of(context, const Duration(milliseconds: 420)),
               curve: Curves.easeOutBack,
               child: Icon(LucideIcons.plus, size: 28, color: p.onAccent),

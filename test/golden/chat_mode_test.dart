@@ -108,35 +108,20 @@ void main() {
     }
 
     for (final look in _looks) {
-      testWidgets('offers Chat first, then Coding (${look.name})', (tester) async {
+      testWidgets('asks where a coding chat works, and no longer offers Chat (${look.name})', (tester) async {
         await open(tester, look);
         // The suggested name has the time in it; a golden needs the same one every run.
         await tester.enterText(find.byType(TextField), 'my-project');
         await tester.pump();
         expect(layoutErrors, isEmpty);
-        expect(find.text(tr('Chat')), findsOneWidget);
-        expect(find.text(tr('Ask anything, look up the news, get help writing')), findsOneWidget);
-        expect(find.text(tr('Coding').toUpperCase()), findsOneWidget);
+        expect(find.text(tr('Coding chat')), findsOneWidget);
         expect(find.text(tr('New project')), findsOneWidget);
         expect(find.text(tr('Open a folder')), findsOneWidget);
-        expect(find.text('Quick chat'), findsNothing, reason: 'replaced by Chat');
-        // Chat is above the coding choices.
-        expect(tester.getTopLeft(find.text(tr('Chat'))).dy, lessThan(tester.getTopLeft(find.text(tr('New project'))).dy));
+        expect(find.text(tr('Ask anything, look up the news, get help writing')), findsNothing, reason: 'Chat is the + menu\'s');
+        expect(find.text('Quick chat'), findsNothing);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('new_chat_sheet_${look.name}')));
       });
     }
-
-    testWidgets('one tap on Chat starts a plain conversation: no folder is sent', (tester) async {
-      final host = await open(tester, const Look());
-      await tester.tap(find.text('Chat'));
-      await sheetSettles(tester);
-      await sheetSettles(tester);
-      final sent = host.sent('new_session');
-      expect(sent, hasLength(1));
-      expect(sent.single['chatMode'], 'chat');
-      expect(sent.single.containsKey('cwd'), isFalse);
-      expect(find.text('Ask anything, look up the news, get help writing'), findsNothing, reason: 'the sheet closed');
-    });
 
     testWidgets('a recent project still starts a coding chat in its folder', (tester) async {
       final host = await open(tester, const Look());
