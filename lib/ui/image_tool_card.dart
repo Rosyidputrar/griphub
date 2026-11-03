@@ -11,6 +11,7 @@ import '../agent/pricing.dart';
 import 'attachment_viewer.dart';
 import 'i18n.dart';
 import 'live_clock.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// The colour pictures are drawn in across the app (the Settings row, the card, the shimmer).
@@ -326,7 +327,7 @@ class _ImageTileState extends State<ImageTile> with TickerProviderStateMixin {
     if (file == null || _bytes == null) return;
     HapticFeedback.selectionClick();
     final p = context.palette;
-    final pick = await showModalBottomSheet<String>(
+    final pick = await showSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(

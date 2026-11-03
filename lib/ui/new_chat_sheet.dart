@@ -7,13 +7,14 @@ import 'i18n.dart';
 import 'errors.dart';
 import 'folder_picker.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// Where a new chat works: its own project folder (default), an existing
 /// folder, or the workspace root. The sheet stays open, its choice showing a spinner, until the new chat exists.
 Future<void> showNewChatSheet(BuildContext context, AgentController agent) async {
   agent.integrations.refreshProjects().catchError((_) {});
-  final picked = await showModalBottomSheet<String>(
+  final picked = await showSheet<String>(
     context: context,
     isScrollControlled: true,
     builder: (_) => _NewChatSheet(agent: agent),

@@ -8,11 +8,12 @@ import 'settings_screen.dart';
 import 'i18n.dart';
 import '../agent/pricing.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 Future<void> showModelSheet(BuildContext context, AgentController agent) {
   agent.refreshProviders();
-  return showModalBottomSheet(
+  return showSheet(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -77,11 +78,8 @@ class _ModelSheetState extends State<_ModelSheet> {
         // favorites the user starred, in starring order.
         final favorites = favoriteModelsInOrder(agent.models, appearance.favoriteModels);
 
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.7,
-          maxChildSize: 0.95,
-          builder: (context, scroll) => Column(
+        return SheetExtent(initial: 0.7, max: 0.95, 
+builder: (context, scroll) => Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),

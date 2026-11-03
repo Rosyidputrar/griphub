@@ -26,6 +26,7 @@ import 'illustration.dart';
 import 'mesh.dart';
 import 'model_sheet.dart';
 import 'review_screen.dart';
+import 'sheet.dart';
 import 'tasks_screen.dart';
 import 'terminal_screen.dart';
 import 'server_screen.dart';
@@ -513,7 +514,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     if (action == 'select') {
-      await showModalBottomSheet<void>(
+      await showSheet<void>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,

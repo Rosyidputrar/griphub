@@ -7,6 +7,7 @@ import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// A starting point for a common MCP server.
@@ -58,7 +59,7 @@ class _McpScreenState extends State<McpScreen> with BusyActions {
   Future<void> _edit({McpServer? existing, _Preset? preset}) async {
     if (existing != null && busy(existing.id)) return;
     // The sheet saves itself and closes only once that worked, so a refused server keeps what the user typed.
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _McpSheet(existing: existing, preset: preset, onSave: f.saveMcp),

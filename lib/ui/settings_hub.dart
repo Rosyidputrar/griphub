@@ -25,6 +25,7 @@ import 'mcp_screen.dart';
 import 'mesh.dart';
 import 'network_screen.dart';
 import 'settings_screen.dart';
+import 'sheet.dart';
 import 'skills_screen.dart';
 import 'subagent_settings_screen.dart';
 import 'sync_screen.dart';
@@ -115,14 +116,12 @@ class _SettingsHubState extends State<SettingsHub> {
       for (final m in it.settings?.fallbackModels ?? const <Map<String, dynamic>>[]) '${m['provider']}/${m['model']}',
     ];
     final models = agent.models;
-    final result = await showModalBottomSheet<List<String>>(
+    final result = await showSheet<List<String>>(
       context: context,
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.7,
-          builder: (context, scroll) => Column(
+        builder: (context, setSheet) => SheetExtent(initial: 0.7, 
+builder: (context, scroll) => Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 12, 4),

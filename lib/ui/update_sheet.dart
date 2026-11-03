@@ -6,6 +6,7 @@ import '../agent/agent_controller.dart';
 import '../agent/updater.dart';
 import 'i18n.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 bool _sheetOpen = false;
@@ -20,7 +21,7 @@ Future<void> showUpdateSheet(BuildContext context, AgentController agent, {bool 
   if (_sheetOpen) return;
   _sheetOpen = true;
   try {
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,

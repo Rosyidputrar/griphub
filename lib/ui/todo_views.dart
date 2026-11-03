@@ -6,6 +6,7 @@ import '../agent/models.dart';
 import '../agent/todos.dart';
 import 'i18n.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// The steps of a plan, each with its state: ✓ done, ◐ in progress, ○ to do.
@@ -152,7 +153,7 @@ class TodoProgressBar extends StatelessWidget {
   final AgentController agent;
 
   void _open(BuildContext context) {
-    showModalBottomSheet<void>(
+    showSheet<void>(
       context: context,
       isScrollControlled: true,
       // Follows the plan while it is open.

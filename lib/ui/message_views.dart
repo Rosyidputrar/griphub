@@ -25,6 +25,7 @@ import 'kit.dart';
 import 'links.dart';
 import 'live_clock.dart';
 import 'i18n.dart';
+import 'sheet.dart';
 import 'theme.dart';
 import 'todo_views.dart';
 
@@ -715,7 +716,7 @@ class _MessageFooter extends StatelessWidget {
                 ? details
                 : GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () => showModalBottomSheet<void>(
+                    onTap: () => showSheet<void>(
                       context: context,
                       isScrollControlled: true,
                       builder: (_) => TurnCostSheet(cost: c, model: model, subagents: subagents),
@@ -1588,7 +1589,7 @@ class JobNoticeView extends StatelessWidget {
       button: true,
       child: InkWell(
         borderRadius: BorderRadius.circular(Radii.sm),
-        onTap: () => showModalBottomSheet<void>(
+        onTap: () => showSheet<void>(
           context: context,
           isScrollControlled: true,
           useSafeArea: true,
@@ -1623,11 +1624,8 @@ class _JobOutputSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.6,
-      maxChildSize: 0.95,
-      builder: (context, scroll) => ListView(
+    return SheetExtent(initial: 0.6, max: 0.95, 
+builder: (context, scroll) => ListView(
         controller: scroll,
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
         children: [

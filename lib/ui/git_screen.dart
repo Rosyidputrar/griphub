@@ -15,6 +15,7 @@ import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'message_views.dart';
+import 'sheet.dart';
 import 'task_log.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -183,7 +184,7 @@ class _GitScreenState extends State<GitScreen> {
   }
 
   Future<void> _branches() async {
-    final s = await showModalBottomSheet<GitStatus>(
+    final s = await showSheet<GitStatus>(
       context: context,
       isScrollControlled: true,
       builder: (_) => BranchSheet(features: _f),
@@ -198,14 +199,11 @@ class _GitScreenState extends State<GitScreen> {
   }
 
   Future<void> _showDiff(GitFile file, _Section section) async {
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        maxChildSize: 0.95,
-        builder: (context, scroll) =>
+      builder: (context) => SheetExtent(initial: 0.75, max: 0.95, 
+builder: (context, scroll) =>
             _DiffSheet(
               features: _f,
               fs: widget.agent.fs,
@@ -219,7 +217,7 @@ class _GitScreenState extends State<GitScreen> {
   }
 
   Future<void> _createPr() async {
-    final url = await showModalBottomSheet<String>(
+    final url = await showSheet<String>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _PrSheet(features: _f, branch: _status?.branch ?? ''),
@@ -244,14 +242,11 @@ class _GitScreenState extends State<GitScreen> {
   }
 
   Future<void> _openIssue(GithubIssue issue) async {
-    final work = await showModalBottomSheet<bool>(
+    final work = await showSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.7,
-        maxChildSize: 0.95,
-        builder: (context, scroll) => _IssueSheet(
+      builder: (context) => SheetExtent(initial: 0.7, max: 0.95, 
+builder: (context, scroll) => _IssueSheet(
           issue: issue,
           scroll: scroll,
           onOpen: () => widget.agent.client.openUrl(issue.url),

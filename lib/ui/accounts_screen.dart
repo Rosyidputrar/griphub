@@ -10,6 +10,7 @@ import '../agent/integrations.dart';
 import 'code_view.dart';
 import 'errors.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'task_log.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -214,7 +215,7 @@ class _AccountsScreenState extends State<AccountsScreen> {
   }
 
   Future<void> _editHost(SshHost? h) async {
-    final result = await showModalBottomSheet<Map<String, dynamic>>(
+    final result = await showSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _HostSheet(host: h),

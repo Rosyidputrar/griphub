@@ -327,6 +327,7 @@ void main() {
       expect(host.sent('set_model'), hasLength(1));
       late.complete({'model': _model('model-b', name: 'Model B').json, 'thinkingLevel': 'off'});
       await frames(tester);
+      await sheetSettles(tester);
       expect(find.text('Model B'), findsNothing, reason: 'closed once saved');
       expect(agent.model?.id, 'model-b');
     });

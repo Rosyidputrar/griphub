@@ -202,6 +202,7 @@ void main() {
       await frames(tester);
       await tester.tap(find.text('Share this chat'));
       await frames(tester);
+      await sheetSettles(tester);
       for (final option in ['Share as text', 'Share as a Markdown file', 'Copy as Markdown', 'Save to Downloads']) {
         expect(find.text(option), findsOneWidget, reason: option);
       }

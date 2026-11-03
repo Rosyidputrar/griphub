@@ -510,8 +510,9 @@ void main() {
       return host;
     }
 
+    // Long enough for a sheet's spring to land (about half a second).
     Future<void> settle(WidgetTester tester) async {
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 10; i++) {
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
         await tester.pump(const Duration(milliseconds: 60));
       }

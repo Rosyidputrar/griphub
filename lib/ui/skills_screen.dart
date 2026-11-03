@@ -9,6 +9,7 @@ import '../agent/integrations.dart';
 import 'errors.dart';
 import 'kit.dart';
 import 'message_views.dart';
+import 'sheet.dart';
 import 'task_log.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -110,7 +111,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
   }
 
   Future<void> _browse(String repo, String title) async {
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _BrowseSheet(integrations: it, repo: repo, title: title, onInstall: _installLink),
@@ -121,14 +122,11 @@ class _SkillsScreenState extends State<SkillsScreen> {
   Future<void> _open(SkillInfo s) async {
     final body = await widget.agent.fs.readString('${s.path}/SKILL.md').catchError((_) => '');
     if (!mounted) return;
-    final remove = await showModalBottomSheet<bool>(
+    final remove = await showSheet<bool>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.8,
-        maxChildSize: 0.95,
-        builder: (context, scroll) => ListView(
+      builder: (context) => SheetExtent(initial: 0.8, max: 0.95, 
+builder: (context, scroll) => ListView(
           controller: scroll,
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
           children: [
@@ -432,11 +430,8 @@ class _BrowseSheetState extends State<_BrowseSheet> {
   Widget build(BuildContext context) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.75,
-      maxChildSize: 0.95,
-      builder: (context, scroll) => Column(
+    return SheetExtent(initial: 0.75, max: 0.95, 
+builder: (context, scroll) => Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),

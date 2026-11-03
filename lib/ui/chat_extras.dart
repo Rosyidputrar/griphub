@@ -29,6 +29,7 @@ import 'predictive_back.dart';
 import 'preview_open.dart';
 import 'review_screen.dart';
 import 'search_screen.dart';
+import 'sheet.dart';
 import 'tasks_screen.dart';
 import 'theme.dart';
 import 'usage_screen.dart';
@@ -396,7 +397,7 @@ class _PastedChip extends StatelessWidget {
 }
 
 /// A long paste's preview, from its chip in the composer. Pops true for "Paste as text".
-Future<bool?> showPastedSheet(BuildContext context, String text) => showModalBottomSheet<bool>(
+Future<bool?> showPastedSheet(BuildContext context, String text) => showSheet<bool>(
   context: context,
   isScrollControlled: true,
   builder: (context) {
@@ -1250,7 +1251,7 @@ Future<void> showProjectTools(
     MaterialPageRoute(settings: w is SearchScreen ? SmoothPageTransitions.nested : null, builder: (_) => w),
   );
   final memory = '${agent.cwd}/AGENTS.md';
-  await showModalBottomSheet<void>(
+  await showSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (sheet) {

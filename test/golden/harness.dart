@@ -254,3 +254,12 @@ Future<void> loadImages(WidgetTester tester) async {
     await tester.pump(const Duration(milliseconds: 50));
   }
 }
+
+/// Lets a bottom sheet's spring land: about 0.5 s to open or settle, 0.7 s to close with Back or the scrim
+/// (lib/ui/sheet.dart). Tests that pumped a fixed 0.4 s for Flutter's 250/200 ms sheet use this after opening or
+/// closing one.
+Future<void> sheetSettles(WidgetTester tester) async {
+  for (var i = 0; i < 8; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}

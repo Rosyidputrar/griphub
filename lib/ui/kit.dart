@@ -8,6 +8,7 @@ import 'package:simple_icons/simple_icons.dart';
 import 'energy.dart';
 import 'i18n.dart';
 import 'errors.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// Shared building blocks for the GripHub AI Agent look.
@@ -788,7 +789,7 @@ Future<T?> runWithProgress<T>(
 
 /// A bottom sheet that is never cut off: as tall as its content, up to the whole screen, and it scrolls past that. A plain
 /// sheet stops at 9/16 of the screen's height, which in landscape left a menu's last rows (Delete) out of reach.
-Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showModalBottomSheet<T>(
+Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showSheet<T>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,

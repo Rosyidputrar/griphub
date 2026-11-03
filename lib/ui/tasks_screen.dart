@@ -11,6 +11,7 @@ import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
 import 'message_views.dart' show JobClock;
+import 'sheet.dart';
 import 'theme.dart';
 
 String _basename(String path) {
@@ -145,7 +146,7 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
     // The sheet saves itself and only closes on success: the old flow
     // popped with the edits first and saved afterwards, so a failed save
     // lost the user's work behind a snackbar.
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _ScheduleSheet(
