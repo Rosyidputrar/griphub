@@ -35,6 +35,8 @@ flutter:
   assets:
     - assets/illustrations/
     - assets/brand/
+    # The users' changelog, read by the changelog screen (lib/ui/changelog_screen.dart).
+    - CHANGELOG.md
   fonts:
     - family: Geist
       fonts:

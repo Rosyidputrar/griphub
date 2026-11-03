@@ -15,6 +15,7 @@
 - Pengaturan baru di Tampilan: Kurangi animasi. Otomatis aktif di HP bermemori kecil; layar dan lembar langsung muncul tanpa gerakan.
 - Backup otomatis server kini hanya mengunduh yang berubah. Setiap file disimpan terpisah dan terenkripsi, jadi backup berikutnya cukup membawa file yang baru atau berubah ke HP, bukan seluruh backup lagi. Unduhan yang terputus dilanjutkan dari titik terakhir. Backup lama tetap bisa dipulihkan.
 - Link di chat kini membuka alamat yang tertulis. Karakter tak terlihat di dalam alamat (misalnya spasi lebar nol) dibuang, karena sebelumnya bisa membuka halaman lain.
+- Riwayat perubahan kini ada di dalam aplikasi: Pengaturan → Tentang → Riwayat perubahan, atau tombol "Lihat riwayat perubahan" di lembar pembaruan. Pilih versi dari deretan di atas untuk melihat apa yang baru, ditingkatkan, diperbaiki, dan soal keamanan di versi itu. Layar langsung membuka versi yang terpasang (ditandai "Versi kamu"), dan bisa dibuka tanpa internet.
 
 
 ## English
@@ -32,3 +33,4 @@
 - A new setting in Appearance: Reduce animations. On by default on phones with little memory; screens and sheets then appear at once.
 - Automatic server backups now download only what changed. Each file is stored on its own, encrypted, so the next backup brings only new or changed files to the phone instead of the whole backup again. A download that was cut off picks up where it stopped. Older backups still restore.
 - Links in the chat now open the address they show. Invisible characters inside an address (such as a zero-width space) are removed; before, they could open a different page.
+- The changelog is now inside the app: Settings → About → Changelog, or "See the changelog" on the update sheet. Pick a version from the row at the top to see what is new, improved, fixed and security-related in it. It opens on the version installed (marked "Your version") and works offline.

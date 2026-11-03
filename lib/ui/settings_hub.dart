@@ -11,6 +11,7 @@ import '../agent/pricing.dart';
 import '../agent/updater.dart';
 import 'accounts_screen.dart';
 import 'backup_screen.dart';
+import 'changelog_screen.dart';
 import 'chat_extras.dart';
 import 'container_screen.dart';
 import 'errors.dart';
@@ -557,6 +558,14 @@ builder: (context, scroll) => Column(
               SettingsGroup(
                 children: [
                   if (Updater.instance.supported) _updatesRow(context),
+                  // As ArchiveTune: the history sits next to the updates, and opens on this phone's version.
+                  SettingsRow(
+                    icon: LucideIcons.history,
+                    color: p.muted,
+                    title: tr('Changelog'),
+                    subtitle: tr('What changed in each version'),
+                    onTap: () => openChangelog(context, Updater.instance.currentVersion),
+                  ),
                   _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—'),
                   _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—'),
                   Padding(

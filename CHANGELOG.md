@@ -28,6 +28,10 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 
   Pemakaian gambar hari ini juga terlihat di sana.
 - **Kartu "Buat gambar ini?"** muncul bila permintaan lewat batas. Kartu ini menampilkan model, jumlah gambar, dan perkiraan kreditnya. Sengaja tanpa tombol Selalu, dan mode Lewati semua izin pun tidak melewatinya.
+- **Riwayat perubahan di dalam aplikasi.** Buka lewat Pengaturan → Tentang → Riwayat perubahan, atau tombol "Lihat riwayat perubahan" di lembar pembaruan.
+  - Versi dipilih dari deretan tombol di atas yang bisa digeser. Di bawahnya tampil satu kartu berisi apa yang baru, ditingkatkan, diperbaiki, dan soal keamanan di versi itu.
+  - Layar langsung membuka versi yang terpasang di HP, ditandai "Versi kamu".
+  - Bisa dibuka tanpa internet.
 - **Pengaturan → Tampilan → Kurangi animasi.** Saat aktif, layar dan lembar langsung muncul tanpa gerakan. Di HP bermemori kecil pengaturan ini otomatis aktif, dan tetap bisa dimatikan.
 
 ### Ditingkatkan
