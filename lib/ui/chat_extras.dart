@@ -25,6 +25,7 @@ import 'files_screen.dart';
 import 'git_screen.dart';
 import 'image_tool_card.dart';
 import 'kit.dart';
+import 'predictive_back.dart';
 import 'preview_open.dart';
 import 'review_screen.dart';
 import 'search_screen.dart';
@@ -1244,7 +1245,10 @@ Future<void> showProjectTools(
   AgentController agent, {
   required void Function(String prompt) onPrompt,
 }) async {
-  void push(Widget w) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
+  // Search results are a nested flow: the page opened from them leaves them half in view underneath.
+  void push(Widget w) => Navigator.of(context).push(
+    MaterialPageRoute(settings: w is SearchScreen ? SmoothPageTransitions.nested : null, builder: (_) => w),
+  );
   final memory = '${agent.cwd}/AGENTS.md';
   await showModalBottomSheet<void>(
     context: context,

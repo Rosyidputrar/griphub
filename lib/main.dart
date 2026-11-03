@@ -54,8 +54,12 @@ class GripHubApp extends StatelessWidget {
         ),
         home: ListenableBuilder(
           listenable: agent,
+          // The app's roots (welcome, starting, home) swap like top-level destinations: a fade, 250 ms in, 200 out.
           builder: (context, _) => AnimatedSwitcher(
-            duration: Motion.of(context, const Duration(milliseconds: 250)),
+            duration: Motion.of(context, const Duration(milliseconds: SmoothPageTransitions.enterMs)),
+            reverseDuration: Motion.of(context, const Duration(milliseconds: SmoothPageTransitions.exitMs)),
+            switchInCurve: SmoothPageTransitions.curve,
+            switchOutCurve: SmoothPageTransitions.curve,
             child: !appearance.onboarded
                 ? OnboardingScreen(agent: agent)
                 : switch (agent.status) {

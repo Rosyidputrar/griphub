@@ -10,6 +10,7 @@ import 'editor_screen.dart';
 import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
+import 'predictive_back.dart';
 import 'preview_open.dart';
 import 'search_screen.dart';
 import 'i18n.dart';
@@ -569,7 +570,9 @@ class _FilesScreenState extends State<FilesScreen> with BusyActions {
               tooltip: tr('Search'),
               icon: const Icon(LucideIcons.search, size: 20),
               onPressed: () =>
-                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => SearchScreen(agent: agent))),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(settings: SmoothPageTransitions.nested, builder: (_) => SearchScreen(agent: agent)),
+                  ),
             ),
             IconButton(
               tooltip: tr(_showHidden ? 'Hide hidden files' : 'Show hidden files'),
