@@ -13,6 +13,8 @@
 - Kembali selalu menutup lapisan paling atas lebih dulu: saran "/" dan "@" di atas kolom pesan (teksnya tetap), kolom cari di editor, dan lembar yang ditarik penuh (kembali ke tinggi awalnya dulu), baru kemudian layarnya.
 - Lembar bawah kini bergerak dengan pegas tanpa memantul. Sentilan ringan ke bawah sudah cukup untuk menutup, dan bila dilepas pelan lembar berhenti di posisi terdekat. Daftar di dalam lembar digulir ke atas dulu sebelum lembarnya ikut turun, dan sudut atasnya menjadi siku saat lembar memenuhi layar.
 - Pengaturan baru di Tampilan: Kurangi animasi. Otomatis aktif di HP bermemori kecil; layar dan lembar langsung muncul tanpa gerakan.
+- Backup otomatis server kini hanya mengunduh yang berubah. Setiap file disimpan terpisah dan terenkripsi, jadi backup berikutnya cukup membawa file yang baru atau berubah ke HP, bukan seluruh backup lagi. Unduhan yang terputus dilanjutkan dari titik terakhir. Backup lama tetap bisa dipulihkan.
+- Link di chat kini membuka alamat yang tertulis. Karakter tak terlihat di dalam alamat (misalnya spasi lebar nol) dibuang, karena sebelumnya bisa membuka halaman lain.
 
 
 ## English
@@ -28,3 +30,5 @@
 - Back always closes the top layer first: the "/" and "@" suggestions over the message field (the text stays), the editor's find bar, and a sheet pulled up to full height (back to its first height first), and only then the screen.
 - Bottom sheets now move on springs that never bounce. A light flick down is enough to close one, and let go slowly it settles at the nearest place. A list inside scrolls back to its top before the sheet follows the finger down, and the top corners square off as a sheet fills the screen.
 - A new setting in Appearance: Reduce animations. On by default on phones with little memory; screens and sheets then appear at once.
+- Automatic server backups now download only what changed. Each file is stored on its own, encrypted, so the next backup brings only new or changed files to the phone instead of the whole backup again. A download that was cut off picks up where it stopped. Older backups still restore.
+- Links in the chat now open the address they show. Invisible characters inside an address (such as a zero-width space) are removed; before, they could open a different page.
