@@ -9,6 +9,11 @@
 - Bila lewat batas, muncul kartu "Buat gambar ini?" dengan model, jumlah, dan perkiraan kreditnya. Kartu ini sengaja tanpa Selalu, dan mode Lewati semua izin tidak melewatinya.
 - Gambar kini ikut dihitung dalam batas harian akun, baik dari agent maupun dari layar Buat gambar.
 - Model Anthropic dan OpenAI di GripHub Router kini dipanggil dengan format aslinya masing-masing, tetap lewat router dan key GripHub yang sama.
+- Perpindahan layar kini lebih utuh: layar baru meluncur penuh dari kanan sambil muncul (250 ms), layar di bawahnya meluncur penuh ke kiri. Kembali adalah kebalikannya, tanpa memudar: layar keluar utuh ke kanan, layar sebelumnya datang dari kiri. Gestur kembali Android tetap sama. Pindah tab di Beranda kini hanya memudar.
+- Kembali selalu menutup lapisan paling atas lebih dulu: saran "/" dan "@" di atas kolom pesan (teksnya tetap), kolom cari di editor, dan lembar yang ditarik penuh (kembali ke tinggi awalnya dulu), baru kemudian layarnya.
+- Lembar bawah kini bergerak dengan pegas tanpa memantul. Sentilan ringan ke bawah sudah cukup untuk menutup, dan bila dilepas pelan lembar berhenti di posisi terdekat. Daftar di dalam lembar digulir ke atas dulu sebelum lembarnya ikut turun, dan sudut atasnya menjadi siku saat lembar memenuhi layar.
+- Pengaturan baru di Tampilan: Kurangi animasi. Otomatis aktif di HP bermemori kecil; layar dan lembar langsung muncul tanpa gerakan.
+
 
 ## English
 
@@ -19,3 +24,7 @@
 - Over a limit, a "Make these pictures?" card shows the model, the count and the estimated credits. It has no Always on purpose, and Bypass all permissions does not skip it.
 - Pictures now count toward the account's daily limit, from the agent and from the Generate image screen.
 - Anthropic and OpenAI models on GripHub Router are now called in their own formats, still through the router with the same GripHub key.
+- Moving between screens now feels whole: a new screen slides in fully from the right while it appears (250 ms), and the one under it slides fully to the left. Going back is the mirror image, with no fade: the screen leaves whole to the right and the previous one comes in from the left. Android's back gesture is unchanged. Switching Home tabs now only fades.
+- Back always closes the top layer first: the "/" and "@" suggestions over the message field (the text stays), the editor's find bar, and a sheet pulled up to full height (back to its first height first), and only then the screen.
+- Bottom sheets now move on springs that never bounce. A light flick down is enough to close one, and let go slowly it settles at the nearest place. A list inside scrolls back to its top before the sheet follows the finger down, and the top corners square off as a sheet fills the screen.
+- A new setting in Appearance: Reduce animations. On by default on phones with little memory; screens and sheets then appear at once.
