@@ -136,7 +136,11 @@ class PredictiveBack extends NavigatorObserver with WidgetsBindingObserver {
 /// underneath (which grows back to full size); when released, the page slides all the way off-screen from where the
 /// finger left it.
 class SmoothPageTransitions extends PageTransitionsBuilder {
-  const SmoothPageTransitions();
+  const SmoothPageTransitions({this.instant = false});
+
+  /// Animations are off (the system's "Remove animations" or the app's "Reduce animations"): pages are just there,
+  /// as ArchiveTune's tween(0). The theme is built with this when they are off.
+  final bool instant;
 
   static final _runs = Expando<_Runs>('page motion runs');
 
@@ -148,10 +152,10 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
   static const curve = Curves.fastOutSlowIn;
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: enterMs);
+  Duration get transitionDuration => instant ? Duration.zero : const Duration(milliseconds: enterMs);
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: exitMs);
+  Duration get reverseTransitionDuration => instant ? Duration.zero : const Duration(milliseconds: exitMs);
 
   /// Where a page is horizontally (as a share of the width) and how opaque, at the time of [route]'s two animations
   /// with no back gesture in progress. Public so the tests can lock the geometry.
@@ -197,6 +201,8 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
+    // Animations off: no time (above), and nothing drawn in between either, a back gesture included.
+    if (instant || (MediaQuery.maybeDisableAnimationsOf(context) ?? false)) return child;
     final gesture = PredictiveBack.instance.gesture;
     final nestedPage = route.settings.name == nested.name;
     final runs = _runs[route] ??= _Runs();

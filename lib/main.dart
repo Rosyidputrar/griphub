@@ -23,6 +23,10 @@ void main() {
   final agent = AgentController(client)..translate = tr;
   // The saved server (if the user set one up and uses it) decides where boot connects.
   unawaited(agent.remote.load().catchError((_) {}).whenComplete(agent.boot));
+  // A low-memory phone starts with animations off (Settings, Appearance turns them back on).
+  unawaited(client.isLowRamDevice().then((low) {
+    if (low) Appearance.instance.setLowRamDevice();
+  }));
   runApp(GripHubApp(agent: agent));
 }
 
@@ -48,6 +52,8 @@ class GripHubApp extends StatelessWidget {
           child: MediaQuery(
             data: MediaQuery.of(context).copyWith(
               textScaler: TextScaler.linear(effectiveTextScale(appearance.textScale, MediaQuery.textScalerOf(context).scale(14) / 14)),
+              // Every animation goes through Motion.of / Motion.reduced, which read this.
+              disableAnimations: MediaQuery.of(context).disableAnimations || appearance.animationsOff,
             ),
             child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
           ),

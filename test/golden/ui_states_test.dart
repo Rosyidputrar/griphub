@@ -543,6 +543,30 @@ void textScaleTests() {
     });
   }
 
+  testWidgets('Reduce animations: says why it is on for a low-memory phone, and the switch is the user\'s choice', (tester) async {
+    final look = Appearance.instance;
+    addTearDown(() => look
+      ..reduceMotion = null
+      ..lowRamDevice = false);
+    look
+      ..reduceMotion = null
+      ..lowRamDevice = false;
+    FakeHost();
+    await pumpLook(tester, const Look(), SettingsHub(agent: newAgent()), height: 2400);
+    await frames(tester);
+    final row = find.ancestor(of: find.text('Reduce animations').first, matching: find.byType(SettingsRow));
+    expect(find.descendant(of: row, matching: find.text('Screens and sheets appear at once')), findsOneWidget);
+    look.setLowRamDevice();
+    await frames(tester);
+    expect(find.descendant(of: row, matching: find.text('On for this phone: it has little memory')), findsOneWidget);
+    expect(tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value, isTrue);
+    await tester.tap(row);
+    await frames(tester);
+    expect(look.reduceMotion, isFalse, reason: 'turned back on by the user');
+    expect(look.animationsOff, isFalse);
+    expect(find.descendant(of: row, matching: find.text('Screens and sheets appear at once')), findsOneWidget);
+  });
+
   testWidgets('UI-22: golden at 2x text: the chat', (tester) async {
     FakeHost();
     final agent = newAgent()..model = ModelInfo({'provider': 'griphub', 'id': 'mock', 'name': 'Mock'});

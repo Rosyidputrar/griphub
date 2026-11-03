@@ -491,6 +491,20 @@ builder: (context, scroll) => Column(
                     ),
                     onTap: () => look.update(compact: !look.compact),
                   ),
+                  SettingsRow(
+                    icon: LucideIcons.zapOff,
+                    color: p.muted,
+                    title: tr('Reduce animations'),
+                    subtitle: look.reduceMotion == null && look.lowRamDevice
+                        ? tr('On for this phone: it has little memory')
+                        : tr('Screens and sheets appear at once'),
+                    trailing: LabeledSwitch(
+                      label: tr('Reduce animations'),
+                      value: look.animationsOff,
+                      onChanged: (v) => look.update(reduceMotion: v),
+                    ),
+                    onTap: () => look.update(reduceMotion: !look.animationsOff),
+                  ),
                   // The title on its own line and the swatches under it, so neither starves on a narrow phone; each swatch
                   // is a 48 dp target that says its colour and whether it is the one chosen.
                   Padding(
