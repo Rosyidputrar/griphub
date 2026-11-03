@@ -813,3 +813,22 @@ class ContentWidth extends StatelessWidget {
         : child,
   );
 }
+
+/// A layer drawn inside a page (a menu over the input, a find bar, a selection) that Back closes before it leaves the
+/// page, as every surface in the app does: while [open], Back calls [onClose] and stays. A predictive back gesture is
+/// not offered meanwhile (PopScope says the page will not pop), so the page does not start to leave and then stay.
+class BackLayer extends StatelessWidget {
+  const BackLayer({super.key, required this.open, required this.onClose, required this.child});
+  final bool open;
+  final VoidCallback onClose;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !open,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop && open) onClose();
+    },
+    child: child,
+  );
+}
