@@ -2,6 +2,7 @@
 
 ## Bahasa Indonesia
 
+- Chat biasa kini terpisah dari chat coding. Ketuk +, lalu pilih Chat untuk bertanya, mencari berita, atau minta bantuan menulis seperti di ChatGPT web. Agent di sini hanya punya pencarian web, baca halaman, dan lampiran, sehingga tidak lagi memanggil banyak tool untuk pertanyaan biasa. Daftar chat bisa disaring Semua / Chat / Coding.
 - Agent kini bisa membuat gambar langsung di chat. Minta saja, misalnya "buatkan logo kedai kopi, 2 variasi", dengan model chat apa pun. Secara bawaan dipakai model gambar termurah (menurut tarif saat itu, termasuk promo), kecuali kamu menyebut modelnya. Hasilnya berupa gambar asli (bukan SVG), disimpan di folder `.images` proyek.
 - Selama gambar dibuat, kotaknya berkilau dengan ukuran akhirnya, lalu gambar muncul halus begitu jadi, satu per satu. Ketuk untuk layar penuh; tekan lama untuk simpan ke HP, bagikan, salin path, atau salin prompt. Bila animasi dikurangi di HP, gambar langsung tampil.
 - Gambar yang gagal disebut jelas: tidak ditagih, atau mungkin tetap ditagih (cek Pemakaian sebelum mencoba lagi). Tidak ada percobaan ulang otomatis.
@@ -20,6 +21,7 @@
 
 ## English
 
+- Plain chat is now separate from coding chat. Tap +, then pick Chat to ask questions, look up the news or get help writing, like ChatGPT on the web. The agent there only has web search, page reading and attachments, so it no longer makes many tool calls for ordinary questions. The chat list can be filtered All / Chat / Coding.
 - The agent can now make pictures right in the chat. Just ask, for example "make a coffee shop logo, 2 variations", with any chat model. By default it uses the cheapest picture model (at the current rate, promos included) unless you name one. The result is a real picture (not SVG), saved in the project's `.images` folder.
 - While a picture is made, its tile shimmers at its final size, then the picture comes in smoothly as soon as it is done, one by one. Tap for full screen; long-press to save to the phone, share, copy the path or copy the prompt. With reduced animations on the phone, pictures show at once.
 - A picture that fails says so plainly: not billed, or maybe billed (check Usage before trying again). Nothing is retried on its own.

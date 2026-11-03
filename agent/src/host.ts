@@ -31,6 +31,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { agentsFileText, isManaged } from "./agents-file.js";
 import { AutoBackup, decryptBackup, isSnapshot, restoreBackup, restoreSnapshot } from "./autobackup.js";
+import { CHAT_TOOLS, chatDate, chatDir, chatModeExtension, chatSystemPrompt, isChatCwd, modeOf } from "./chatmode.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
 import { installDohLookup } from "./dns.js";
@@ -124,6 +125,7 @@ const guard = new Guard({
 	},
 	cwd: () => session?.sessionManager.getCwd() ?? workspace,
 	chat: () => session?.sessionFile ?? session?.sessionId ?? "",
+	coding: () => !isChatCwd(session?.sessionManager.getCwd(), workspace),
 });
 
 // ---------------------------------------------------------------------------
@@ -372,6 +374,9 @@ function state() {
 		sessionFile: s.sessionFile ?? null,
 		sessionName: s.sessionName ?? null,
 		cwd: s.sessionManager.getCwd(),
+		// "chat" for a plain conversation (chatmode.ts), "coding" for the agent with its whole tool set. Not "mode":
+		// hello already says with that whether this host is a phone's or a server's, and spreads this state after it.
+		chatMode: modeOf(s.sessionManager.getCwd(), workspace),
 		billingNotice: billingNotice(),
 		planMode: guard.planMode,
 		approvalMode: guard.mode,
@@ -386,6 +391,10 @@ async function buildSession(
 	opts: { interactive: boolean; onLimit: (reason: string) => void; unattended?: Guard },
 ) {
 	const cwd = sessionManager.getCwd();
+	// A chat-mode chat (chatmode.ts): a conversation's few tools, its own prompt, no AGENTS.md or skills.
+	const chat = isChatCwd(cwd, workspace);
+	// Its folder holds what the user attaches; a chat opened after it was removed gets it back.
+	if (chat) mkdirSync(cwd, { recursive: true });
 	// generate_image: on in chats unless turned off; in runs nobody watches only when the user allowed it.
 	const pics = imageSettings(integrations.settings);
 	const pictures = pics.imageAgentTool && (opts.interactive || pics.imageUnattended);
@@ -395,10 +404,18 @@ async function buildSession(
 		cwd,
 		agentDir,
 		settingsManager,
+		...(chat && {
+			// pi's own prompt is a coding agent's; the notes (AGENTS.md) are about the shell and projects, the skills
+			// about building things. None of it belongs in a conversation, and each of it invites tool calls.
+			systemPrompt: chatSystemPrompt({ date: chatDate(new Date(), integrations.settings.timeZone), pictures }),
+			noContextFiles: true,
+			noSkills: true,
+		}),
 		// Limits come first, so a call past a limit is refused before it asks for approval.
 		// Approvals and plan mode only make sense with someone watching.
 		extensionFactories: [
 			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
+			...(chat ? [{ name: "griphub-chat", factory: chatModeExtension({ dir: cwd, stopped: opts.onLimit }), hidden: true }] : []),
 			{ name: "griphub-images", factory: (pi: any) => pi.on("agent_start", () => images.startRun(runKey)), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
 			// A server's background runs go on while nobody is there: what would need approval is refused instead.
@@ -406,7 +423,20 @@ async function buildSession(
 		],
 	});
 	await resourceLoader.reload();
-	const mcpTools = mcp.toolDefinitions();
+	// A chat has no MCP tools: they are the user's integrations for work, and each one is a tool call on offer.
+	const mcpTools = chat ? [] : mcp.toolDefinitions();
+	const searchKeys = () => ({
+		...integrations.searchKeys(),
+		// The router search backends reuse the saved GripHub key with the dedicated
+		// search models from settings (not the conversation's model). The callback
+		// runs per tool call, so it always reads the current settings.
+		griphubKey: customProviders?.key(GRIPHUB_ID) ?? "",
+		griphubBaseUrl: GRIPHUB_BASE_URL,
+		activeModel: session?.model?.id ?? "",
+	});
+	// Pictures (image.ts): over the user's limit the open chat asks; a run nobody watches is refused instead.
+	const imageTool = () =>
+		images.tool(runKey, () => sessionManager.getCwd(), opts.interactive ? (summary, reason) => guard.askSpend(IMAGE_TOOL, summary, reason) : undefined);
 	const result = await createAgentSession({
 		cwd,
 		agentDir,
@@ -416,31 +446,23 @@ async function buildSession(
 		resourceLoader,
 		// "subagent" must be named here: the SDK drops custom tools whose
 		// name is not in this allow-list (that is why 1.0.42 never showed it).
-		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...mcpTools.map((t) => t.name)],
-		customTools: [
-			...webTools(
-				() => ({
-					...integrations.searchKeys(),
-					// The router search backends reuse the saved GripHub key with the dedicated
-					// search models from settings (not the conversation's model). The callback
-					// runs per tool call, so it always reads the current settings.
-					griphubKey: customProviders?.key(GRIPHUB_ID) ?? "",
-					griphubBaseUrl: GRIPHUB_BASE_URL,
-					activeModel: session?.model?.id ?? "",
-				}),
-				() => sessionManager.getCwd(),
-			),
-			todoTool(),
-			...mcpTools,
-			// The parent's only way to create a subagent. Interactive sessions
-			// only: background runs and subagent sessions never get this tool,
-			// so a subagent can never spawn another one.
-			...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
-			// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
-			...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
-			// Pictures (image.ts): over the user's limit the open chat asks; a run nobody watches is refused instead.
-			...(pictures ? [images.tool(runKey, () => sessionManager.getCwd(), opts.interactive ? (summary, reason) => guard.askSpend(IMAGE_TOOL, summary, reason) : undefined)] : []),
-		] as any,
+		tools: chat
+			? [...CHAT_TOOLS, ...(pictures ? [IMAGE_TOOL] : [])]
+			: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...mcpTools.map((t) => t.name)],
+		customTools: (chat
+			? [...webTools(searchKeys, () => sessionManager.getCwd(), { chat: true }), ...(pictures ? [imageTool()] : [])]
+			: [
+					...webTools(searchKeys, () => sessionManager.getCwd()),
+					todoTool(),
+					...mcpTools,
+					// The parent's only way to create a subagent. Interactive sessions
+					// only: background runs and subagent sessions never get this tool,
+					// so a subagent can never spawn another one.
+					...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
+					// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
+					...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
+					...(pictures ? [imageTool()] : []),
+				]) as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
 	installLenientTools(result.session.agent);
@@ -1380,8 +1402,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			// A server with a nearly full disk takes no new work (health.ts); on the phone this never refuses.
 			await health.assertRoom();
 			fallbackTried = false;
-			// Plan mode: ask for a plan first; tools that change things are blocked (guard.ts).
-			const text = guard.planMode
+			// Plan mode: ask for a plan first; tools that change things are blocked (guard.ts). A chat has nothing to plan.
+			const text = guard.planMode && !isChatCwd(s.sessionManager.getCwd(), workspace)
 				? `${cmd.text}\n\n[Plan mode] Investigate as needed, then reply with a numbered plan only. Do not change files or run commands that modify anything until I approve.`
 				: cmd.text;
 			// The agent may git push from its shell; don't hold the prompt for it.
@@ -1614,14 +1636,22 @@ async function handle(cmd: Command): Promise<unknown> {
 			return { day: t.day, count: t.count, credits: t.credits, models, cheapest: cheapest?.id ?? null, modelsError };
 		}
 
-		case "new_session":
+		case "new_session": {
 			assertIdle();
+			// A chat-mode chat works in the chat folder (chatmode.ts), whatever folder was named with it.
+			if (cmd.chatMode === "chat") {
+				const dir = chatDir(workspace);
+				mkdirSync(dir, { recursive: true });
+				return openSession(SessionManager.create(dir));
+			}
 			return openSession(SessionManager.create(cmd.cwd ?? workspace));
+		}
 		case "sessions":
 			return (await SessionManager.listAll()).map((info) => ({
 				path: info.path,
 				id: info.id,
 				cwd: info.cwd,
+				chatMode: modeOf(info.cwd, workspace),
 				name: info.name ?? null,
 				modified: info.modified.getTime(),
 				messageCount: info.messageCount,

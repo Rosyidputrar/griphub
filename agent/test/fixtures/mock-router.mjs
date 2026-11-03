@@ -62,6 +62,14 @@ globalThis.fetch = async (input, init) => {
 	}
 	// MOCK_BODIES: what each request asked, one JSON line each (the last message), for tests that check the prompt.
 	if (process.env.MOCK_BODIES) appendFileSync(process.env.MOCK_BODIES, `${JSON.stringify(last?.content ?? "")}\n`);
+	// MOCK_REQUESTS: each chat request's system prompt and the tools it offered, one JSON line each, for tests that
+	// check what a kind of chat gives the model (chat mode: its own prompt and a conversation's few tools).
+	if (process.env.MOCK_REQUESTS) {
+		const system = request.messages?.find((m) => m.role === "system" || m.role === "developer");
+		const text = typeof system?.content === "string" ? system.content : JSON.stringify(system?.content ?? "");
+		const tools = (request.tools ?? []).map((t) => t.function?.name ?? t.name);
+		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary })}\n`);
+	}
 	if (process.env.MOCK_TOOL) {
 		const said = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
 		const lines =

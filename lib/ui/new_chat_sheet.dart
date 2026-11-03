@@ -10,8 +10,9 @@ import 'kit.dart';
 import 'sheet.dart';
 import 'theme.dart';
 
-/// Where a new chat works: its own project folder (default), an existing
-/// folder, or the workspace root. The sheet stays open, its choice showing a spinner, until the new chat exists.
+/// What a new chat is: a plain conversation (the first choice, one tap), or a coding chat in its own project folder
+/// (the default for coding), an existing folder, or a recent project. The sheet stays open, its choice showing a
+/// spinner, until the new chat exists.
 Future<void> showNewChatSheet(BuildContext context, AgentController agent) async {
   agent.integrations.refreshProjects().catchError((_) {});
   final picked = await showSheet<String>(
@@ -80,18 +81,19 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
     });
   }
 
-  /// Starts the chat in [dir] (the workspace root when null) and closes the sheet once it exists.
-  Future<bool> _start(String? dir) async {
-    final started = await widget.agent.newSession(dir: dir);
+  /// Starts the chat in [dir] (the workspace root when null), or a plain conversation when [chat], and closes the
+  /// sheet once it exists.
+  Future<bool> _start(String? dir, {bool chat = false}) async {
+    final started = await widget.agent.newSession(dir: dir, chat: chat);
     if (started && mounted) Navigator.pop(context);
     return started;
   }
 
   /// A row or chip: one start at a time, with the spinner on the choice that was tapped.
-  Future<void> _startFrom(String key, String? dir) async {
+  Future<void> _startFrom(String key, String? dir, {bool chat = false}) async {
     if (busy()) return;
     try {
-      await runBusy(key, () => _start(dir));
+      await runBusy(key, () => _start(dir, chat: chat));
     } catch (e) {
       if (mounted) setState(() => error = friendlyError(e));
     }
@@ -115,10 +117,35 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
               children: [
                 Text(tr('New chat'), style: text.titleLarge),
                 const SizedBox(height: 4),
-                Text(tr('Each chat can have its own folder to work in.'), style: text.bodySmall),
+                Text(tr('Just talk, or build something in a project folder.'), style: text.bodySmall),
                 const SizedBox(height: 16),
+                // A plain conversation: questions, news, writing. One tap, no folder to name.
+                Semantics(
+                  button: true,
+                  child: SurfaceCard(
+                    highlight: true,
+                    onTap: busy() ? null : () => _startFrom('chat', null, chat: true),
+                    child: Row(
+                      children: [
+                        IconTile(icon: LucideIcons.messageCircle, color: p.accent),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(tr('Chat'), style: text.titleSmall),
+                              Text(tr('Ask anything, look up the news, get help writing'), style: text.bodySmall),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        busy('chat') ? const BusySpinner() : Icon(LucideIcons.arrowRight, size: 18, color: p.muted),
+                      ],
+                    ),
+                  ),
+                ),
+                SectionLabel(tr('Coding'), padding: const EdgeInsets.fromLTRB(4, 20, 4, 8)),
                 SurfaceCard(
-                  highlight: true,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -173,14 +200,6 @@ class _NewChatSheetState extends State<_NewChatSheet> with BusyActions {
                       title: tr('Open a folder'),
                       subtitle: tr('Continue in an existing project folder'),
                       onTap: busy() ? null : () => Navigator.pop(context, _pick),
-                    ),
-                    SettingsRow(
-                      icon: LucideIcons.messageSquare,
-                      color: p.muted,
-                      title: tr('Quick chat'),
-                      subtitle: tr('No project folder; works in the workspace root'),
-                      trailing: busy('quick') ? const BusySpinner() : null,
-                      onTap: busy() ? null : () => _startFrom('quick', null),
                     ),
                   ],
                 ),

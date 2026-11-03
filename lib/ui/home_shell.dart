@@ -1209,6 +1209,7 @@ class _SessionRow extends StatelessWidget {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
     final folder = sessionFolder(session.cwd, workspace);
+    final chat = session.isChat;
     return InkWell(
       borderRadius: BorderRadius.circular(Radii.lg),
       onTap: onTap,
@@ -1224,7 +1225,11 @@ class _SessionRow extends StatelessWidget {
                 radius: 16,
                 child: Center(
                   child: Icon(
-                    folder != null ? LucideIcons.folderGit2 : LucideIcons.messageSquare,
+                    chat
+                        ? LucideIcons.messageCircle
+                        : folder != null
+                        ? LucideIcons.folderGit2
+                        : LucideIcons.messageSquare,
                     size: 20,
                     color: MeshArt.inkFor(session.id),
                   ),
@@ -1239,10 +1244,12 @@ class _SessionRow extends StatelessWidget {
                   Text(session.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.titleSmall),
                   const SizedBox(height: 3),
                   Text(
-                    folder ?? tr('Quick chat'),
+                    // A plain conversation has no folder; a coding chat names its project, or the workspace it works in
+                    // (the old "Quick chat": a coding chat too, so not to be read as one of the plain ones).
+                    chat ? tr('Chat') : folder ?? tr('Workspace'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontFamily: folder != null ? mono : null, fontSize: 12, color: p.muted),
+                    style: TextStyle(fontFamily: !chat && folder != null ? mono : null, fontSize: 12, color: p.muted),
                   ),
                 ],
               ),
@@ -1284,6 +1291,9 @@ class _ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<_ChatsTab> {
   late Future<List<SessionSummary>> sessions = widget.agent.listSessions();
   String query = '';
+
+  /// Which chats the list shows: 'all', 'chat' (plain conversations) or 'coding'.
+  String _kind = 'all';
 
   /// Kept by the tab: the list builds its rows lazily, and a search field rebuilt from nothing would lose its text.
   final _query = TextEditingController();
@@ -1406,8 +1416,12 @@ class _ChatsTabState extends State<_ChatsTab> {
         future: sessions,
         builder: (context, snap) {
           final q = query.toLowerCase();
-          final all = (snap.data ?? const <SessionSummary>[])
-              .where((s) => s.messageCount > 0)
+          final talked = (snap.data ?? const <SessionSummary>[]).where((s) => s.messageCount > 0).toList();
+          // Only once there is a plain conversation to tell apart: until then every chat is a coding chat.
+          final mixed = talked.any((s) => s.isChat);
+          final kind = mixed ? _kind : 'all';
+          final all = talked
+              .where((s) => kind == 'all' || s.isChat == (kind == 'chat'))
               .where((s) => q.isEmpty || s.title.toLowerCase().contains(q) || s.cwd.toLowerCase().contains(q))
               .toList();
           final groups = <String, List<SessionSummary>>{};
@@ -1447,6 +1461,15 @@ class _ChatsTabState extends State<_ChatsTab> {
                       prefixIcon: const Icon(LucideIcons.search, size: 18),
                     ),
                   ),
+                  if (mixed) ...[
+                    (_) => const SizedBox(height: 12),
+                    (_) => PillSegments<String>(
+                      value: kind,
+                      options: {'all': tr('All'), 'chat': tr('Chat'), 'coding': tr('Coding')},
+                      icons: const {'chat': LucideIcons.messageCircle, 'coding': LucideIcons.code},
+                      onChanged: (v) => setState(() => _kind = v),
+                    ),
+                  ],
                   // A list that could not be read says so, with a retry (it spun forever).
                   if (snap.hasError)
                     (_) => Padding(
@@ -1463,10 +1486,10 @@ class _ChatsTabState extends State<_ChatsTab> {
                       padding: const EdgeInsets.only(top: 40),
                       child: Column(
                         children: [
-                          if (q.isEmpty) const Illustration('chat', height: 200),
+                          if (q.isEmpty && kind == 'all') const Illustration('chat', height: 200),
                           const SizedBox(height: 12),
                           Text(
-                            tr(q.isEmpty ? 'No chats yet. Tap + to start one.' : 'Nothing matches.'),
+                            tr(q.isEmpty && kind == 'all' ? 'No chats yet. Tap + to start one.' : 'Nothing matches.'),
                             style: text.bodySmall,
                           ),
                         ],

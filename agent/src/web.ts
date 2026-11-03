@@ -949,17 +949,26 @@ function decodeEntities(s: string) {
 
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }], details: undefined });
 
-export function webTools(keys: () => SearchKeys, cwd: () => string) {
+/**
+ * The web tools. [opts.chat]: for a chat-mode chat (chatmode.ts), where a search is for current information, not for
+ * docs and error fixes; the description says so, since that is what the model reads there.
+ */
+export function webTools(keys: () => SearchKeys, cwd: () => string, opts: { chat?: boolean } = {}) {
 	return [
 		{
 			name: "web_search",
 			label: "Web search",
-			description:
-				"Search the web. Use it to find install instructions, documentation, package names, API usage, and fixes for errors instead of guessing. Returns titles, URLs and snippets; follow up with web_fetch to read a page.",
-			promptSnippet: "web_search: search the web for docs, install steps, and error fixes",
-			promptGuidelines: [
-				"When unsure how to install or use something, or an error is unfamiliar, use web_search and then web_fetch the most relevant result before acting.",
-			],
+			description: opts.chat
+				? "Search the web for current or fast-changing information: news, prices, weather, schedules, releases, recent events. Not needed for general knowledge. Returns titles, URLs and snippets; follow up with web_fetch only when the snippets are not enough."
+				: "Search the web. Use it to find install instructions, documentation, package names, API usage, and fixes for errors instead of guessing. Returns titles, URLs and snippets; follow up with web_fetch to read a page.",
+			promptSnippet: opts.chat
+				? "web_search: search the web for news and other current information"
+				: "web_search: search the web for docs, install steps, and error fixes",
+			promptGuidelines: opts.chat
+				? []
+				: [
+						"When unsure how to install or use something, or an error is unfamiliar, use web_search and then web_fetch the most relevant result before acting.",
+					],
 			parameters: Type.Object({
 				query: Type.String({ description: "Search query" }),
 				count: Type.Optional(Type.Number({ description: "Target number of results (default 8, max 20). List engines return this many; OpenAI/Anthropic router backends return however many sources the model cites." })),
