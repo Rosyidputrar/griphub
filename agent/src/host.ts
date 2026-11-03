@@ -30,7 +30,7 @@ import {
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { agentsFileText, isManaged } from "./agents-file.js";
-import { AutoBackup, decryptBackup, restoreBackup } from "./autobackup.js";
+import { AutoBackup, decryptBackup, isSnapshot, restoreBackup, restoreSnapshot } from "./autobackup.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
 import { installDohLookup } from "./dns.js";
@@ -1903,6 +1903,14 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 		// The phone's own backups are restored with the same door the server's are: decrypt with the key, put in place.
 		// The key comes back as a recovery code only on the phone's own host (see recoveryKey), for the app to show once.
+		// An incremental backup, fetched by the phone: what a snapshot needs, then the blobs it lacks, many per answer.
+		case "auto_backup_needs":
+			if (!autoBackup?.enabled) throw new Error("Automatic backups are off");
+			return autoBackup.needs(String(cmd.name ?? ""));
+		case "auto_backup_read":
+			if (!autoBackup?.enabled) throw new Error("Automatic backups are off");
+			if (!Array.isArray(cmd.items)) throw new Error("items must be a list");
+			return autoBackup.read(cmd.items, Number(cmd.max) || undefined);
 		case "auto_backup_key":
 			if (server) throw new Error("A server never tells its backup key; the phone that made it has it");
 			return { key: autoBackup?.recoveryKey() ?? null };
@@ -1910,10 +1918,13 @@ async function handle(cmd: Command): Promise<unknown> {
 		// afterwards, so every part reads what was restored.
 		case "backup_restore_server": {
 			if (session?.isStreaming) throw new Error("Stop the agent before restoring");
+			const to = { agentDir, workspace, home: process.env.HOME ?? agentDir };
+			// A snapshot is restored from its blobs straight away; nothing decrypted is ever on disk.
+			if (isSnapshot(String(cmd.path))) return restoreSnapshot(String(cmd.path), String(cmd.key ?? ""), to);
 			const tmp = join(stateDir, `restore-${Date.now()}.zip`);
 			try {
 				decryptBackup(String(cmd.path), String(cmd.key ?? ""), tmp);
-				return restoreBackup(tmp, { agentDir, workspace, home: process.env.HOME ?? agentDir });
+				return restoreBackup(tmp, to);
 			} finally {
 				rmSync(tmp, { force: true });
 			}
@@ -2226,6 +2237,8 @@ async function main() {
 		home: process.env.HOME ?? agentDir,
 		intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
 		noSecrets: !server,
+		// A server's backups come to the phone over the link: as snapshots of blobs, so only what changed is fetched.
+		incremental: server,
 		log: (m) => log(m),
 	});
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot

@@ -757,7 +757,7 @@ test("a background job can be stopped, and stops what it started; its chat is to
 // ---------------------------------------------------------------------------
 // Automatic backups: made on the server with the phone's key, fetched over fs_*, never readable as files there
 
-test("server mode: automatic backups are off until the phone gives its key, then made and readable over fs_*", async (t) => {
+test("server mode: automatic backups are off until the phone gives its key, then made as snapshots the phone fetches piece by piece", async (t) => {
 	const dir = home(t);
 	const { c } = await connected(t, dir);
 	const ws = join(dir, "workspace");
@@ -775,12 +775,20 @@ test("server mode: automatic backups are off until the phone gives its key, then
 	const now = await c.call("auto_backup_now");
 	assert.equal(now.ok, true, now.error);
 	const [latest] = now.data.backups;
-	assert.match(latest.name, /^auto-\d+\.ghb$/);
-	assert.ok(latest.size > 0);
-	// The app fetches it like any file; it cannot be changed from there.
-	const read = await c.call("fs_read", { path: latest.path });
+	assert.match(latest.name, /^auto-\d+\.ghs$/, "a server backs up incrementally");
+	assert.ok(latest.size > 0 && latest.added === latest.size, "the first one adds all it needs");
+	// The phone asks what it needs, then the blobs, several in one answer.
+	const needs = await c.call("auto_backup_needs", { name: latest.name });
+	assert.equal(needs.ok, true, needs.error);
+	assert.equal(Buffer.from(needs.data.snapshot, "base64").subarray(0, 4).toString(), "GHS1");
+	assert.ok(needs.data.blobs.length > 2);
+	const read = await c.call("auto_backup_read", { items: needs.data.blobs.map((b) => ({ id: b.id, offset: 0 })) });
 	assert.equal(read.ok, true, read.error);
-	assert.equal(Buffer.from(read.data.data, "base64").subarray(0, 4).toString(), "GHB1");
+	assert.equal(read.data.chunks.length, needs.data.blobs.length, "small blobs in one answer");
+	for (const ch of read.data.chunks) assert.equal(Buffer.from(ch.data, "base64").subarray(0, 4).toString(), "GHO1");
+	assert.equal((await c.call("auto_backup_read", { items: [{ id: "../index.json" }] })).ok, false, "only blobs");
+	assert.equal((await c.call("auto_backup_needs", { name: "../auto-backup.json" })).ok, false, "only snapshots");
+	// Still a read-only folder for the app's file commands.
 	const write = await c.call("fs_write", { path: latest.path, data: "" });
 	assert.equal(write.ok, false, "the backups folder is read-only for the app");
 	// Turning it off removes what that key made.

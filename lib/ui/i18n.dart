@@ -1753,13 +1753,14 @@ const _id = <String, String>{
   'API keys are not in a phone backup; enter them again.': 'Kunci API tidak ada di backup HP; isi lagi.',
   'Newest': 'Terbaru',
   'Back up now': 'Backup sekarang',
-  'Every hour when something changed: chats, projects with their .git, skills, API keys and accounts. Dependencies such as node_modules are left out. Encrypted with a key only this phone and your server have; the newest one comes to this phone while the app is open.':
-      'Setiap jam bila ada perubahan: chat, proyek beserta .git-nya, skill, API key dan akun. Dependensi seperti node_modules tidak ikut. Dienkripsi dengan kunci yang hanya dimiliki HP ini dan server kamu; backup terbaru dibawa ke HP ini selama aplikasi terbuka.',
+  'Every hour when something changed: chats, projects with their .git, skills, API keys and accounts. Dependencies such as node_modules are left out. Encrypted with a key only this phone and your server have; the newest one comes to this phone while the app is open, and only the files that changed are downloaded.':
+      'Setiap jam bila ada perubahan: chat, proyek beserta .git-nya, skill, API key dan akun. Dependensi seperti node_modules tidak ikut. Dienkripsi dengan kunci yang hanya dimiliki HP ini dan server kamu; backup terbaru dibawa ke HP ini selama aplikasi terbuka, dan hanya file yang berubah yang diunduh.',
   'Fetching the newest backup…': 'Mengambil backup terbaru…',
   "From the backup of {when}: the server's chats, projects with their .git, skills, schedules, API keys and accounts come to this phone. Files with the same name are replaced. This phone keeps its own DNS and Linux settings.":
       'Dari backup {when}: chat, proyek beserta .git-nya, skill, jadwal, API key dan akun dari server dipindah ke HP ini. File dengan nama yang sama diganti. HP ini tetap memakai pengaturan DNS dan Linux miliknya sendiri.',
   'Newest on the server': 'Terbaru di server',
   'Newest on this phone': 'Terbaru di HP ini',
+  'downloaded {size}, only what changed': 'diunduh {size}, hanya yang berubah',
   'Not now': 'Nanti saja',
   'Restore on this phone': 'Pulihkan di HP ini',
   "Restore the server's data on this phone?": 'Pulihkan data server di HP ini?',

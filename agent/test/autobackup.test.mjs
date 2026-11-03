@@ -3,7 +3,8 @@
 // phone puts where.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { bundle, tempDir } from "./helpers.mjs";
 
@@ -309,4 +310,182 @@ test("a backup that was cut short is cleaned away once it is old, never one bein
 	b.stop();
 	assert.equal(existsSync(join(dir, ".auto-444.ghb.tmp")), false);
 	assert.equal(existsSync(fresh), true);
+});
+
+// ---------------------------------------------------------------------------
+// Incremental (a server's): blobs and snapshots, so the phone fetches only what changed.
+
+const { readSnapshot, readBlob, restoreSnapshot, isSnapshot } = await bundle("autobackup");
+
+/** What the phone does: asks what a snapshot needs, fetches the blobs it lacks into [phone], and the snapshot. */
+function fetchTo(b, name, phone) {
+	const needs = b.needs(name);
+	mkdirSync(join(phone, "blobs"), { recursive: true });
+	const have = new Set(existsSync(join(phone, "blobs")) ? readdirSync(join(phone, "blobs")) : []);
+	const want = needs.blobs.filter((x) => !have.has(x.id));
+	let fetched = 0;
+	let answers = 0;
+	const parts = new Map();
+	let queue = want.map((x) => ({ id: x.id, offset: 0 }));
+	while (queue.length) {
+		const { chunks } = b.read(queue, 64 * 1024);
+		answers++;
+		const next = [];
+		const done = new Set();
+		for (const c of chunks) {
+			const data = Buffer.from(c.data, "base64");
+			parts.set(c.id, Buffer.concat([parts.get(c.id) ?? Buffer.alloc(0), data]));
+			fetched += data.length;
+			if (c.offset + data.length < c.size) next.push({ id: c.id, offset: c.offset + data.length });
+			else done.add(c.id);
+		}
+		for (const id of done) writeFileSync(join(phone, "blobs", id), parts.get(id));
+		const answered = new Set(chunks.map((c) => c.id));
+		queue = [...next, ...queue.filter((q) => !answered.has(q.id))];
+	}
+	writeFileSync(join(phone, name), Buffer.from(needs.snapshot, "base64"));
+	return { fetched, blobs: want.length, answers, total: needs.blobs.length };
+}
+
+test("incremental: a second backup stores and sends only what changed", async (t) => {
+	const s = server(t);
+	write(s.workspace, "site/big.bin", Buffer.alloc(300 * 1024, 7));
+	let now = 2_000_000;
+	const b = backups(t, s, { incremental: true, now: () => now++ });
+	b.configure(KEY);
+	const first = await b.tick();
+	assert.match(first.name, /^auto-\d+\.ghs$/);
+	assert.equal(first.added, first.size, "the first one adds everything it needs");
+	const phone = tempDir(t, "phone-");
+	const one = fetchTo(b, first.name, phone);
+	assert.ok(one.blobs > 5);
+
+	// One file changes: one new blob, and a fresh snapshot that lists everything.
+	write(s.workspace, "site/index.html", "<h1>changed</h1>");
+	utimesSync(join(s.workspace, "site/index.html"), new Date(), new Date(Date.now() + 5000));
+	const second = await b.tick();
+	assert.ok(second && second.name !== first.name);
+	assert.ok(second.added < 2048, `only the change and the snapshot are new (${second.added} bytes)`);
+	assert.ok(second.size > 1024, "its size counts every blob it needs");
+	const two = fetchTo(b, second.name, phone);
+	assert.equal(two.blobs, 1, "the phone fetches the one changed file");
+	assert.ok(two.fetched < 1024, `${two.fetched} bytes fetched`);
+	assert.equal(two.total, one.total, "the snapshot still names every file");
+
+	// Restored from the phone's copy: the whole tree, with the change.
+	const other = tempDir(t, "restored-");
+	const to = { agentDir: join(other, "agent"), workspace: join(other, "workspace"), home: join(other, "home") };
+	assert.ok(isSnapshot(join(phone, second.name)));
+	const r = restoreSnapshot(join(phone, second.name), KEY, to);
+	assert.ok(r.restored > 0);
+	assert.equal(readFileSync(join(to.workspace, "site/index.html"), "utf8"), "<h1>changed</h1>");
+	assert.equal(readFileSync(join(to.workspace, "site/big.bin")).length, 300 * 1024);
+	assert.equal(JSON.parse(readFileSync(join(to.agentDir, "sessions/--w--/chat.jsonl"), "utf8").split("\n")[0]).cwd, `${to.workspace}/site`);
+	assert.equal(readSecureJson(join(to.agentDir, "griphub", "integrations.json"), {}).github.token, SECRET);
+	// The older snapshot still restores: its blobs are shared, not replaced.
+	const older = tempDir(t, "older-");
+	const to2 = { agentDir: join(older, "agent"), workspace: join(older, "workspace"), home: join(older, "home") };
+	restoreSnapshot(join(phone, first.name), KEY, to2);
+	assert.equal(readFileSync(join(to2.workspace, "site/index.html"), "utf8"), "<h1>hi</h1>");
+});
+
+test("incremental: an unchanged file is not read again, the same content is stored once, and nothing is readable", async (t) => {
+	const s = server(t);
+	write(s.workspace, "a/copy1.txt", "same words in two places");
+	write(s.workspace, "b/copy2.txt", "same words in two places");
+	let now = 3_000_000;
+	const b = backups(t, s, { incremental: true, now: () => now++ });
+	b.configure(KEY);
+	const first = await b.tick();
+	const snap = readSnapshot(first.path, KEY);
+	const ids = snap.files.filter((f) => f.name.endsWith("copy1.txt") || f.name.endsWith("copy2.txt")).map((f) => f.id);
+	assert.equal(ids.length, 2);
+	assert.equal(ids[0], ids[1], "one blob for both");
+	for (const n of readdirSync(b.blobsDir)) {
+		const raw = readFileSync(join(b.blobsDir, n));
+		assert.equal(raw.subarray(0, 4).toString(), "GHO1");
+		for (const plain of [SECRET, "sk-router-key", "PRIVATE KEY", "<h1>hi</h1>", "same words"]) {
+			assert.equal(raw.includes(Buffer.from(plain)), false, `${plain} is not readable in a blob`);
+		}
+	}
+	assert.equal(readFileSync(first.path).includes(Buffer.from("index.html")), false, "file names are not readable in the snapshot");
+	assert.equal(readdirSync(b.blobsDir).includes(createHash("sha256").update("<h1>hi</h1>").digest("hex")), false, "a blob's name says nothing of its content");
+	assert.throws(() => readSnapshot(first.path, "cd".repeat(32)), /another key/);
+
+	// The same size and time: taken from the index, without reading (a changed byte under an unchanged time is the
+	// one thing that slips by, as with the old fingerprint and as with rsync).
+	const st = statSync(join(s.workspace, "site/index.html"));
+	writeFileSync(join(s.workspace, "site/index.html"), "<h1>HI</h1>");
+	utimesSync(join(s.workspace, "site/index.html"), st.atime, st.mtime);
+	const again = await b.tick(true);
+	const html = (x) => readSnapshot(x.path, KEY).files.find((f) => f.name === "workspace/site/index.html").id;
+	assert.equal(html(again), html(first), "not read again");
+	// A blob that went missing is written again rather than trusted.
+	rmSync(join(b.blobsDir, html(first)));
+	const healed = await b.tick(true);
+	assert.notEqual(html(healed), html(first), "read again: its content had changed");
+	assert.ok(existsSync(join(b.blobsDir, html(healed))));
+});
+
+test("incremental: the newest three are kept and the blobs only they needed go; off removes everything", async (t) => {
+	const s = server(t);
+	let now = 4_000_000;
+	const b = backups(t, s, { incremental: true, now: () => now++ });
+	b.configure(KEY);
+	const made = [];
+	for (let i = 0; i < 5; i++) {
+		write(s.workspace, "site/index.html", `<h1>version ${i}</h1>`);
+		utimesSync(join(s.workspace, "site/index.html"), new Date(), new Date(Date.now() + (i + 1) * 5000));
+		made.push(await b.tick());
+	}
+	assert.deepEqual(b.list().map((x) => x.name), made.slice(2).reverse().map((x) => x.name));
+	const live = new Set(b.list().flatMap((x) => readSnapshot(x.path, KEY).files.map((f) => f.id)));
+	assert.deepEqual(new Set(readdirSync(b.blobsDir)), live, "only blobs a kept snapshot needs");
+	for (const x of b.list()) {
+		const other = tempDir(t, "keep-");
+		restoreSnapshot(x.path, KEY, { agentDir: join(other, "a"), workspace: join(other, "w"), home: join(other, "h") });
+	}
+	b.configure(null);
+	assert.equal(b.list().length, 0);
+	assert.equal(existsSync(b.blobsDir), false);
+	assert.equal(existsSync(join(s.home, ".griphub", "backups", "index.json")), false);
+});
+
+test("incremental: a server that still has zip backups from before lists both, newest first", async (t) => {
+	const s = server(t);
+	let now = 5_000_000;
+	const old = backups(t, s, { now: () => now++ });
+	old.configure(KEY);
+	const zip = await old.tick();
+	const b = backups(t, s, { incremental: true, now: () => now++ });
+	const snap = await b.tick(true);
+	assert.deepEqual(b.list().map((x) => x.name), [snap.name, zip.name]);
+	assert.equal(isSnapshot(zip.path), false);
+	assert.throws(() => b.needs(zip.name), /Not a snapshot/);
+});
+
+test("incremental: what the phone asks for is checked, a large blob comes over several answers, a damaged one is refused", async (t) => {
+	const s = server(t);
+	write(s.workspace, "site/noise.bin", randomBytes(200 * 1024));
+	const b = backups(t, s, { incremental: true });
+	b.configure(KEY);
+	const made = await b.tick();
+	assert.throws(() => b.read([{ id: "../auto-backup.json" }]), /Not a blob/);
+	assert.throws(() => b.needs("../../etc/passwd"), /Not a snapshot/);
+	const phone = tempDir(t, "phone-");
+	const got = fetchTo(b, made.name, phone);
+	assert.ok(got.answers >= 4, `200 KB in 64 KB answers (${got.answers})`);
+	assert.equal(readBlob(join(phone, "blobs"), readSnapshot(join(phone, made.name), KEY).files.find((f) => f.name.endsWith("noise.bin")).id, KEY).length, 200 * 1024);
+
+	// One flipped byte in one blob: the restore stops before writing anything.
+	const victim = readdirSync(join(phone, "blobs"))[0];
+	const raw = readFileSync(join(phone, "blobs", victim));
+	raw[40] ^= 1;
+	writeFileSync(join(phone, "blobs", victim), raw);
+	const other = tempDir(t, "bad-");
+	const to = { agentDir: join(other, "agent"), workspace: join(other, "workspace"), home: join(other, "home") };
+	assert.throws(() => restoreSnapshot(join(phone, made.name), KEY, to), /damaged/);
+	assert.equal(existsSync(to.workspace), false, "nothing written");
+	rmSync(join(phone, "blobs", victim));
+	assert.throws(() => restoreSnapshot(join(phone, made.name), KEY, to), /missing/);
 });
