@@ -39,6 +39,24 @@ void main() {
       expect(linkify('tanpa link'), [('tanpa link', null)]);
     });
 
+    test('an invisible character in an address is dropped, so the link opens what it shows', () {
+      // As a chat reply once carried it: "griphub" with a zero-width space after the g, which opened another repo.
+      const shown = 'https://github.com/Rosyidputrar/g\u200Briphub/pull/27';
+      expect(linkify('PR: $shown')[1].$2, 'https://github.com/Rosyidputrar/griphub/pull/27');
+      expect(openableUri(shown).toString(), 'https://github.com/Rosyidputrar/griphub/pull/27');
+      // Markdown hands the address over percent-encoded.
+      expect(
+        openableUri('https://github.com/Rosyidputrar/g%E2%80%8Briphub/pull/27').toString(),
+        'https://github.com/Rosyidputrar/griphub/pull/27',
+      );
+      for (final c in ['\u00AD', '\u200C', '\u200D', '\u200E', '\u202E', '\u2060', '\u2066', '\uFEFF']) {
+        expect(openableUri('https://exa${c}mple.com/a').toString(), 'https://example.com/a', reason: c.codeUnitAt(0).toRadixString(16));
+      }
+      expect(openableUri('https://ex%EF%BB%BFample.com/%e2%80%8ba').toString(), 'https://example.com/a');
+      // Ordinary encoded text stays as it is.
+      expect(openableUri('https://example.com/caf%C3%A9?q=a%20b').toString(), 'https://example.com/caf%C3%A9?q=a%20b');
+    });
+
     test('only http(s), mailto and tel can be opened', () {
       expect(openableUri('https://a.b/c'), isNotNull);
       expect(openableUri('mailto:x@y.z'), isNotNull);

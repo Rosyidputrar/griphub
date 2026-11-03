@@ -132,6 +132,10 @@ class MainActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
                     "isRunning" -> result.success(AgentRuntime.isRunning)
+                    // Android's own flag for phones with little memory (as ArchiveTune reads it): animations default off.
+                    "isLowRamDevice" -> result.success(
+                        (getSystemService(ACTIVITY_SERVICE) as? android.app.ActivityManager)?.isLowRamDevice == true
+                    )
                     // The toolchain environment, for terminals the app opens.
                     // Unpacking the agent bundle after an update takes a moment: off the UI thread.
                     "environment" -> Thread {

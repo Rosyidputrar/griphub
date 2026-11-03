@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'agent_client.dart';
 import 'agent_controller.dart';
 import 'agent_fs.dart';
+import 'backup_sync.dart';
 import 'msg.dart';
 import 'port_forward.dart';
 import 'remote_fs.dart';
@@ -260,17 +261,23 @@ class RemoteMode extends ChangeNotifier {
   /// How many fetched backups the phone keeps.
   static const keepBackups = 3;
 
-  /// The server's backups on this phone, newest first.
+  /// The server's backups on this phone, newest first: snapshots (with their blobs in `blobs/`), and zips from
+  /// before a server made snapshots.
   List<File> localBackups() {
     if (setup == null || !backupsDir.existsSync()) return const [];
-    final files = backupsDir.listSync().whereType<File>().where((f) => RegExp(r'/auto-\d+\.ghb$').hasMatch(f.path)).toList()
-      ..sort((a, b) => b.path.compareTo(a.path));
+    final files = backupsDir.listSync().whereType<File>().where((f) => _backupName.hasMatch(f.path)).toList()
+      ..sort((a, b) => backupTime(b).compareTo(backupTime(a)));
     return files;
   }
 
+  static final _backupName = RegExp(r'/auto-(\d+)\.gh[bs]$');
+
   /// When a backup on this phone was made on the server, from its name.
   static DateTime backupTime(File f) =>
-      DateTime.fromMillisecondsSinceEpoch(int.tryParse(RegExp(r'auto-(\d+)\.ghb$').firstMatch(f.path)?[1] ?? '') ?? 0);
+      DateTime.fromMillisecondsSinceEpoch(int.tryParse(_backupName.firstMatch(f.path)?[1] ?? '') ?? 0);
+
+  /// How many bytes the last fetch brought over the link (only what this phone lacked), and when it ended.
+  ({int bytes, DateTime at})? lastPull;
 
   /// Asks the server how its backups stand (only with the server in use).
   Future<Map<String, dynamic>?> refreshAutoBackup() async {
@@ -320,12 +327,26 @@ class RemoteMode extends ChangeNotifier {
     final list = (status?['backups'] as List? ?? const []).whereType<Map>().toList();
     if (status?['enabled'] != true || list.isEmpty) return null;
     final latest = list.first.cast<String, dynamic>();
-    final target = File('${backupsDir.path}/${latest['name']}');
-    if (target.existsSync() && target.lengthSync() == (latest['size'] as num?)?.toInt()) return target;
+    final name = latest['name'] as String;
+    final target = File('${backupsDir.path}/$name');
+    final snapshot = BackupSync.snapshotName.hasMatch(name);
+    // A snapshot is written only once its blobs are all here; a zip is whole when its size matches.
+    if (target.existsSync() && (snapshot || target.lengthSync() == (latest['size'] as num?)?.toInt())) return target;
     pullingBackup = true;
     backupPullError = null;
     notifyListeners();
     try {
+      if (snapshot) {
+        final sync = BackupSync(agent.client.call, backupsDir, waitOnline: agent.client.whenConnected);
+        final got = await sync.fetch(name, onProgress: onProgress, cancel: cancel);
+        lastPull = (bytes: got.fetched, at: DateTime.now());
+        final all = localBackups();
+        for (final old in all.skip(keepBackups)) {
+          BackupSync.deleteSnapshot(old);
+        }
+        sync.pruneBlobs(all.take(keepBackups).where((f) => f.path.endsWith('.ghs')));
+        return got.file;
+      }
       final fetched = await agent.fs.toPhoneFile(latest['path'] as String, onProgress: onProgress, cancel: cancel);
       backupsDir.createSync(recursive: true);
       final part = File('${target.path}.part');
@@ -333,8 +354,9 @@ class RemoteMode extends ChangeNotifier {
       await part.rename(target.path);
       // The download cache needs no second copy of it.
       unawaited(File(fetched).delete().then((_) {}, onError: (_) {}));
+      lastPull = (bytes: target.lengthSync(), at: DateTime.now());
       for (final old in localBackups().skip(keepBackups)) {
-        old.deleteSync();
+        BackupSync.deleteSnapshot(old);
       }
       return target;
     } catch (e) {

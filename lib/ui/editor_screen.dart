@@ -362,11 +362,21 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
     final p = context.palette;
     final t = Theme.of(context).textTheme;
     final ready = !_loading && !_binary && _error == null;
-    return PopScope(
-      canPop: !_dirty,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _confirmLeave();
-      },
+    // Back closes the find bar first, then asks about unsaved changes, then leaves.
+    return ValueListenableBuilder<CodeFindValue?>(
+      valueListenable: _find,
+      builder: (context, find, child) => PopScope(
+        canPop: !_dirty && find == null,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
+          if (_find.value != null) {
+            _find.close();
+          } else {
+            _confirmLeave();
+          }
+        },
+        child: child!,
+      ),
       child: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {

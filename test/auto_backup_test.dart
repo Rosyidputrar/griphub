@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_backend.dart';
@@ -43,23 +44,41 @@ void main() {
     final fetched = await remote.backupNow(force: true);
     expect(fetched, isNotNull);
     expect(fetched!.path, startsWith(remote.backupsDir.path));
+    expect(fetched.path, endsWith('.ghs'), reason: 'a server backs up as snapshots of blobs');
     // Turning it on also made one in the background; the newest is the one fetched.
-    final serverCopy = (Directory('${rig.daemon.home.path}/.griphub/backups')
-            .listSync()
-            .whereType<File>()
-            .where((f) => f.path.endsWith('.ghb'))
-            .toList()
+    final serverDir = Directory('${rig.daemon.home.path}/.griphub/backups');
+    final newest = (serverDir.listSync().whereType<File>().where((f) => f.path.endsWith('.ghs')).toList()
           ..sort((a, b) => b.path.compareTo(a.path)))
         .first;
-    expect(fetched.readAsBytesSync(), serverCopy.readAsBytesSync(), reason: 'the same bytes as on the server');
-    expect(String.fromCharCodes(fetched.readAsBytesSync().take(4)), 'GHB1');
-    expect(fetched.readAsStringSync(encoding: latin1).contains('<h1>Halo</h1>'), isFalse, reason: 'encrypted');
+    expect(fetched.readAsBytesSync(), newest.readAsBytesSync(), reason: 'the same snapshot as on the server');
+    expect(String.fromCharCodes(fetched.readAsBytesSync().take(4)), 'GHS1');
+    final blobs = Directory('${remote.backupsDir.path}/blobs').listSync().whereType<File>().toList();
+    expect(blobs, isNotEmpty);
+    for (final b in blobs) {
+      expect(b.readAsBytesSync(), File('${serverDir.path}/blobs/${b.uri.pathSegments.last}').readAsBytesSync());
+      expect(b.readAsStringSync(encoding: latin1).contains('<h1>Halo</h1>'), isFalse, reason: 'encrypted');
+    }
     expect(remote.localBackups().first.path, fetched.path);
 
     // Already here: not fetched again.
     final before = fetched.lastModifiedSync();
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect((await remote.pullLatestBackup())!.lastModifiedSync(), before);
+
+    final noise = Random(1); // does not compress
+    // A large file comes over once; after that a small edit does not bring it again. (Only "less than that file": the
+    // host may still be copying its starter skills in, whose fonts are a few hundred KB that are new too. The exact
+    // bytes are counted in backup_sync_test.dart and agent/test/autobackup.test.mjs.)
+    File('${rig.daemon.home.path}/workspace/site/big.bin').writeAsBytesSync(List.generate(1024 * 1024, (_) => noise.nextInt(256)));
+    await remote.backupNow(force: true);
+    expect(remote.lastPull!.bytes, greaterThan(1000 * 1000), reason: 'the new file came over');
+    File('${rig.daemon.home.path}/workspace/site/index.html').writeAsStringSync('<h1>Halo lagi</h1>');
+    final third = await remote.backupNow(force: true);
+    final whole = ((remote.autoBackup!['backups'] as List).first as Map)['size'] as int;
+    expect(whole, greaterThan(1000 * 1000), reason: 'the backup is the whole tree');
+    expect(remote.lastPull!.bytes, lessThan(1000 * 1000), reason: 'the changed files only, not the 1 MB again (${remote.lastPull!.bytes} of $whole bytes)');
+    expect(remote.localBackups().first.path, third!.path);
+    expect(remote.localBackups().length, 3, reason: 'the newest three are kept');
 
     // Off: the server's copies go, the phone keeps its own and the key.
     await remote.setAutoBackup(false);

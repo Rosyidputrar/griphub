@@ -14,6 +14,9 @@
 import { appendFileSync, existsSync } from "node:fs";
 
 const ROUTER = "https://griphubrouter.web.id/v1";
+// A 1x1 PNG, for MOCK_IMAGES.
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+let imageCount = 0;
 const realFetch = globalThis.fetch;
 
 function chunk(delta, finish = null, extra = {}) {
@@ -23,6 +26,26 @@ function chunk(delta, finish = null, extra = {}) {
 globalThis.fetch = async (input, init) => {
 	const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 	if (!url.startsWith(ROUTER)) return realFetch(input, init);
+	// MOCK_IMAGES: the router's image models and picture endpoint. Each picture request is logged as "image <model>";
+	// MOCK_IMAGE_FAIL=<n> refuses the n-th one (content policy, not billed).
+	if (process.env.MOCK_IMAGES && url === `${ROUTER}/models`) {
+		const data = [
+			{ id: "mock-model", name: "Mock" },
+			{ id: "gpt-image", name: "GPT Image", kind: "image" },
+			{ id: "gemini-3.1-flash-image", name: "Gemini Flash Image", kind: "image" },
+		];
+		return new Response(JSON.stringify({ data }), { status: 200, headers: { "content-type": "application/json" } });
+	}
+	if (process.env.MOCK_IMAGES && url === `${ROUTER}/images/generations`) {
+		const req = JSON.parse(init.body);
+		if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, `image ${req.model} ${req.size}\n`);
+		imageCount++;
+		if (String(imageCount) === process.env.MOCK_IMAGE_FAIL) {
+			return new Response('{"error":{"message":"Prompt refused by content policy"}}', { status: 400, headers: { "content-type": "application/json" } });
+		}
+		await new Promise((r) => setTimeout(r, 50 * imageCount));
+		return new Response(JSON.stringify({ data: [{ b64_json: PNG }] }), { status: 200, headers: { "content-type": "application/json" } });
+	}
 	if (!url.startsWith(`${ROUTER}/chat/completions`)) return new Response('{"error":"not found"}', { status: 404 });
 	if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, "chat\n");
 	const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);

@@ -10,6 +10,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { readSecureJson, writeSecureJson } from "./secure.js";
 import { atomicWrite } from "./state.js";
 
@@ -21,6 +22,50 @@ export const GRIPHUB_ID = "griphub";
 export const GRIPHUB_NAME = "GripHub Router";
 export const GRIPHUB_API: ProviderApi = "openai-completions";
 export const GRIPHUB_BASE_URL = "https://griphubrouter.web.id/v1";
+/** The router's origin: Anthropic's SDK appends `/v1/messages` itself, so Anthropic models get the base without `/v1`. */
+export const GRIPHUB_ORIGIN = "https://griphubrouter.web.id";
+
+/**
+ * Which of GripHub Router's endpoints a model is sent to. Everything still goes through the router with the same key;
+ * only the wire format follows the model family: Anthropic models speak Anthropic Messages (`/v1/messages`), GPT and
+ * OpenAI o-series models speak OpenAI Responses (`/v1/responses`), and every other model stays on Chat Completions.
+ */
+export function griphubApiFor(modelId: string): ProviderApi {
+	const id = modelId.trim().toLowerCase().replace(/^.*\//, "");
+	if (id.startsWith("claude")) return "anthropic-messages";
+	if (id.startsWith("gpt") || /^o\d/.test(id)) return "openai-responses";
+	return GRIPHUB_API;
+}
+
+/**
+ * What pi's own catalog knows about the same model from the vendor, for a GripHub model sent in the vendor's format.
+ * GripHub ids use dots (`claude-sonnet-5.5`), the catalog dashes (`claude-sonnet-5-5`). Only the thinking settings
+ * carry over: how thinking is asked for (adaptive vs. a token budget, no temperature on newer Anthropic models) and which levels
+ * exist. Vendor-only features (mid-conversation effort or tool changes) stay off: the router is a proxy, not the vendor.
+ * `max` is left out: the app offers up to xhigh ("Max").
+ */
+export function vendorThinking(modelId: string, api: ProviderApi): { compat?: Record<string, boolean>; levels?: Record<string, string | null> } {
+	const id = modelId.trim().toLowerCase();
+	let m: any;
+	try {
+		if (api === "anthropic-messages") m = (getBuiltinModel as any)("anthropic", id.replace(/\./g, "-"));
+		else if (api === "openai-responses") m = (getBuiltinModel as any)("openai", id);
+	} catch {
+		m = undefined;
+	}
+	if (!m) return {};
+	const compat: Record<string, boolean> = {};
+	if (api === "anthropic-messages") {
+		if (m.compat?.forceAdaptiveThinking === true) compat.forceAdaptiveThinking = true;
+		if (m.compat?.supportsTemperature === false) compat.supportsTemperature = false;
+	}
+	const levels: Record<string, string | null> = { ...(m.thinkingLevelMap ?? {}) };
+	delete levels.max;
+	return {
+		...(Object.keys(compat).length ? { compat } : {}),
+		...(Object.keys(levels).length ? { levels } : {}),
+	};
+}
 
 export type CustomModel = {
 	id: string;
@@ -193,14 +238,30 @@ export class CustomProviders {
 				baseUrl: p.baseUrl,
 				api: p.api,
 				apiKey: `$${envName(p.id)}`,
-				models: p.models.map((m) => ({
-					id: m.id,
-					...(m.name ? { name: m.name } : {}),
-					...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-					...(m.maxTokens ? { maxTokens: requestedOutput(m) } : {}),
-					...(m.reasoning ? { reasoning: true, thinkingLevelMap: thinkingLevels(m, p.api) } : {}),
-					...(m.input?.length ? { input: m.input } : {}),
-				})),
+				models: p.models.map((m) => {
+					// Per-model routing inside the router (see griphubApiFor); the provider-level api stays the default.
+					const api = p.id === GRIPHUB_ID ? griphubApiFor(m.id) : p.api;
+					const vendor = api !== p.api ? vendorThinking(m.id, api) : {};
+					return {
+						id: m.id,
+						...(m.name ? { name: m.name } : {}),
+						...(api !== p.api ? { api } : {}),
+						...(api === "anthropic-messages" && p.id === GRIPHUB_ID
+							? {
+									baseUrl: GRIPHUB_ORIGIN,
+									// The router reads the bearer token (proven on /v1/messages in web.ts); x-api-key also goes out.
+									headers: { authorization: `Bearer $${envName(p.id)}` },
+								}
+							: {}),
+						...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+						...(m.maxTokens ? { maxTokens: requestedOutput(m) } : {}),
+						...(m.reasoning
+							? { reasoning: true, thinkingLevelMap: { ...thinkingLevels(m, api), ...vendor.levels } }
+							: {}),
+						...(vendor.compat ? { compat: vendor.compat } : {}),
+						...(m.input?.length ? { input: m.input } : {}),
+					};
+				}),
 			};
 		}
 		return JSON.stringify({ ...config, providers }, null, 2);
@@ -384,21 +445,47 @@ export async function listImageModels(baseUrl: string, apiKey: string): Promise<
 		.map((m) => ({ id: String(m.id), name: String(m.name ?? m.id) }));
 }
 
-/** Generates an image through an OpenAI-compatible Images API (`POST …/images/generations`). */
-export async function generateImage(baseUrl: string, apiKey: string, model: string, prompt: string, size: string): Promise<string> {
+/** How long one picture may take before it is given up on (they take 20–120 s). */
+export const IMAGE_TIMEOUT_MS = 180_000;
+
+/** Raised when a picture request failed; [status] is the HTTP status (0 when no answer came: timeout, network). */
+export class ImageError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+		/** True when the request may have reached the router and been billed anyway (timed out, connection dropped). */
+		readonly maybeBilled = false,
+	) {
+		super(message);
+	}
+}
+
+/**
+ * Generates an image through an OpenAI-compatible Images API (`POST …/images/generations`) and returns it as base64.
+ * [signal] stops it early (the user pressed Stop). Never retries: a request that timed out may still have produced
+ * (and billed) a picture on the router.
+ */
+export async function generateImage(baseUrl: string, apiKey: string, model: string, prompt: string, size: string, signal?: AbortSignal): Promise<string> {
 	const base = cleanUrl(baseUrl);
 	if (!/^https?:\/\/[^/]+/.test(base)) throw new Error("Enter a full base URL (https://…)");
 	if (!apiKey) throw new Error("Connect GripHub first: no API key saved.");
 	if (!prompt.trim()) throw new Error("Prompt is empty");
-	// Image work takes 20–120s; the long timeout is deliberate. No auto-retry:
-	// a timed-out request may still have produced (and billed) an image server-side.
-	const res = await fetch(`${base}/images/generations`, {
-		method: "POST",
-		headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${apiKey}` },
-		body: JSON.stringify({ model, prompt, size }),
-		signal: AbortSignal.timeout(180_000),
-	});
-	const body = await res.text();
+	const timeout = AbortSignal.timeout(IMAGE_TIMEOUT_MS);
+	let res: Response;
+	let body: string;
+	try {
+		res = await fetch(`${base}/images/generations`, {
+			method: "POST",
+			headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${apiKey}` },
+			body: JSON.stringify({ model, prompt, size }),
+			signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+		});
+		body = await res.text();
+	} catch (e) {
+		if (signal?.aborted) throw new ImageError("Stopped", 0, true);
+		if (timeout.aborted) throw new ImageError(`No answer after ${IMAGE_TIMEOUT_MS / 60_000} minutes`, 0, true);
+		throw new ImageError(`Could not reach the router: ${(e as Error).message}`, 0, true);
+	}
 	if (!res.ok) {
 		let detail = body.slice(0, 300);
 		try {
@@ -406,15 +493,26 @@ export async function generateImage(baseUrl: string, apiKey: string, model: stri
 			const m = j?.error?.message ?? j?.error;
 			if (typeof m === "string" && m) detail = m.slice(0, 300);
 		} catch {}
-		throw new Error(`${res.status} ${res.statusText}: ${detail}`);
+		// A refusal is an answer: the router does not charge failed requests.
+		throw new ImageError(`${res.status} ${res.statusText}: ${detail}`, res.status);
 	}
 	let json: any;
 	try {
 		json = JSON.parse(body);
 	} catch {
-		throw new Error(`The endpoint did not return JSON: ${body.slice(0, 200)}`);
+		throw new ImageError(`The endpoint did not return JSON: ${body.slice(0, 200)}`, res.status, true);
 	}
-	const b64 = json?.data?.[0]?.b64_json;
-	if (typeof b64 !== "string" || !b64) throw new Error("The endpoint returned no image data");
-	return b64;
+	const item = json?.data?.[0];
+	if (typeof item?.b64_json === "string" && item.b64_json) return item.b64_json;
+	// Some upstreams answer with a link instead of the data; it is fetched once, from the same answer.
+	if (typeof item?.url === "string" && /^https:\/\//.test(item.url)) {
+		try {
+			const pic = await fetch(item.url, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000) });
+			if (!pic.ok) throw new Error(`${pic.status}`);
+			return Buffer.from(await pic.arrayBuffer()).toString("base64");
+		} catch (e) {
+			throw new ImageError(`The picture was made but could not be downloaded: ${(e as Error).message}`, res.status, true);
+		}
+	}
+	throw new ImageError("The endpoint returned no image data", res.status, true);
 }

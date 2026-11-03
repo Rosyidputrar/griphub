@@ -26,6 +26,7 @@ import 'illustration.dart';
 import 'mesh.dart';
 import 'model_sheet.dart';
 import 'review_screen.dart';
+import 'sheet.dart';
 import 'tasks_screen.dart';
 import 'terminal_screen.dart';
 import 'server_screen.dart';
@@ -80,6 +81,9 @@ class _ChatScreenState extends State<ChatScreen> {
   /// The @ list: files matching what is typed after the @ at the cursor, and the query they answer.
   List<String> mentionFiles = const [];
   String? mentionQuery;
+
+  /// The text when Back closed the suggestions: they stay closed until it changes.
+  String? _suggestionsClosedFor;
   Timer? _mentionTimer;
   int _mentionAsk = 0;
 
@@ -96,6 +100,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// "/par" while typing a command name; null otherwise.
   String? get _slashQuery {
     final t = input.text;
+    if (t == _suggestionsClosedFor) return null;
     if (!t.startsWith('/') || t.contains(' ') || t.contains('\n')) return null;
     return t.substring(1);
   }
@@ -250,7 +255,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Asks the host for files matching the @ being typed, a moment after the typing stops; an answer for an older query
   /// is dropped. No @ at the cursor (or no project): no list.
   void _findMention() {
-    final m = _mention;
+    final m = input.text == _suggestionsClosedFor ? null : _mention;
     if (m == null) {
       _mentionTimer?.cancel();
       mentionQuery = null;
@@ -509,7 +514,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     if (action == 'select') {
-      await showModalBottomSheet<void>(
+      await showSheet<void>(
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
@@ -567,7 +572,11 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = context.palette;
     return ListenableBuilder(
       listenable: Listenable.merge([agent, agent.remote]),
-      builder: (context, _) => Scaffold(
+      // Back closes the "/" or "@" suggestions over the input first (the text stays), then leaves the chat.
+      builder: (context, _) => BackLayer(
+        open: _suggesting,
+        onClose: _closeSuggestions,
+        child: Scaffold(
         appBar: AppBar(
           leading: Navigator.of(context).canPop()
               ? IconButton(
@@ -701,7 +710,7 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             if (_slashQuery != null && slash != null)
               SlashMenu(commands: slash!, query: _slashQuery!, onPick: (c) => _prefill('/${c.name} '))
-            else if (mentionQuery != null && _mention != null && mentionFiles.isNotEmpty)
+            else if (mentionQuery != null && _mention != null && mentionFiles.isNotEmpty && input.text != _suggestionsClosedFor)
               MentionMenu(files: mentionFiles, onPick: _pickMention),
             if (agent.billingNotice != null)
               Padding(
@@ -737,7 +746,23 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         ),
       ),
+      ),
     );
+  }
+
+  /// The "/" commands or "@" files are showing over the input.
+  bool get _suggesting =>
+      (_slashQuery != null && slash != null && slash!.any((c) => c.name.toLowerCase().contains(_slashQuery!.toLowerCase()))) ||
+      (mentionQuery != null && _mention != null && mentionFiles.isNotEmpty && input.text != _suggestionsClosedFor);
+
+  /// Back on the suggestions: they go, the text stays as typed. They come back with the next keystroke.
+  void _closeSuggestions() {
+    setState(() {
+      _suggestionsClosedFor = input.text;
+      mentionQuery = null;
+      mentionFiles = const [];
+      _mentionTimer?.cancel();
+    });
   }
 
   /// The line under the transcript while the agent works, or null when something on screen

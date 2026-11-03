@@ -510,8 +510,9 @@ void main() {
       return host;
     }
 
+    // Long enough for a sheet's spring to land (about half a second).
     Future<void> settle(WidgetTester tester) async {
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 10; i++) {
         await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
         await tester.pump(const Duration(milliseconds: 60));
       }
@@ -582,9 +583,11 @@ void main() {
         );
       agent.remote.configure(setup: RemoteSetup(home: home.path), store: store);
       final at = goldenNow.subtract(const Duration(minutes: 40)).millisecondsSinceEpoch;
-      File('${agent.remote.backupsDir.path}/auto-$at.ghb')
+      // A snapshot (a server's backup since they are incremental), fetched with only what changed since the last.
+      File('${agent.remote.backupsDir.path}/auto-$at.ghs')
         ..createSync(recursive: true)
-        ..writeAsBytesSync([71, 72, 66, 49]);
+        ..writeAsBytesSync([71, 72, 83, 49]);
+      agent.remote.lastPull = (bytes: 182 * 1024, at: goldenNow);
       return (agent, at);
     }
 
@@ -597,7 +600,7 @@ void main() {
         agent.remote.autoBackup = {
           'enabled': true,
           'backups': [
-            {'name': 'auto-$at.ghb', 'path': '/srv/auto-$at.ghb', 'at': at, 'size': 48 * 1024 * 1024},
+            {'name': 'auto-$at.ghs', 'path': '/srv/auto-$at.ghs', 'at': at, 'size': 48 * 1024 * 1024, 'added': 182 * 1024},
           ],
         };
         agent.remote.notifyListeners();

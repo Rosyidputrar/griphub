@@ -4,8 +4,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/updater.dart';
+import 'changelog_screen.dart';
 import 'i18n.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 bool _sheetOpen = false;
@@ -20,7 +22,7 @@ Future<void> showUpdateSheet(BuildContext context, AgentController agent, {bool 
   if (_sheetOpen) return;
   _sheetOpen = true;
   try {
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -191,6 +193,12 @@ class _UpdateSheet extends StatelessWidget {
               ],
               const SizedBox(height: 20),
               ..._actions(context),
+              // Under the update buttons, as ArchiveTune's "View changelog": every version, not only the next one.
+              TextButton.icon(
+                onPressed: () => openChangelog(context, updater.currentVersion),
+                icon: const Icon(LucideIcons.history, size: 16),
+                label: Text(tr('See the changelog')),
+              ),
               if (updater.phase == UpdatePhase.upToDate ||
                   updater.phase == UpdatePhase.idle ||
                   updater.phase == UpdatePhase.available) ...[

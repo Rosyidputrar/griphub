@@ -9,6 +9,7 @@ import '../agent/agent_controller.dart';
 import '../agent/integrations.dart';
 import 'accounts_screen.dart';
 import 'errors.dart';
+import 'sheet.dart';
 import 'task_log.dart';
 import 'i18n.dart';
 import 'kit.dart';
@@ -71,7 +72,7 @@ Future<void> _deployFlow(BuildContext context, AgentController agent) async {
     deployPreparing.value = false;
   }
   if (!context.mounted) return;
-  final request = await showModalBottomSheet<_DeployRequest>(
+  final request = await showSheet<_DeployRequest>(
     context: context,
     isScrollControlled: true,
     builder: (_) => _DeploySheet(agent: agent),

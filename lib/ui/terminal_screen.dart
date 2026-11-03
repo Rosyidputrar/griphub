@@ -11,6 +11,7 @@ import 'package:xterm/xterm.dart';
 import '../agent/agent_controller.dart';
 import 'errors.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'terminal_pane.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -560,7 +561,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
           .showSnackBar(SnackBar(content: Text(tr('Add a server under Accounts & servers first'))));
       return;
     }
-    final name = await showModalBottomSheet<String>(
+    final name = await showSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         // Scrolls once there are more servers than fit.
@@ -598,7 +599,7 @@ class _TerminalScreenState extends State<TerminalScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('No commands yet'))));
       return;
     }
-    final pick = await showModalBottomSheet<({String command, bool run})>(
+    final pick = await showSheet<({String command, bool run})>(
       context: context,
       isScrollControlled: true,
       builder: (context) => SafeArea(

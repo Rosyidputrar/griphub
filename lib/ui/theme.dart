@@ -180,6 +180,8 @@ class Appearance extends ValueNotifier<ThemeMode> {
       onboarded = saved['onboarded'] == true;
       textScale = (saved['textScale'] as num?)?.toDouble() ?? 1;
       compact = saved['compact'] == true;
+      final r = saved['reduceMotion'];
+      reduceMotion = r is bool ? r : null;
       accent = ((saved['accent'] as num?)?.toInt() ?? 0).clamp(0, accentChoices.length - 1);
       language = saved['language'] as String? ?? 'en';
       appLock = saved['appLock'] == true;
@@ -206,6 +208,23 @@ class Appearance extends ValueNotifier<ThemeMode> {
   bool onboarded = false;
   double textScale = 1;
   bool compact = false;
+
+  /// The user's "Reduce animations": null until they choose, when the phone decides ([lowRamDevice]).
+  bool? reduceMotion;
+
+  /// Set at start from Android: a low-memory phone has animations off unless the user turns them on.
+  bool lowRamDevice = false;
+
+  void setLowRamDevice() {
+    if (lowRamDevice) return;
+    lowRamDevice = true;
+    notifyListeners();
+  }
+
+  /// Animations are off in the app: the user's choice, or by default on a low-memory phone. The system's own "Remove
+  /// animations" turns them off too (MediaQuery), whatever this says.
+  bool get animationsOff => reduceMotion ?? lowRamDevice;
+
   int accent = 0;
   String language = 'en';
   bool appLock = false;
@@ -221,6 +240,7 @@ class Appearance extends ValueNotifier<ThemeMode> {
   void update({
     double? textScale,
     bool? compact,
+    bool? reduceMotion,
     int? accent,
     String? language,
     bool? appLock,
@@ -229,6 +249,7 @@ class Appearance extends ValueNotifier<ThemeMode> {
     this.terminalFontSize = terminalFontSize ?? this.terminalFontSize;
     this.textScale = textScale ?? this.textScale;
     this.compact = compact ?? this.compact;
+    this.reduceMotion = reduceMotion ?? this.reduceMotion;
     this.accent = accent ?? this.accent;
     this.language = language ?? this.language;
     this.appLock = appLock ?? this.appLock;
@@ -302,6 +323,7 @@ class Appearance extends ValueNotifier<ThemeMode> {
           'onboarded': onboarded,
           'textScale': textScale,
           'compact': compact,
+          'reduceMotion': ?reduceMotion,
           'accent': accent,
           'language': language,
           'appLock': appLock,
@@ -558,7 +580,11 @@ ThemeData buildTheme(Brightness brightness) {
       selectionColor: p.accent.withValues(alpha: 0.25),
       selectionHandleColor: p.accent,
     ),
-    pageTransitionsTheme: const PageTransitionsTheme(builders: {TargetPlatform.android: SmoothPageTransitions()}),
+    // With "Reduce animations" pages take no time at all; with the system's "Remove animations" they are drawn
+    // finished (SmoothPageTransitions reads MediaQuery).
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {TargetPlatform.android: SmoothPageTransitions(instant: look.animationsOff)},
+    ),
   );
 }
 

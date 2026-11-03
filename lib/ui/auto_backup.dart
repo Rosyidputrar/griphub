@@ -96,7 +96,7 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
               const SizedBox(height: 8),
               Text(
                 tr(
-                  'Every hour when something changed: chats, projects with their .git, skills, API keys and accounts. Dependencies such as node_modules are left out. Encrypted with a key only this phone and your server have; the newest one comes to this phone while the app is open.',
+                  'Every hour when something changed: chats, projects with their .git, skills, API keys and accounts. Dependencies such as node_modules are left out. Encrypted with a key only this phone and your server have; the newest one comes to this phone while the app is open, and only the files that changed are downloaded.',
                 ),
                 style: text.bodySmall,
               ),
@@ -128,7 +128,12 @@ class _ServerBackupCardState extends State<ServerBackupCard> with BusyActions {
                 if (local.isNotEmpty)
                   _Line(
                     icon: LucideIcons.smartphone,
-                    text: '${tr('Newest on this phone')}: ${_when(RemoteMode.backupTime(local.first))}',
+                    text: [
+                      '${tr('Newest on this phone')}: ${_when(RemoteMode.backupTime(local.first))}',
+                      // What the last fetch cost, when it was only the changes: the point of fetching that way.
+                      if (remote.lastPull case final pull? when local.first.path.endsWith('.ghs'))
+                        tr('downloaded {size}, only what changed').replaceAll('{size}', formatBytes(pull.bytes)),
+                    ].join(' · '),
                   ),
                 if (remote.pullingBackup)
                   _Line(icon: LucideIcons.download, text: tr('Fetching the newest backup…'), busy: true),

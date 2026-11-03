@@ -7,6 +7,7 @@ import 'errors.dart';
 import 'illustration.dart';
 import 'kit.dart';
 import 'i18n.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// Prompt templates: reusable prompts the user runs as `/name args` in chat.
@@ -53,7 +54,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> with BusyActions {
     if (existing != null && busy(existing.name)) return;
     // The sheet saves itself and closes only once that worked: a failed save keeps what the user wrote, with the
     // reason, instead of closing first and losing it behind a snackbar.
-    await showModalBottomSheet<void>(
+    await showSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (_) => _TemplateSheet(

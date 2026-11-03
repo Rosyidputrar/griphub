@@ -313,6 +313,93 @@ class ToolRun {
 
   /// Pictures in the result (a `read` of an image): shown as thumbnails on the tool's card.
   List<ToolImage> images = const [];
+
+  /// generate_image's progress and result (its `details`), while running and once done.
+  ImageJob? imageJob;
+}
+
+/// One picture of a generate_image call.
+class ImageSlot {
+  const ImageSlot({required this.status, this.file, this.error, this.maybeBilled = false});
+  factory ImageSlot.fromJson(Map<String, dynamic> j) => ImageSlot(
+    status: switch (j['status']) {
+      'done' => ImageSlotStatus.done,
+      'failed' => ImageSlotStatus.failed,
+      'stopped' => ImageSlotStatus.stopped,
+      _ => ImageSlotStatus.running,
+    },
+    file: j['file'] as String?,
+    error: j['error'] as String?,
+    maybeBilled: j['maybeBilled'] == true,
+  );
+  final ImageSlotStatus status;
+
+  /// The saved picture, on the agent's machine (the phone, or a server).
+  final String? file;
+  final String? error;
+
+  /// A failure that may still have been billed (it timed out, or was stopped after it was sent).
+  final bool maybeBilled;
+}
+
+enum ImageSlotStatus { running, done, failed, stopped }
+
+/// What generate_image reports (agent/src/image.ts ImageDetails): the model, the pictures as they land, the cost.
+class ImageJob {
+  const ImageJob({
+    required this.model,
+    required this.size,
+    required this.prompt,
+    required this.slots,
+    this.asked = 1,
+    this.rate,
+    this.credits,
+    this.cheapest = false,
+    this.startedAt,
+    this.finishedAt,
+  });
+
+  /// From a tool result's or update's `details`; null when it is not one (an older host, another tool).
+  static ImageJob? fromDetails(Object? details) {
+    if (details is! Map || details['slots'] is! List || details['model'] is! String) return null;
+    final slots = [for (final s in (details['slots'] as List).whereType<Map>()) ImageSlot.fromJson(s.cast<String, dynamic>())];
+    if (slots.isEmpty) return null;
+    DateTime? at(Object? v) => v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt()) : null;
+    return ImageJob(
+      model: details['model'] as String,
+      size: details['size'] as String? ?? '1024x1024',
+      prompt: details['prompt'] as String? ?? '',
+      slots: slots,
+      asked: (details['asked'] as num?)?.toInt() ?? slots.length,
+      rate: (details['rate'] as num?)?.toDouble(),
+      credits: (details['credits'] as num?)?.toDouble(),
+      cheapest: details['cheapest'] == true,
+      startedAt: at(details['startedAt']),
+      finishedAt: at(details['finishedAt']),
+    );
+  }
+
+  final String model;
+  final String size;
+  final String prompt;
+  final List<ImageSlot> slots;
+  final int asked;
+  final double? rate;
+  final double? credits;
+  final bool cheapest;
+  final DateTime? startedAt;
+  final DateTime? finishedAt;
+
+  int get done => slots.where((s) => s.status == ImageSlotStatus.done).length;
+  bool get running => slots.any((s) => s.status == ImageSlotStatus.running);
+
+  /// Width over height of the pictures, from the size ("1536x1024" -> 1.5); square when it cannot be read.
+  double get aspect {
+    final m = RegExp(r'^(\d+)x(\d+)$').firstMatch(size);
+    if (m == null) return 1;
+    final w = int.parse(m[1]!), h = int.parse(m[2]!);
+    return w > 0 && h > 0 ? w / h : 1;
+  }
 }
 
 /// A picture a tool returned, decoded once.
@@ -369,6 +456,7 @@ String toolSummary(String? name, Map<String, dynamic>? args) {
     'grep' => pick(['pattern']),
     'find' => pick(['pattern', 'path']),
     'background_job' => pick(['label', 'command']),
+    'generate_image' => pick(['prompt']),
     _ => null,
   };
   return (value ?? jsonEncode(args)).split('\n').first;

@@ -30,7 +30,7 @@ import {
 	VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { agentsFileText, isManaged } from "./agents-file.js";
-import { AutoBackup, decryptBackup, restoreBackup } from "./autobackup.js";
+import { AutoBackup, decryptBackup, isSnapshot, restoreBackup, restoreSnapshot } from "./autobackup.js";
 import { Checkpoints } from "./checkpoints.js";
 import { Container, type Distro } from "./container.js";
 import { installDohLookup } from "./dns.js";
@@ -38,7 +38,8 @@ import * as gitops from "./gitops.js";
 import { Fs, isFsCommand, runFsCommand } from "./fs.js";
 import { Guard } from "./guard.js";
 import { DEFAULT_HEALTH_LIMITS, Health, type HealthChange, humanBytes } from "./health.js";
-import { compactLimit, gitRun, Integrations, type Log, run } from "./integrations.js";
+import { compactLimit, gitRun, imageSettings, Integrations, type Log, run } from "./integrations.js";
+import { IMAGE_TOOL, Images } from "./image.js";
 import { type JobRecord, Jobs, jobReport, jobTool, jobWire } from "./jobs.js";
 import { installLenientTools } from "./lenient.js";
 import { limitsExtension } from "./limits.js";
@@ -47,7 +48,7 @@ import { Notifier } from "./notify.js";
 import { syncLauncher } from "./launcher.js";
 import { PodmanBox } from "./podmanbox.js";
 import { Preview } from "./preview.js";
-import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, listImageModels } from "./providers.js";
+import { CustomProviders, fetchModels, generateImage, GRIPHUB_API, GRIPHUB_BASE_URL, GRIPHUB_ID, ImageError, listImageModels } from "./providers.js";
 import { type RunSession, Runner } from "./runs.js";
 import { onStoreProblem, storeProblemMessage } from "./state.js";
 import { serialQueue, swapSession } from "./sessionswap.js";
@@ -106,6 +107,8 @@ let customProviders: CustomProviders;
 let sync: GitHubSync;
 let subagents: SubagentManager;
 let jobs: Jobs;
+/** Pictures: the generate_image tool, its limits and the day's picture log (image.ts). */
+let images: Images;
 let router: Router;
 let fsService: Fs;
 let preview: Preview;
@@ -383,6 +386,11 @@ async function buildSession(
 	opts: { interactive: boolean; onLimit: (reason: string) => void; unattended?: Guard },
 ) {
 	const cwd = sessionManager.getCwd();
+	// generate_image: on in chats unless turned off; in runs nobody watches only when the user allowed it.
+	const pics = imageSettings(integrations.settings);
+	const pictures = pics.imageAgentTool && (opts.interactive || pics.imageUnattended);
+	// The session's per-request picture spend is keyed by this object, reset when each request starts.
+	const runKey = {};
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
@@ -391,6 +399,7 @@ async function buildSession(
 		// Approvals and plan mode only make sense with someone watching.
 		extensionFactories: [
 			{ name: "griphub-limits", factory: limitsExtension({ budgetError, stopped: opts.onLimit }), hidden: true },
+			{ name: "griphub-images", factory: (pi: any) => pi.on("agent_start", () => images.startRun(runKey)), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
 			// A server's background runs go on while nobody is there: what would need approval is refused instead.
 			...(opts.unattended ? [{ name: "griphub-unattended", factory: opts.unattended.extension, hidden: true }] : []),
@@ -407,7 +416,7 @@ async function buildSession(
 		resourceLoader,
 		// "subagent" must be named here: the SDK drops custom tools whose
 		// name is not in this allow-list (that is why 1.0.42 never showed it).
-		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...mcpTools.map((t) => t.name)],
+		tools: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...mcpTools.map((t) => t.name)],
 		customTools: [
 			...webTools(
 				() => ({
@@ -429,6 +438,8 @@ async function buildSession(
 			...(opts.interactive ? [subagentTool(subagents, () => currentParent())] : []),
 			// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
 			...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
+			// Pictures (image.ts): over the user's limit the open chat asks; a run nobody watches is refused instead.
+			...(pictures ? [images.tool(runKey, () => sessionManager.getCwd(), opts.interactive ? (summary, reason) => guard.askSpend(IMAGE_TOOL, summary, reason) : undefined)] : []),
 		] as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
@@ -877,8 +888,13 @@ function spentToday(): { credits: number; real: boolean } {
 			.list()
 			.filter((r) => (r.finishedAt ?? Date.now()) >= from && r.credits !== null)
 			.reduce((sum, r) => sum + (r.credits ?? 0) * subagentShareSince(r, from), 0);
-	if (!today) return { credits: local() + subs(Date.parse(`${day}T00:00:00+07:00`)), real: false };
-	return { credits: today.credits + local(today.fetchedAt) + subs(today.fetchedAt), real: true };
+	// Pictures are not in any chat file's usage: the picture log counts them until the router's figure includes them.
+	const pics = (from: number) => images?.creditsSince(from) ?? 0;
+	if (!today) {
+		const start = Date.parse(`${day}T00:00:00+07:00`);
+		return { credits: local() + subs(start) + pics(start), real: false };
+	}
+	return { credits: today.credits + local(today.fetchedAt) + subs(today.fetchedAt) + pics(today.fetchedAt), real: true };
 }
 
 /** The part of a subagent's spend that falls after [from] (linear over its run). */
@@ -927,6 +943,20 @@ function budgetError(): string | null {
 	const { credits } = spentToday();
 	return credits >= cap
 		? `Daily budget of ${cap} credits reached (${credits.toFixed(2)} credits spent today). Raise it in Settings → Usage.`
+		: null;
+}
+
+/**
+ * The daily budget for a picture costing [extra] credits: refused when it would go over, not only once it is already
+ * spent (a turn may end a little over the cap; a picture is bought up front and costs several credits at once).
+ */
+function budgetErrorFor(extra: number): string | null {
+	const cap = integrations.settings.dailyBudget ?? 0;
+	if (!cap) return null;
+	const { credits } = spentToday();
+	if (credits >= cap) return budgetError();
+	return credits + extra > cap + 1e-9
+		? `Not enough daily budget left: ${(cap - credits).toFixed(2)} of ${cap} credits remain today and this needs ${extra.toFixed(2)}. Raise it in Settings → Usage.`
 		: null;
 }
 
@@ -1554,18 +1584,35 @@ async function handle(cmd: Command): Promise<unknown> {
 			const rates = router.rates();
 			return models.map((m) => ({ ...m, credits: rates[m.id]?.credits ?? null, perImage: rates[m.id]?.perImage ?? true, list: rates[m.id]?.list ?? null, promoEndsAt: rates[m.id]?.promoEndsAt ?? null }));
 		}
-		case "custom_provider_images_generate":
-			// A picture costs several credits (more than most turns): the daily budget applies to it too.
-			checkBudget();
-			return {
-				b64_json: await generateImage(
-					GRIPHUB_BASE_URL,
-					customProviders.key(GRIPHUB_ID),
-					String(cmd.model ?? ""),
-					String(cmd.prompt ?? ""),
-					String(cmd.size ?? "1024x1024"),
-				),
-			};
+		case "custom_provider_images_generate": {
+			// A picture costs several credits (more than most turns): the daily budget and the picture limit apply.
+			// The user pressed the button here, so "without asking" does not: only the hard daily limits do.
+			const model = String(cmd.model ?? "");
+			const daily = images.dailyError(router.rate(model)?.credits ?? 0);
+			if (daily) throw new Error(daily);
+			try {
+				const b64 = await generateImage(GRIPHUB_BASE_URL, customProviders.key(GRIPHUB_ID), model, String(cmd.prompt ?? ""), String(cmd.size ?? "1024x1024"));
+				images.record(model);
+				return { b64_json: b64 };
+			} catch (e) {
+				// One that may have been billed counts toward the day, as in the tool.
+				if (e instanceof ImageError && e.maybeBilled) images.record(model);
+				throw e;
+			}
+		}
+		// Today's pictures against their limit, for Settings → Pictures.
+		case "image_usage": {
+			const t = images.today();
+			let models: { id: string; name: string; credits: number | null }[] = [];
+			let modelsError: string | null = null;
+			try {
+				models = await images.imageModels(!!cmd.refresh);
+			} catch (e) {
+				modelsError = (e as Error).message;
+			}
+			const cheapest = models.filter((m) => m.credits !== null).sort((a, b) => a.credits! - b.credits!)[0] ?? null;
+			return { day: t.day, count: t.count, credits: t.credits, models, cheapest: cheapest?.id ?? null, modelsError };
+		}
 
 		case "new_session":
 			assertIdle();
@@ -1856,6 +1903,14 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 		// The phone's own backups are restored with the same door the server's are: decrypt with the key, put in place.
 		// The key comes back as a recovery code only on the phone's own host (see recoveryKey), for the app to show once.
+		// An incremental backup, fetched by the phone: what a snapshot needs, then the blobs it lacks, many per answer.
+		case "auto_backup_needs":
+			if (!autoBackup?.enabled) throw new Error("Automatic backups are off");
+			return autoBackup.needs(String(cmd.name ?? ""));
+		case "auto_backup_read":
+			if (!autoBackup?.enabled) throw new Error("Automatic backups are off");
+			if (!Array.isArray(cmd.items)) throw new Error("items must be a list");
+			return autoBackup.read(cmd.items, Number(cmd.max) || undefined);
 		case "auto_backup_key":
 			if (server) throw new Error("A server never tells its backup key; the phone that made it has it");
 			return { key: autoBackup?.recoveryKey() ?? null };
@@ -1863,10 +1918,13 @@ async function handle(cmd: Command): Promise<unknown> {
 		// afterwards, so every part reads what was restored.
 		case "backup_restore_server": {
 			if (session?.isStreaming) throw new Error("Stop the agent before restoring");
+			const to = { agentDir, workspace, home: process.env.HOME ?? agentDir };
+			// A snapshot is restored from its blobs straight away; nothing decrypted is ever on disk.
+			if (isSnapshot(String(cmd.path))) return restoreSnapshot(String(cmd.path), String(cmd.key ?? ""), to);
 			const tmp = join(stateDir, `restore-${Date.now()}.zip`);
 			try {
 				decryptBackup(String(cmd.path), String(cmd.key ?? ""), tmp);
-				return restoreBackup(tmp, { agentDir, workspace, home: process.env.HOME ?? agentDir });
+				return restoreBackup(tmp, to);
 			} finally {
 				rmSync(tmp, { force: true });
 			}
@@ -2007,9 +2065,15 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "settings_get":
 			return integrations.publicSettings();
 		case "settings_set": {
+			const before = imageSettings(integrations.settings).imageAgentTool;
 			const out = integrations.updateSettings(cmd.settings ?? {});
 			if (!server) container.setNameservers(integrations.settings.dns);
 			guard.mode = integrations.settings.approvalMode ?? "ask_risky";
+			// generate_image is given to a chat when it is built: turning it on or off rebuilds the open chat, once idle
+			// (until then the tool refuses itself when off).
+			if (before !== imageSettings(integrations.settings).imageAgentTool && session && !session.isStreaming) {
+				await reopenSession().catch(() => {});
+			}
 			return out;
 		}
 		case "search_keys_add":
@@ -2173,6 +2237,8 @@ async function main() {
 		home: process.env.HOME ?? agentDir,
 		intervalMs: Number(process.env.GRIPHUB_BACKUP_MS) || undefined,
 		noSecrets: !server,
+		// A server's backups come to the phone over the link: as snapshots of blobs, so only what changed is fetched.
+		incremental: server,
 		log: (m) => log(m),
 	});
 	// The app's view of files on this machine (fs_*), and pages served from them (preview_*). A server's app cannot
@@ -2222,6 +2288,19 @@ async function main() {
 			};
 		},
 		checkBudget: () => checkBudget(),
+	});
+	images = new Images(join(stateDir, "images.json"), {
+		settings: () => imageSettings(integrations.settings),
+		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
+		baseUrl: GRIPHUB_BASE_URL,
+		listModels: listImageModels,
+		rate: (model) => {
+			const r = router.rate(model);
+			return r && Number.isFinite(r.credits) ? r.credits : null;
+		},
+		knownImageModels: () => Object.entries(router.rates()).filter(([, r]) => r.perImage).map(([id]) => id),
+		generate: generateImage,
+		budgetError: budgetErrorFor,
 	});
 	jobs = new Jobs({
 		send: (r) => send(r),

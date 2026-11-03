@@ -124,18 +124,74 @@ class PredictiveBack extends NavigatorObserver with WidgetsBindingObserver {
   }
 }
 
-/// Pages glide in: a short slide from the right with a fade, while the page underneath eases back and dims a
-/// little. During a predictive back gesture the page instead shrinks toward the finger with rounded corners,
-/// revealing the page underneath (which grows back to full size); when released, the page slides all the way
-/// off-screen instead of fading in place. Popping without a gesture likewise slides the page fully off-screen.
+/// Page motion, after ArchiveTune (Metrolist): a pushed page slides in from the right across the whole width while it
+/// fades in (250 ms), and the page it covers slides out to the left across the whole width while it fades out (200 ms);
+/// going back is the mirror image, both pages sliding the whole width with no fade (200 ms), so a page always travels
+/// off-screen instead of vanishing part-way. Every curve is fast-out-slow-in (Compose's tween default).
+///
+/// A page opened with [nested] settings (search results) is the exception underneath: covered, it moves only half the
+/// width and fades, and comes back the same way, as results do under the page opened from them.
+///
+/// During a predictive back gesture the page instead shrinks toward the finger with rounded corners, revealing the page
+/// underneath (which grows back to full size); when released, the page slides all the way off-screen from where the
+/// finger left it.
 class SmoothPageTransitions extends PageTransitionsBuilder {
-  const SmoothPageTransitions();
+  const SmoothPageTransitions({this.instant = false});
+
+  /// Animations are off (the system's "Remove animations" or the app's "Reduce animations"): pages are just there,
+  /// as ArchiveTune's tween(0). The theme is built with this when they are off.
+  final bool instant;
+
+  static final _runs = Expando<_Runs>('page motion runs');
+
+  /// Route settings for a page whose page underneath motion is the half-width parallax (search results).
+  static const nested = RouteSettings(name: 'nested');
+
+  static const enterMs = 250;
+  static const exitMs = 200;
+  static const curve = Curves.fastOutSlowIn;
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 380);
+  Duration get transitionDuration => instant ? Duration.zero : const Duration(milliseconds: enterMs);
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 300);
+  Duration get reverseTransitionDuration => instant ? Duration.zero : const Duration(milliseconds: exitMs);
+
+  /// Where a page is horizontally (as a share of the width) and how opaque, at the time of [route]'s two animations
+  /// with no back gesture in progress. Public so the tests can lock the geometry.
+  @visibleForTesting
+  static ({double dx, double opacity}) place({
+    required double value,
+    required AnimationStatus status,
+    required double under,
+    required AnimationStatus underStatus,
+    bool nested = false,
+  }) {
+    // Popping: slides off to the right across the whole width, with no fade.
+    if (status == AnimationStatus.reverse) return (dx: curve.transform(1 - value), opacity: 1);
+    var dx = 0.0;
+    var opacity = 1.0;
+    if (under > 0) {
+      final reach = nested ? 0.5 : 1.0;
+      if (underStatus == AnimationStatus.reverse) {
+        // The page above goes back: this one comes back in from the left. Only the half-way (nested) page fades in, as
+        // in ArchiveTune; a full-width one is already in view as it slides.
+        final t = curve.transform(1 - under);
+        dx = -reach * (1 - t);
+        if (nested) opacity = t;
+      } else {
+        // A page is pushed on top: this one leaves to the left and fades, over 200 of the 250 ms.
+        final t = curve.transform((under / (exitMs / enterMs)).clamp(0.0, 1.0));
+        dx = -reach * t;
+        opacity = 1 - t;
+      }
+    }
+    // Coming in: from the right across the whole width, fading in.
+    final e = curve.transform(value);
+    dx += 1 - e;
+    opacity *= e;
+    return (dx: dx, opacity: opacity);
+  }
 
   @override
   Widget buildTransitions<T>(
@@ -145,9 +201,11 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    final enter = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeOutCubic);
-    final under = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic);
+    // Animations off: no time (above), and nothing drawn in between either, a back gesture included.
+    if (instant || (MediaQuery.maybeDisableAnimationsOf(context) ?? false)) return child;
     final gesture = PredictiveBack.instance.gesture;
+    final nestedPage = route.settings.name == nested.name;
+    final runs = _runs[route] ??= _Runs();
     return AnimatedBuilder(
       animation: Listenable.merge([animation, secondaryAnimation, gesture]),
       child: child,
@@ -159,7 +217,7 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
         var scale = 1.0;
         var radius = 0.0;
         var opacity = 1.0;
-        // Darkens a page that is behind another one; cheaper than fading the whole page, and nothing shows through.
+        // Darkens the page a back gesture reveals; cheaper than fading the whole page, and nothing shows through.
         var scrim = 0.0;
         var shadow = 0.0;
         if (g != null && g.route == route) {
@@ -182,28 +240,25 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
             shadow = math.min(1.0, drag * 4) * (1 - ce);
             // opacity stays 1: the page leaves the screen instead of vanishing.
           }
-        } else if (g == null && animation.status == AnimationStatus.reverse) {
-          // Popping without a gesture: slide all the way off to the right with a
-          // gentle landing, no fade — so the page travels out instead of
-          // vanishing part-way.
-          dx = width * (1 - enter.value);
-          // opacity stays 1; radius and shadow stay 0.
+        } else if (g != null && animation.status != AnimationStatus.reverse) {
+          // Revealed by a back gesture: grows to full size as the page above
+          // leaves (secondaryAnimation falls with the top page's animation),
+          // brightening as the page above moves away.
+          scrim = 0.12 * secondaryAnimation.value;
+          scale = 0.92 + 0.08 * (1 - secondaryAnimation.value);
+          final e = curve.transform(animation.value);
+          dx = width * (1 - e);
+          opacity = e;
         } else {
-          final u = under.value;
-          if (g == null) {
-            // Underneath a page being pushed or popped: eases back.
-            dx = -0.08 * width * u;
-            scrim = 0.18 * u;
-          } else {
-            // Revealed by a back gesture: grows to full size as the page above
-            // leaves (secondaryAnimation falls with the top page's animation),
-            // brightening as the page above moves away.
-            scrim = 0.12 * secondaryAnimation.value;
-            scale = 0.92 + 0.08 * (1 - secondaryAnimation.value);
-          }
-          // Coming in: slides from the right, fading in over the first part only, so two pages never blend.
-          dx += 0.18 * width * (1 - enter.value);
-          opacity = (animation.value / 0.4).clamp(0.0, 1.0);
+          final at = place(
+            value: animation.value,
+            status: runs.own.of(animation.status),
+            under: secondaryAnimation.value,
+            underStatus: runs.under.of(secondaryAnimation.status),
+            nested: nestedPage,
+          );
+          dx = width * at.dx;
+          opacity = at.opacity;
         }
         final dark = Theme.of(context).brightness == Brightness.dark;
         return Transform.translate(
@@ -240,5 +295,25 @@ class SmoothPageTransitions extends PageTransitionsBuilder {
         );
       },
     );
+  }
+}
+
+/// The direction each of a page's two animations started in. A run keeps its motion until it stops, as
+/// CurvedAnimation keeps its curve: a page popped while it is still being pushed goes back the way it came, instead of
+/// jumping to where the pop motion would have it.
+class _Runs {
+  final own = _Run();
+  final under = _Run();
+}
+
+class _Run {
+  AnimationStatus? _started;
+
+  AnimationStatus of(AnimationStatus status) {
+    if (!status.isAnimating) {
+      _started = null;
+      return status;
+    }
+    return _started ??= status;
   }
 }

@@ -104,7 +104,8 @@ void main() {
     testWidgets('dismissing the sheet changes nothing either', (tester) async {
       await openMenu(tester);
       await tester.tapAt(const Offset(200, 40));
-      await frames(tester);
+      // The scrim closes it with the soft spring (about 0.7 s).
+      await frames(tester, 14);
       expect(find.text('Go back to this message?'), findsNothing);
       expect(rewound(), isFalse);
     });

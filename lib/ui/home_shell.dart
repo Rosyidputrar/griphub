@@ -22,6 +22,7 @@ import 'kit.dart';
 import 'illustration.dart';
 import 'mesh.dart';
 import 'new_chat_sheet.dart';
+import 'predictive_back.dart';
 import 'repos_screen.dart';
 import 'settings_hub.dart';
 import 'settings_screen.dart';
@@ -345,11 +346,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       child: Scaffold(
       extendBody: true,
       // Every tab stays built (scroll positions survive); the active one fades
-      // and drifts in, the others fade out and stop ticking.
+      // in, the others fade out and stop ticking.
       body: Stack(
         children: [
           for (var i = 0; i < tabs.length; i++)
-            _TabLayer(active: i == tab, forward: i >= tab, child: ContentWidth(child: tabs[i])),
+            _TabLayer(active: i == tab, child: ContentWidth(child: tabs[i])),
         ],
       ),
       bottomNavigationBar: _NavBar(index: tab, onTap: (i) => setState(() => tab = i), onCreate: _newChat),
@@ -359,9 +360,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 }
 
 class _TabLayer extends StatefulWidget {
-  const _TabLayer({required this.active, required this.forward, required this.child});
+  const _TabLayer({required this.active, required this.child});
   final bool active;
-  final bool forward;
   final Widget child;
 
   @override
@@ -388,19 +388,19 @@ class _TabLayerState extends State<_TabLayer> {
         enabled: active || !hidden,
         child: IgnorePointer(
           ignoring: !active,
+          // Top-level destinations only fade, as in ArchiveTune: 250 ms in, 200 ms out, and no slide (a slide says
+          // "deeper", which switching tabs is not).
           child: AnimatedOpacity(
             opacity: active ? 1 : 0,
-            duration: Motion.of(context, const Duration(milliseconds: 240)),
-            curve: Curves.easeOutCubic,
+            duration: Motion.of(
+              context,
+              Duration(milliseconds: active ? SmoothPageTransitions.enterMs : SmoothPageTransitions.exitMs),
+            ),
+            curve: SmoothPageTransitions.curve,
             onEnd: () {
               if (!widget.active && mounted) setState(() => hidden = true);
             },
-            child: AnimatedSlide(
-              offset: active ? Offset.zero : Offset(widget.forward ? 0.04 : -0.04, 0),
-              duration: Motion.of(context, const Duration(milliseconds: 300)),
-              curve: Curves.easeOutCubic,
-              child: widget.child,
-            ),
+            child: widget.child,
           ),
         ),
       ),

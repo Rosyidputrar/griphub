@@ -1010,10 +1010,12 @@ class AgentController extends ChangeNotifier {
       case 'tool_execution_update':
         final run = tools.putIfAbsent(e['toolCallId'] as String, () => ToolRun(e['toolCallId'] as String));
         run.output = contentText((e['partialResult'] as Map?)?['content']);
+        run.imageJob = ImageJob.fromDetails((e['partialResult'] as Map?)?['details']) ?? run.imageJob;
       case 'tool_execution_end':
         final run = tools.putIfAbsent(e['toolCallId'] as String, () => ToolRun(e['toolCallId'] as String));
         run.output = contentText((e['result'] as Map?)?['content']);
         run.images = contentImageData((e['result'] as Map?)?['content']);
+        run.imageJob = ImageJob.fromDetails((e['result'] as Map?)?['details']) ?? run.imageJob;
         run.status = e['isError'] == true ? ToolStatus.failed : ToolStatus.done;
         runningTool = null;
       // The older turns are being summarized; the line it adds runs a clock until compaction_end says how it went.
@@ -1118,6 +1120,7 @@ class AgentController extends ChangeNotifier {
         final run = tools.putIfAbsent(m['toolCallId'] as String, () => ToolRun(m['toolCallId'] as String));
         run.output = contentText(m['content']);
         run.images = contentImageData(m['content']);
+        run.imageJob = ImageJob.fromDetails(m['details']);
         run.status = m['isError'] == true ? ToolStatus.failed : ToolStatus.done;
       case 'bashExecution':
         entries.add(NoticeEntry('\$ ${m['command']}\n${m['output']}'));

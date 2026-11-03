@@ -9,6 +9,7 @@ import 'accounts_screen.dart';
 import 'errors.dart';
 import 'git_screen.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'task_log.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -37,7 +38,7 @@ class _ReposScreenState extends State<ReposScreen> {
   Future<void> _tap(RepoInfo repo) async {
     final dir = repo.path;
     if (!repo.cloned || dir == null) return _open(repo);
-    final open = await showModalBottomSheet<bool>(
+    final open = await showSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (_) => RepoActionsSheet(repo: repo, dir: dir, features: widget.agent.features),
@@ -256,7 +257,7 @@ class _RepoActionsSheetState extends State<RepoActionsSheet> {
   }
 
   Future<void> _branch() async {
-    final s = await showModalBottomSheet<GitStatus>(
+    final s = await showSheet<GitStatus>(
       context: context,
       isScrollControlled: true,
       // Already fetched when this sheet opened.

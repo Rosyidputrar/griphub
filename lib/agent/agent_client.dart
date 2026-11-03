@@ -185,6 +185,15 @@ class AgentClient {
 
   Future<void> setBusy(bool busy) => _method.invokeMethod('setBusy', busy);
 
+  /// Android says this phone has little memory (ActivityManager.isLowRamDevice). False when it can't say.
+  Future<bool> isLowRamDevice() async {
+    try {
+      return await _method.invokeMethod<bool>('isLowRamDevice') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> openUrl(String url) => _method.invokeMethod('openUrl', url);
 
   /// Whether this build can ask for shared storage at all (the Play build can't), whether it has it, and where it is.

@@ -23,10 +23,13 @@ import 'diff_view.dart';
 import 'errors.dart';
 import 'files_screen.dart';
 import 'git_screen.dart';
+import 'image_tool_card.dart';
 import 'kit.dart';
+import 'predictive_back.dart';
 import 'preview_open.dart';
 import 'review_screen.dart';
 import 'search_screen.dart';
+import 'sheet.dart';
 import 'tasks_screen.dart';
 import 'theme.dart';
 import 'usage_screen.dart';
@@ -394,7 +397,7 @@ class _PastedChip extends StatelessWidget {
 }
 
 /// A long paste's preview, from its chip in the composer. Pops true for "Paste as text".
-Future<bool?> showPastedSheet(BuildContext context, String text) => showModalBottomSheet<bool>(
+Future<bool?> showPastedSheet(BuildContext context, String text) => showSheet<bool>(
   context: context,
   isScrollControlled: true,
   builder: (context) {
@@ -643,6 +646,8 @@ class _ApprovalCardsState extends State<ApprovalCards> {
   Widget _card(BuildContext context, Approval a, List<Approval> approvals) {
     final p = context.palette;
     final text = Theme.of(context).textTheme;
+    // A picture over the user's own limit: a question about spending, not a permission (no "Always", no bypass).
+    final spend = a.toolName == 'generate_image' && a.key.isEmpty;
     return Padding(
           key: ValueKey(a.id),
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -651,20 +656,20 @@ class _ApprovalCardsState extends State<ApprovalCards> {
             decoration: BoxDecoration(
               color: p.surface,
               borderRadius: BorderRadius.circular(Radii.xl),
-              border: Border.all(color: p.warning.withValues(alpha: 0.6), width: 1.2),
+              border: Border.all(color: (spend ? imageViolet : p.warning).withValues(alpha: 0.6), width: 1.2),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
                   children: [
-                    IconTile(icon: toolIcon(a.toolName), color: p.warning, size: 32),
+                    IconTile(icon: toolIcon(a.toolName), color: spend ? imageViolet : p.warning, size: 32),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('${tr('Allow')} ${a.toolName}?', style: text.titleSmall),
+                          Text(spend ? tr('Make these pictures?') : '${tr('Allow')} ${a.toolName}?', style: text.titleSmall),
                           Text(tr(a.reason), style: text.bodySmall),
                         ],
                       ),
@@ -696,7 +701,7 @@ class _ApprovalCardsState extends State<ApprovalCards> {
                   approval: a,
                   onAnswered: () => _onAnswered(a),
                 ),
-                TextButton.icon(
+                if (!spend) TextButton.icon(
                   onPressed: () async {
                     if (!await confirmBypass(context)) return;
                     try {
@@ -786,6 +791,28 @@ class _ApprovalActionsState extends State<_ApprovalActions> {
       style: FilledButton.styleFrom(minimumSize: const Size(0, 42)),
       child: Text(tr('Allow')),
     );
+    // A spending question (a picture over the user's limit) has no "Always": one tap would turn the limit off.
+    if (widget.approval.key.isEmpty && widget.approval.toolName == 'generate_image') {
+      final pair = Row(
+        children: [
+          Expanded(child: deny),
+          const SizedBox(width: 8),
+          Expanded(child: allow),
+        ],
+      );
+      if (!offline) return pair;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          pair,
+          const SizedBox(height: 8),
+          Text(
+            tr('Not connected. The agent is still waiting for your answer: reconnect to answer.'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+          ),
+        ],
+      );
+    }
     final buttons = LayoutBuilder(
       builder: (context, constraints) {
         // Equal thirds must fit the widest label; on a narrow phone with large text "Izinkan" broke into "Izin/kan".
@@ -1219,9 +1246,12 @@ Future<void> showProjectTools(
   AgentController agent, {
   required void Function(String prompt) onPrompt,
 }) async {
-  void push(Widget w) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
+  // Search results are a nested flow: the page opened from them leaves them half in view underneath.
+  void push(Widget w) => Navigator.of(context).push(
+    MaterialPageRoute(settings: w is SearchScreen ? SmoothPageTransitions.nested : null, builder: (_) => w),
+  );
   final memory = '${agent.cwd}/AGENTS.md';
-  await showModalBottomSheet<void>(
+  await showSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (sheet) {

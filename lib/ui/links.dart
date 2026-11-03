@@ -40,17 +40,34 @@ List<(String, String?)> linkify(String text) {
     }
     if (raw.length < 8) continue;
     if (m.start > at) out.add((text.substring(at, m.start), null));
-    out.add((raw, raw.toLowerCase().startsWith('www.') ? 'https://$raw' : raw));
+    final url = cleanUrl(raw);
+    out.add((raw, url.toLowerCase().startsWith('www.') ? 'https://$url' : url));
     at = m.start + raw.length;
   }
   if (at < text.length) out.add((text.substring(at), null));
   return out;
 }
 
+/// Characters that show as nothing (zero-width spaces and joiners, the BOM, the soft hyphen) or only turn the text
+/// around (bidi controls). Text copied from a chat or a web page can carry them inside an address: the link reads
+/// "github.com/a/griphub" while it opens "g%E2%80%8Briphub", another page. Never part of a real address.
+const _invisible = '\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF';
+final _invisibleChars = RegExp('[$_invisible]');
+
+/// The same characters percent-encoded in UTF-8, as Markdown hands a link's address over.
+final _invisibleEncoded = RegExp(
+  '%C2%AD|%E2%80%8[B-F]|%E2%80%A[A-E]|%E2%81%A[0-4]|%E2%81%A[6-9]|%EF%BB%BF',
+  caseSensitive: false,
+);
+
+/// [url] as it reads: every invisible character taken out, typed or percent-encoded.
+String cleanUrl(String url) => url.replaceAll(_invisibleChars, '').replaceAll(_invisibleEncoded, '').trim();
+
 /// What a link would open, judged before asking: null when it cannot be
-/// opened at all (javascript:, file:, intent:, a malformed address).
+/// opened at all (javascript:, file:, intent:, a malformed address). An
+/// invisible character in it is dropped, so it opens what it shows.
 Uri? openableUri(String url) {
-  final u = Uri.tryParse(url.trim());
+  final u = Uri.tryParse(cleanUrl(url));
   if (u == null) return null;
   switch (u.scheme.toLowerCase()) {
     case 'http' || 'https':

@@ -109,6 +109,13 @@ class FakeHost {
     'subagentNotifyApproval': stored['subagentNotifyApproval'] ?? true,
     'subagentNotifyRunning': stored['subagentNotifyRunning'] ?? true,
     'subagentApprovalOverride': stored.containsKey('subagentApprovalMode'),
+    'imageModel': stored['imageModel'] ?? 'auto',
+    'imageAutoCredits': stored['imageAutoCredits'] ?? 10,
+    'imageMaxPerCall': stored['imageMaxPerCall'] ?? 4,
+    'imageDailyCredits': stored['imageDailyCredits'] ?? 50,
+    'imageOverLimit': stored['imageOverLimit'] ?? 'ask',
+    'imageAgentTool': stored['imageAgentTool'] ?? true,
+    'imageUnattended': stored['imageUnattended'] ?? false,
   };
 
   /// Answers for the app's other calls to the platform side ('clipboardImage', ...), by method name.
@@ -244,6 +251,15 @@ Future<void> loadImages(WidgetTester tester) async {
       }
       await Future<void>.delayed(const Duration(milliseconds: 30));
     });
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
+/// Lets a bottom sheet's spring land: about 0.5 s to open or settle, 0.7 s to close with Back or the scrim
+/// (lib/ui/sheet.dart). Tests that pumped a fixed 0.4 s for Flutter's 250/200 ms sheet use this after opening or
+/// closing one.
+Future<void> sheetSettles(WidgetTester tester) async {
+  for (var i = 0; i < 8; i++) {
     await tester.pump(const Duration(milliseconds: 50));
   }
 }

@@ -6,6 +6,7 @@ import 'ci_panel.dart';
 import 'i18n.dart';
 import 'errors.dart';
 import 'kit.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// Runs [task] in a bottom sheet that streams its output, then shows either
@@ -17,7 +18,7 @@ Future<T?> runWithLog<T>(
   Widget Function(BuildContext context, T result)? onDone,
   void Function(String url)? openUrl,
 }) {
-  return showModalBottomSheet<T>(
+  return showSheet<T>(
     context: context,
     isScrollControlled: true,
     isDismissible: false,

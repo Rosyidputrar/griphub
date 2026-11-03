@@ -11,6 +11,7 @@ import '../agent/pricing.dart';
 import '../agent/updater.dart';
 import 'accounts_screen.dart';
 import 'backup_screen.dart';
+import 'changelog_screen.dart';
 import 'chat_extras.dart';
 import 'container_screen.dart';
 import 'errors.dart';
@@ -19,11 +20,13 @@ import 'kit.dart';
 import 'links.dart';
 import 'i18n.dart';
 import 'illustration.dart';
-import 'image_gen_screen.dart';
+import 'image_settings_screen.dart';
+import 'image_tool_card.dart';
 import 'mcp_screen.dart';
 import 'mesh.dart';
 import 'network_screen.dart';
 import 'settings_screen.dart';
+import 'sheet.dart';
 import 'skills_screen.dart';
 import 'subagent_settings_screen.dart';
 import 'sync_screen.dart';
@@ -114,14 +117,12 @@ class _SettingsHubState extends State<SettingsHub> {
       for (final m in it.settings?.fallbackModels ?? const <Map<String, dynamic>>[]) '${m['provider']}/${m['model']}',
     ];
     final models = agent.models;
-    final result = await showModalBottomSheet<List<String>>(
+    final result = await showSheet<List<String>>(
       context: context,
       isScrollControlled: true,
       builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.7,
-          builder: (context, scroll) => Column(
+        builder: (context, setSheet) => SheetExtent(initial: 0.7, 
+builder: (context, scroll) => Column(
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 12, 4),
@@ -267,10 +268,10 @@ class _SettingsHubState extends State<SettingsHub> {
                   ),
                   SettingsRow(
                     icon: LucideIcons.image,
-                    color: const Color(0xFF7C3AED),
-                    title: tr('Generate image'),
-                    subtitle: tr('Make pictures with GripHub image models'),
-                    onTap: () => _open(ImageGenScreen(agent: agent)),
+                    color: imageViolet,
+                    title: tr('Pictures'),
+                    subtitle: imageLimitsSummary(agent.integrations.settings),
+                    onTap: () => _open(ImageSettingsScreen(agent: agent)),
                   ),
                 ],
               ),
@@ -491,6 +492,20 @@ class _SettingsHubState extends State<SettingsHub> {
                     ),
                     onTap: () => look.update(compact: !look.compact),
                   ),
+                  SettingsRow(
+                    icon: LucideIcons.zapOff,
+                    color: p.muted,
+                    title: tr('Reduce animations'),
+                    subtitle: look.reduceMotion == null && look.lowRamDevice
+                        ? tr('On for this phone: it has little memory')
+                        : tr('Screens and sheets appear at once'),
+                    trailing: LabeledSwitch(
+                      label: tr('Reduce animations'),
+                      value: look.animationsOff,
+                      onChanged: (v) => look.update(reduceMotion: v),
+                    ),
+                    onTap: () => look.update(reduceMotion: !look.animationsOff),
+                  ),
                   // The title on its own line and the swatches under it, so neither starves on a narrow phone; each swatch
                   // is a 48 dp target that says its colour and whether it is the one chosen.
                   Padding(
@@ -543,6 +558,14 @@ class _SettingsHubState extends State<SettingsHub> {
               SettingsGroup(
                 children: [
                   if (Updater.instance.supported) _updatesRow(context),
+                  // As ArchiveTune: the history sits next to the updates, and opens on this phone's version.
+                  SettingsRow(
+                    icon: LucideIcons.history,
+                    color: p.muted,
+                    title: tr('Changelog'),
+                    subtitle: tr('What changed in each version'),
+                    onTap: () => openChangelog(context, Updater.instance.currentVersion),
+                  ),
                   _InfoRow('Workspace', agent.info['workspace']?.toString() ?? '—'),
                   _InfoRow('Agent directory', agent.info['agentDir']?.toString() ?? '—'),
                   Padding(

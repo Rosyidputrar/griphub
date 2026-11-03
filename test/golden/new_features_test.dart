@@ -268,9 +268,11 @@ void main() {
       await settle(tester);
       await tester.tap(find.text('Pasted content'));
       await settle(tester);
+      await sheetSettles(tester);
       expect(find.text('40 lines · 1 KB'), findsOneWidget);
       await tester.tap(find.text('Paste as text'));
       await settle(tester);
+      await sheetSettles(tester);
       expect(find.text('Pasted content'), findsNothing);
       expect(tester.widget<TextField>(composer()).controller!.text, 'Lihat: $paste');
     });
@@ -282,8 +284,10 @@ void main() {
       await settle(tester);
       await tester.tap(find.text('Pasted content'));
       await settle(tester);
+      await sheetSettles(tester);
       await tester.tapAt(const Offset(20, 20));
       await settle(tester);
+      await sheetSettles(tester);
       expect(find.text('Pasted content'), findsOneWidget);
       expect(tester.widget<TextField>(composer()).controller!.text, '');
     });
@@ -306,6 +310,7 @@ void main() {
         await expectLater(find.byType(ChatScreen), matchesGoldenFile(golden('composer_paste_${look.name}')));
         await tester.tap(find.text(look.language == 'id' ? 'Konten yang ditempel' : 'Pasted content').first);
         await settle(tester);
+        await sheetSettles(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('paste_preview_${look.name}')));
       });
     }
@@ -423,6 +428,7 @@ void main() {
         await expectLater(find.byType(AssistantMessageView), matchesGoldenFile(golden('turn_cost_footer_${look.name}')));
         await tester.tap(find.byType(GestureDetector).last);
         await settle(tester);
+        await sheetSettles(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('turn_cost_sheet_${look.name}')));
       });
     }

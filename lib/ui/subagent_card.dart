@@ -14,6 +14,7 @@ import 'errors.dart';
 import 'kit.dart';
 import 'chat_export.dart' show showMarkdownShare;
 import 'message_views.dart' show MarkdownText;
+import 'sheet.dart';
 import 'subagent_timeline.dart';
 import 'theme.dart';
 
@@ -612,7 +613,7 @@ class _SubagentApprovalPanelState extends State<SubagentApprovalPanel> {
 // Detail sheet
 
 Future<void> showSubagentSheet(BuildContext context, SubagentState state, AgentController agent) {
-  return showModalBottomSheet<void>(
+  return showSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,

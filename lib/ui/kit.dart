@@ -8,6 +8,7 @@ import 'package:simple_icons/simple_icons.dart';
 import 'energy.dart';
 import 'i18n.dart';
 import 'errors.dart';
+import 'sheet.dart';
 import 'theme.dart';
 
 /// Shared building blocks for the GripHub AI Agent look.
@@ -552,6 +553,7 @@ IconData toolIcon(String? name) => switch (name) {
   'web_screenshot' => LucideIcons.camera,
   'todo_write' => LucideIcons.listTodo,
   'background_job' => LucideIcons.hourglass,
+  'generate_image' => LucideIcons.image,
   _ => LucideIcons.wrench,
 };
 
@@ -787,7 +789,7 @@ Future<T?> runWithProgress<T>(
 
 /// A bottom sheet that is never cut off: as tall as its content, up to the whole screen, and it scrolls past that. A plain
 /// sheet stops at 9/16 of the screen's height, which in landscape left a menu's last rows (Delete) out of reach.
-Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showModalBottomSheet<T>(
+Future<T?> showAppSheet<T>({required BuildContext context, required WidgetBuilder builder}) => showSheet<T>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
@@ -810,5 +812,24 @@ class ContentWidth extends StatelessWidget {
     builder: (context, box) => box.maxWidth.isFinite && box.maxWidth > max
         ? Padding(padding: EdgeInsets.symmetric(horizontal: (box.maxWidth - max) / 2), child: child)
         : child,
+  );
+}
+
+/// A layer drawn inside a page (a menu over the input, a find bar, a selection) that Back closes before it leaves the
+/// page, as every surface in the app does: while [open], Back calls [onClose] and stays. A predictive back gesture is
+/// not offered meanwhile (PopScope says the page will not pop), so the page does not start to leave and then stay.
+class BackLayer extends StatelessWidget {
+  const BackLayer({super.key, required this.open, required this.onClose, required this.child});
+  final bool open;
+  final VoidCallback onClose;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !open,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop && open) onClose();
+    },
+    child: child,
   );
 }
