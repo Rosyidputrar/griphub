@@ -393,6 +393,10 @@ test("incremental: an unchanged file is not read again, the same content is stor
 	const s = server(t);
 	write(s.workspace, "a/copy1.txt", "same words in two places");
 	write(s.workspace, "b/copy2.txt", "same words in two places");
+	// A whole second, so putting the same time back is exact: a Date only keeps milliseconds, and writing a
+	// sub-millisecond mtime back through one can round it up to the next millisecond (it did on CI).
+	const stamp = 1_790_000_000;
+	utimesSync(join(s.workspace, "site/index.html"), stamp, stamp);
 	let now = 3_000_000;
 	const b = backups(t, s, { incremental: true, now: () => now++ });
 	b.configure(KEY);
@@ -414,9 +418,8 @@ test("incremental: an unchanged file is not read again, the same content is stor
 
 	// The same size and time: taken from the index, without reading (a changed byte under an unchanged time is the
 	// one thing that slips by, as with the old fingerprint and as with rsync).
-	const st = statSync(join(s.workspace, "site/index.html"));
 	writeFileSync(join(s.workspace, "site/index.html"), "<h1>HI</h1>");
-	utimesSync(join(s.workspace, "site/index.html"), st.atime, st.mtime);
+	utimesSync(join(s.workspace, "site/index.html"), stamp, stamp);
 	const again = await b.tick(true);
 	const html = (x) => readSnapshot(x.path, KEY).files.find((f) => f.name === "workspace/site/index.html").id;
 	assert.equal(html(again), html(first), "not read again");
