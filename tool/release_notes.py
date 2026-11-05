@@ -59,7 +59,12 @@ def stamp(changelog: Path, version: str, date: str) -> bool:
     if any(l.startswith(f"## v{version} ") or l.rstrip() == f"## v{version}" for l in lines):
         raise SystemExit(f"CHANGELOG.md already has v{version}")
     lines[start] = f"## v{version} ({long_date(date)})"
-    # The new empty section goes above, with its own rule under it, as the sections are written everywhere else.
+    # The rule that closed the old section now closes the new empty one, above it: the released versions have none
+    # between them, and a second rule would sit between two of them.
+    if end < len(lines) and lines[end] == "---":
+        del lines[end]
+        if end < len(lines) and lines[end] == "":
+            del lines[end]
     lines[start:start] = [UNRELEASED, "", EMPTY, "", "---", ""]
     changelog.write_text("\n".join(lines), encoding="utf-8")
     return True

@@ -104,7 +104,12 @@ Penjelasan.
       expect(x.date, isNotEmpty, reason: x.key);
     }
     expect(v.map((x) => x.key).toSet().length, v.length, reason: 'keys are unique');
+    // The newest releases, as they were published: the first three of this stretch, newest first.
+    expect(v.take(4).map((x) => x.key), ['1.0.131', '1.0.128', '1.0.126', '1.0.119']);
+    expect(compareDotted(v[0].key, v[1].key), 1);
+    // What is waiting for the next release is not in the list until it has a version.
+    expect(text, contains('## Belum dirilis'));
     // Users read this inside the app: no repository, account, link or commit.
-    expect(text, isNot(matches(RegExp(r'github\.com|seseegy|rosyid|pull request|PR #|\b[0-9a-f]{7,40}\b', caseSensitive: false))));
+    expect(text, isNot(matches(RegExp(r'github\.com|seseegy|rosyid|pull request|PR #|\b[0-9a-f]{7,40}\b|[\u200b-\u200f\u2060\ufeff]', caseSensitive: false))));
   });
 }

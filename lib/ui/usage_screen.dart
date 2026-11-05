@@ -489,7 +489,7 @@ class _UsageScreenState extends State<UsageScreen> {
           children: [
             for (final m in models)
               SettingsRow(
-                leading: BrandTile(id: m.provider, size: 30),
+                leading: BrandTile(id: m.provider, model: m.model, size: 30),
                 title: m.model.isEmpty ? 'unknown' : m.model,
                 subtitle: '${m.provider} · ${_compact(m.tokens)} ${tr('tokens')}',
                 trailing: Text(

@@ -64,6 +64,9 @@ void main() {
     expect(RegExp('^## Belum dirilis', multiLine: true).allMatches(text), hasLength(1));
     expect(text.indexOf('## Belum dirilis'), lessThan(text.indexOf('## v1.0.130')));
     expect(text, contains('## Belum dirilis\n\n_Belum ada perubahan._\n\n---\n\n## v1.0.130'));
+    // One rule under the intro and one under the empty section: none left between the new version and the old one.
+    expect('\n---\n'.allMatches(text), hasLength(2));
+    expect(text, contains('  - Rinciannya.\n\n### Diperbaiki\n- Satu perbaikan.\n\n## v1.0.119'));
     // The screen reads it: the new version first (its entries), the empty section never listed.
     final v = parseChangelog(text);
     expect(v.map((x) => x.version), ['1.0.130', '1.0.119']);

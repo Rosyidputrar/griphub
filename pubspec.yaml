@@ -35,6 +35,9 @@ flutter:
   assets:
     - assets/illustrations/
     - assets/brand/
+    # Model-family marks (lib/ui/model_logo.dart): cropped to the artwork and cut to 128 px; *_light.png is the
+    # same mark with its white drawn in ink, for the light theme.
+    - assets/providers/
     # The users' changelog, read by the changelog screen (lib/ui/changelog_screen.dart).
     - CHANGELOG.md
   fonts:

@@ -1318,7 +1318,7 @@ class _Composer extends StatelessWidget {
                         children: [
                           Flexible(
                             child: _Chip(
-                              leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, size: 20),
+                              leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, model: agent.model!.id, size: 20),
                               label: agent.model?.name ?? tr('Choose model'),
                               icon: LucideIcons.chevronsUpDown,
                               onTap: onPickModel,

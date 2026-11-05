@@ -8,6 +8,7 @@ import 'package:simple_icons/simple_icons.dart';
 import 'energy.dart';
 import 'i18n.dart';
 import 'errors.dart';
+import 'model_logo.dart';
 import 'sheet.dart';
 import 'theme.dart';
 
@@ -529,14 +530,21 @@ Brand providerBrand(BuildContext context, String id) {
 }
 
 /// Brand mark rendered in a soft tile.
+///
+/// [id] is a provider (or a model, as the usage list passes it). [model] is the model's own id when there is one:
+/// GripHub serves every family under one provider, so the model says whose it is. The family's own mark comes first
+/// (model_logo.dart); a family with none here keeps the provider's mark from Simple Icons, then a neutral glyph.
 class BrandTile extends StatelessWidget {
-  const BrandTile({super.key, required this.id, this.size = 36});
+  const BrandTile({super.key, required this.id, this.model, this.size = 36});
   final String id;
+  final String? model;
   final double size;
 
   @override
   Widget build(BuildContext context) {
-    final b = providerBrand(context, id);
+    final logo = (model == null ? null : logoFor(model!)) ?? logoFor(id);
+    if (logo != null) return ModelLogoTile(logo: logo, size: size);
+    final b = providerBrand(context, model != null && modelFamily(model!) != null ? model! : id);
     return IconTile(icon: b.icon, color: b.color, size: size);
   }
 }
