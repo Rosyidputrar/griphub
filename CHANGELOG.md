@@ -13,6 +13,12 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 
 ## Belum dirilis
 
+_Belum ada perubahan._
+
+---
+
+## v1.0.133 (5 November 2026)
+
 ### Baru
 - **Pengaturan → Status model.** Dua tab dengan angka dari GripHub Router, bukan perkiraan:
   - **Status**: model mana yang bekerja sekarang. Tiap model punya status (Bekerja, Lambat atau gagal, Mati, Sepi), persentase berhasil, dan deretan batang waktu yang menunjukkan kapan ia gagal. Ketuk sebuah model untuk waktu tunggu, kecepatan, dan penyebab gagalnya. Yang gagal dan sedang dipakai ada di atas; model yang tidak dipakai disembunyikan sampai diminta.
@@ -22,8 +28,6 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 
 ### Ditingkatkan
 - **Model kini punya logo pembuatnya.** Di daftar model, di pilihan model di chat, di Pemakaian, dan di layar Status model: Claude, GPT, Gemini, DeepSeek, GLM, Kimi, MiniMax, Qwen, Grok, serta Muse (Meta) dan Hy (Tencent). Sebelumnya semua model GripHub memakai satu ikon yang sama, atau tanpa ikon sama sekali.
-
----
 
 ## v1.0.131 (3 November 2026)
 
