@@ -83,6 +83,7 @@ import {
 import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { PromptQueue } from "./promptqueue.js";
 import { Router } from "./router.js";
+import { ModelBoard } from "./modelboard.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
 type Command = { id?: number; type: string; [key: string]: any };
@@ -111,6 +112,7 @@ let jobs: Jobs;
 /** Pictures: the generate_image tool, its limits and the day's picture log (image.ts). */
 let images: Images;
 let router: Router;
+let modelBoard: ModelBoard;
 let fsService: Fs;
 let preview: Preview;
 /** Server only: hourly encrypted backups for the phone to keep (autobackup.ts). */
@@ -2073,6 +2075,11 @@ async function handle(cmd: Command): Promise<unknown> {
 		}
 		case "router_snapshot":
 			return router.snapshot();
+		// Which models people use (no key) and which work now (the GripHub key), from the router's portal.
+		case "model_rank":
+			return modelBoard.rank(cmd.period, !!cmd.force);
+		case "model_status":
+			return modelBoard.status(cmd.window, !!cmd.force);
 		case "griphub_credits": {
 			// Older app builds: the trimmed summary the first Usage card used.
 			const a = await router.refreshAccount(30_000);
@@ -2288,6 +2295,10 @@ async function main() {
 		fallbackRates: FALLBACK_RATES,
 	});
 	usePricingRouter(router);
+	modelBoard = new ModelBoard({
+		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
+		cacheFile: join(stateDir, "model-board-cache.json"),
+	});
 	modelRuntime = await ModelRuntime.create();
 	// Never auto-trust project code: a cloned repo's .pi/extensions/*.ts
 	// would otherwise run inside the host with the user's tokens on merely

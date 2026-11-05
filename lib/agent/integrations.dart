@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
 import 'clock.dart';
+import 'model_board.dart';
 import 'router_account.dart';
 
 class GithubAccount {
@@ -634,6 +635,15 @@ class Integrations extends ChangeNotifier {
 
   /// The last account data fetched this run (null until then).
   RouterAccount? router;
+
+  /// Which models people use on GripHub Router in [period] (one of [rankPeriods]); needs no key. [force] asks again,
+  /// though the host still waits ten seconds after the last fetch.
+  Future<Served<RankBoard>> modelRank(String period, {bool force = false}) async =>
+      parseServedRank((await client.call<Map>('model_rank', {'period': period, 'force': force})).cast<String, dynamic>());
+
+  /// Which models work now, over [window] (one of [statusWindows]); uses the saved GripHub key.
+  Future<Served<StatusBoard>> modelStatus(String window, {bool force = false}) async =>
+      parseServedStatus((await client.call<Map>('model_status', {'window': window, 'force': force})).cast<String, dynamic>());
 
   /// Re-reads GripHub's model list; returns how many models it has now.
   Future<Map<String, dynamic>> refreshGripHubModels() async =>

@@ -86,7 +86,16 @@ void main() {
     await pumpLook(tester, const Look(), screen('9.9.9'));
     await frames(tester);
     expect(find.textContaining('Belum dirilis'), findsNothing);
-    expect(find.text('v1.0.119'), findsNWidgets(2), reason: 'a newer build opens on the newest release');
+    expect(find.text('v1.0.131'), findsNWidgets(2), reason: 'a newer build opens on the newest release');
+  });
+
+  testWidgets('entries waiting under "Belum dirilis" are not shown until they have a version', (tester) async {
+    final text = _real.replaceFirst('_Belum ada perubahan._', '### Baru\n- **Hal yang belum dirilis.**');
+    await pumpLook(tester, const Look(), screen('1.0.131', text));
+    await frames(tester);
+    expect(find.textContaining('Hal yang belum dirilis'), findsNothing);
+    expect(find.textContaining('Belum dirilis'), findsNothing);
+    expect(find.text('v1.0.131'), findsNWidgets(2));
   });
 
   testWidgets('a file that cannot be read says so and tries again', (tester) async {
@@ -108,7 +117,7 @@ void main() {
     await tester.tap(find.text('Try again'));
     await frames(tester);
     expect(calls, 2);
-    expect(find.text('v1.0.119'), findsNWidgets(2));
+    expect(find.text('v1.0.119'), findsNWidgets(2), reason: 'the version on this phone, in its chip and its card');
   });
 
   testWidgets('an empty changelog says there is nothing yet', (tester) async {

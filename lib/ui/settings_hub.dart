@@ -21,6 +21,7 @@ import 'links.dart';
 import 'i18n.dart';
 import 'illustration.dart';
 import 'image_settings_screen.dart';
+import 'model_board_screen.dart';
 import 'image_tool_card.dart';
 import 'mcp_screen.dart';
 import 'mesh.dart';
@@ -272,6 +273,13 @@ builder: (context, scroll) => Column(
                     title: tr('Pictures'),
                     subtitle: imageLimitsSummary(agent.integrations.settings),
                     onTap: () => _open(ImageSettingsScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.activity,
+                    color: p.success,
+                    title: tr('Model status'),
+                    subtitle: tr('Which models work now and which are used most'),
+                    onTap: () => _open(ModelBoardScreen(agent: agent)),
                   ),
                 ],
               ),

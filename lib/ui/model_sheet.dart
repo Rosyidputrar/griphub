@@ -183,11 +183,18 @@ class _ModelTile extends StatelessWidget {
     final price = model.pricing;
     final available = price?.available ?? true;
     final text = Theme.of(context).textTheme;
+    final hasSubtitle = details.isNotEmpty || !available || (price != null && price.credits != null);
     return ListTile(
       enabled: available,
       onTap: saving != null ? null : () => onPick(model),
+      // The maker's mark, by the model: GripHub serves every family under one provider (kit.dart BrandTile).
+      leading: BrandTile(id: model.provider, model: model.id, size: 32),
       title: Text(model.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Column(
+      // With nothing to say under the name there is no subtitle at all: an empty one still made a two-line row, with the
+      // name at the top and the mark, star and check halfway down (a custom provider's models have no details).
+      subtitle: !hasSubtitle
+          ? null
+          : Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [

@@ -2,10 +2,12 @@
 
 ## Bahasa Indonesia
 
-- Tombol + kini membuka dua pilihan di atasnya: Chat dan Coding. Ketuk Chat untuk langsung mulai bertanya, mencari berita, atau menulis, tanpa memilih folder. Ketuk Coding untuk memilih proyek seperti biasa. Tombol + berubah jadi silang, halaman di belakang meredup, dan Kembali atau ketukan di luar menutup menu lebih dulu. Bila animasi dikurangi, pilihan langsung tampil.
-- Lembar chat coding kini hanya berisi pilihan folder dan proyek, karena Chat sudah ada di menu +.
+- Layar baru, Pengaturan → Status model, dengan angka dari GripHub Router. Tab Status menunjukkan model mana yang bekerja sekarang (Bekerja, Lambat atau gagal, Mati, Sepi), persentase berhasil, dan batang waktu yang memperlihatkan kapan sebuah model gagal. Ketuk sebuah model untuk waktu tunggu, kecepatan, dan penyebab gagalnya. Tab Peringkat menunjukkan model mana yang paling banyak dipakai. Angkanya milik semua pengguna router, bukan hanya kamu; peringkat menunjukkan popularitas, bukan mutu.
+- Kalau router tidak terjangkau, salinan terakhir tetap tampil dengan keterangan dari kapan.
+- Model kini punya logo pembuatnya (Claude, GPT, Gemini, DeepSeek, GLM, Kimi, MiniMax, Qwen, Grok, Muse, Hy) di daftar model, pilihan model di chat, Pemakaian, dan Status model.
 
 ## English
 
-- The + button now opens two choices above it: Chat and Coding. Tap Chat to start asking, looking up the news or writing at once, with no folder to pick. Tap Coding to choose a project as before. The + turns into a cross, the page behind dims, and Back or a tap outside closes the menu first. With reduced animations the choices simply appear.
-- The coding chat sheet now holds only the folder and project choices, since Chat is in the + menu.
+- A new screen, Settings → Model status, with figures from GripHub Router. The Status tab shows which models work now (Working, Slow or failing, Down, Quiet), the share that succeeded, and bars over time that show when a model failed. Tap a model for its wait, speed and why it failed. The Ranking tab shows which models are used most. The figures are everyone's on the router, not only yours; the ranking shows popularity, not quality.
+- When the router cannot be reached, the last copy still shows, with how old it is.
+- Models now carry their maker's logo (Claude, GPT, Gemini, DeepSeek, GLM, Kimi, MiniMax, Qwen, Grok, Muse, Hy) in the model list, the model picker in chat, Usage and Model status.

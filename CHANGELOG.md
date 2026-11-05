@@ -14,16 +14,41 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 ## Belum dirilis
 
 ### Baru
+- **Pengaturan → Status model.** Dua tab dengan angka dari GripHub Router, bukan perkiraan:
+  - **Status**: model mana yang bekerja sekarang. Tiap model punya status (Bekerja, Lambat atau gagal, Mati, Sepi), persentase berhasil, dan deretan batang waktu yang menunjukkan kapan ia gagal. Ketuk sebuah model untuk waktu tunggu, kecepatan, dan penyebab gagalnya. Yang gagal dan sedang dipakai ada di atas; model yang tidak dipakai disembunyikan sampai diminta.
+  - **Peringkat**: model mana yang paling banyak dipakai (24 jam, 7, 14, 30 hari, atau semua), dengan porsinya. Ini menunjukkan seberapa populer sebuah model, bukan seberapa bagus.
+  - Angkanya milik semua pengguna router, bukan hanya kamu. Status memakai key GripHub yang tersimpan; peringkat tidak perlu key.
+  - Kalau router tidak terjangkau, salinan terakhir tetap tampil dengan keterangan dari kapan.
+
+### Ditingkatkan
+- **Model kini punya logo pembuatnya.** Di daftar model, di pilihan model di chat, di Pemakaian, dan di layar Status model: Claude, GPT, Gemini, DeepSeek, GLM, Kimi, MiniMax, Qwen, Grok, serta Muse (Meta) dan Hy (Tencent). Sebelumnya semua model GripHub memakai satu ikon yang sama, atau tanpa ikon sama sekali.
+
+---
+
+## v1.0.131 (3 November 2026)
+
+### Baru
 - **Tombol + membuka dua pilihan: Chat dan Coding.**
   - **Chat** langsung memulai percakapan biasa, tanpa memilih folder. **Coding** membuka lembar untuk memilih proyek, seperti sebelumnya.
   - Tombol + berubah jadi silang, halaman di belakang meredup, dan pilihan muncul bergantian dari tombol. Kembali atau ketukan di luar menutup menu lebih dulu.
   - Bila **Kurangi animasi** aktif, pilihan langsung tampil tanpa gerak.
+
+### Ditingkatkan
+- **Lembar chat coding lebih sederhana.** Isinya kini hanya pilihan folder dan proyek, karena **Chat** sudah ada di menu +.
+
+## v1.0.128 (3 November 2026)
+
+### Baru
 - **Chat biasa, terpisah dari chat coding.** Ketuk +, lalu pilih **Chat** untuk bertanya, mencari berita, atau minta bantuan menulis, seperti ChatGPT di web.
   - Agent di chat ini hanya punya pencarian web, baca halaman, baca lampiran, dan pembuat gambar (kalau aktif). Tanpa terminal, file proyek, todo, atau subagent, jadi pertanyaan biasa tidak lagi memicu banyak tool.
   - Satu jawaban paling banyak memakai beberapa pencarian. Lewat itu, agent diminta menjawab dengan yang sudah ada.
   - Jawaban yang memakai web menyebut sumbernya. Pencarian tampil sebagai satu kalimat, misalnya "Mencari di web ...", dan bisa diketuk untuk melihat detailnya.
   - Chat coding tetap seperti sebelumnya, di bawah bagian **Coding** pada lembar chat baru.
 - **Daftar chat bisa disaring** Semua / Chat / Coding. Penyaring muncul begitu kamu punya chat biasa.
+
+## v1.0.126 (3 November 2026)
+
+### Baru
 - **Agent bisa membuat gambar langsung di chat.** Minta saja, misalnya "buatkan logo kedai kopi, 2 variasi", dengan model chat apa pun.
   - Secara bawaan dipakai model gambar termurah menurut tarif saat itu, promo ikut dihitung. Kalau kamu menyebut model tertentu, model itu yang dipakai.
   - Hasilnya gambar asli, bukan SVG, dan disimpan di folder `.images` proyek. Folder itu tidak ikut ke git.
@@ -70,8 +95,6 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 ### Keamanan
 - **Restore backup lebih aman.** Setiap bagian backup diperiksa keutuhannya dulu sebelum ada yang ditulis ke HP, dan tidak ada salinan tanpa enkripsi yang tertinggal di disk.
 - **Nama file di backup server tidak membocorkan isinya.** Tanpa kunci backup, isi file tidak bisa ditebak dari namanya.
-
----
 
 ## v1.0.119 (1 November 2026)
 
