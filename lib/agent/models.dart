@@ -146,9 +146,13 @@ class SessionSummary {
 sealed class ChatEntry {}
 
 class UserEntry extends ChatEntry {
-  UserEntry(this.text, {this.images = 0, this.attachments = const []});
+  UserEntry(this.text, {this.images = 0, this.attachments = const [], this.visionReads = const []});
   final String text;
   final int images;
+
+  /// The pictures of this message (or of an earlier one it asks about) read into text by a vision model for a model
+  /// that cannot read them (agent/src/visiontranslate.ts). Hidden from the bubble; the answer's footer names the reader.
+  final List<VisionRead> visionReads;
 
   /// Files/pictures sent with this message, from the sent-attachments
   /// store. Empty for messages sent before attachment display existed:
@@ -435,6 +439,41 @@ String contentText(dynamic content) {
     return content.whereType<Map>().where((c) => c['type'] == 'text').map((c) => c['text'] as String? ?? '').join('\n');
   }
   return '';
+}
+
+/// One reading of pictures by the vision translator, as the host adds it to the user's turn.
+class VisionRead {
+  const VisionRead({required this.model, required this.name, required this.kind, this.credits});
+  final String model;
+  final String name;
+
+  /// full (the pictures of this message) or targeted (a detail of an earlier one, for a question about it).
+  final String kind;
+  final double? credits;
+}
+
+final _visionBlock = RegExp(r'\n*<griphub-vision\b([^>]*)>[\s\S]*?</griphub-vision>');
+final _visionAttr = RegExp(r'(\w+)="([^"]*)"');
+
+String _unescapeAttr(String v) =>
+    v.replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
+
+/// A user message's text split into what the user wrote and the readings the host added to it.
+(String, List<VisionRead>) splitVisionReads(String text) {
+  if (!text.contains('<griphub-vision')) return (text, const []);
+  final reads = <VisionRead>[];
+  for (final m in _visionBlock.allMatches(text)) {
+    final a = {for (final x in _visionAttr.allMatches(m.group(1) ?? '')) x.group(1)!: _unescapeAttr(x.group(2)!)};
+    reads.add(
+      VisionRead(
+        model: a['model'] ?? '',
+        name: a['name'] ?? a['model'] ?? '',
+        kind: a['kind'] ?? 'full',
+        credits: double.tryParse(a['credits'] ?? ''),
+      ),
+    );
+  }
+  return (text.replaceAll(_visionBlock, '').trimRight(), reads);
 }
 
 int contentImages(dynamic content) =>
@@ -778,5 +817,17 @@ class RoutingDecision {
 
   /// The reason as codes (agent/src/smartrouter.ts Decision.why), worded by the app.
   final List<String> why;
+  final double? estimate;
+}
+
+/// The host asks before a paid reading of a picture (Settings → Vision translator → Ask first): which model would read
+/// it, and about what it would cost.
+class VisionAsk {
+  VisionAsk(Map<String, dynamic> j)
+    : model = j['model'] as String? ?? '',
+      modelName = j['modelName'] as String? ?? j['model'] as String? ?? '',
+      estimate = (j['estimate'] as num?)?.toDouble();
+  final String model;
+  final String modelName;
   final double? estimate;
 }

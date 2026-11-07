@@ -188,6 +188,15 @@ export interface AppSettings {
 	 */
 	smartRouter?: boolean;
 	smartRouterBlocked?: string[];
+	/**
+	 * Vision translator (visiontranslate.ts), for pictures sent to a model that cannot read them: "auto" reads them
+	 * with a vision model, "ask" asks before the first paid reading in a chat, "off" refuses the picture. Unset = auto.
+	 * [visionTranslatorModel]: the user's own translator (wins when it qualifies); unset = the cheapest approved.
+	 * [visionTranslatorAllowed]: the approved translators (quality floor); unset = the default from the metadata.
+	 */
+	visionTranslator?: "auto" | "ask" | "off";
+	visionTranslatorModel?: string;
+	visionTranslatorAllowed?: string[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
 	/**
@@ -380,6 +389,9 @@ export class Integrations {
 			fallbackModels: fallbackModels ?? [],
 			smartRouter: this.settings.smartRouter ?? true,
 			smartRouterBlocked: (this.settings.smartRouterBlocked ?? []).filter((id) => typeof id === "string" && id),
+			visionTranslator: this.settings.visionTranslator ?? "auto",
+			visionTranslatorModel: this.settings.visionTranslatorModel ?? null,
+			visionTranslatorAllowed: this.settings.visionTranslatorAllowed ?? null,
 			dailyBudget: dailyBudget ?? 0,
 			...imageSettings(this.settings),
 			// Null while the user set nothing: the limit then follows the open chat's model (compactLimit). An app too old
@@ -444,6 +456,18 @@ export class Integrations {
 				throw new Error("The smart router's blocked list holds model ids");
 			}
 			next.smartRouterBlocked = [...new Set(next.smartRouterBlocked.map((id) => id.trim()))];
+		}
+		if (next.visionTranslator !== undefined && !["auto", "ask", "off"].includes(next.visionTranslator)) {
+			throw new Error("The vision translator is automatic, ask first, or off");
+		}
+		if (next.visionTranslatorModel !== undefined && (typeof next.visionTranslatorModel !== "string" || !next.visionTranslatorModel.trim())) {
+			throw new Error("The vision translator is a model id");
+		}
+		if (next.visionTranslatorAllowed !== undefined) {
+			if (!Array.isArray(next.visionTranslatorAllowed) || next.visionTranslatorAllowed.some((id) => typeof id !== "string" || !id.trim())) {
+				throw new Error("The approved vision translators are model ids");
+			}
+			next.visionTranslatorAllowed = [...new Set(next.visionTranslatorAllowed.map((id) => id.trim()))];
 		}
 		// 0 turns the host's summaries off (pi's own stay); anything else must be a sane token count.
 		if (next.compactAt !== undefined && !(typeof next.compactAt === "number" && Number.isInteger(next.compactAt) && next.compactAt >= 0)) {

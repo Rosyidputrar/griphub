@@ -84,6 +84,7 @@ import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter
 import { PromptQueue } from "./promptqueue.js";
 import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
+import { asksAboutPicture, defaultAllowed, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
 import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
@@ -116,6 +117,8 @@ let images: Images;
 let router: Router;
 /** Smart router state and decision log per chat (smartrouter.ts). */
 let routing: RoutingStore;
+/** "Ask first" consent of the vision translator, per chat (visiontranslate.ts). */
+let visionConsent: VisionConsent;
 let modelBoard: ModelBoard;
 let fsService: Fs;
 let preview: Preview;
@@ -1011,6 +1014,98 @@ async function routeTurn(s: AgentSession, text: string, images: number) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Vision translator (visiontranslate.ts): pictures for a model that cannot read them
+
+/** Fixed sentences, so the app can say them in the user's language. */
+const VISION_OFF =
+	"This model can't read pictures, and the vision translator is off. Switch to a model that reads pictures, or turn the translator on in Settings → Vision translator.";
+const VISION_NONE =
+	"No approved vision model is available to read the picture. Switch to a model that reads pictures, or change the approved list in Settings → Vision translator.";
+const VISION_FAILED = "The vision model could not read the picture, so nothing was sent. Try again, or switch to a model that reads pictures.";
+
+/** How many of the latest user messages a follow-up question may reach back over to find the picture it is about. */
+const VISION_LOOKBACK = 6;
+
+type Prepared = { text: string; images?: any[] } | { visionConsent: { model: string; modelName: string; estimate: number | null } };
+
+/** The vision model for [images] pictures, or a refusal; never a model outside the router's metadata. */
+function visionTranslator(images: number) {
+	const st = integrations.settings;
+	return pickTranslator(routerCatalog(), {
+		manual: st.visionTranslatorModel,
+		allowed: st.visionTranslatorAllowed,
+		blocked: new Set(st.smartRouterBlocked ?? []),
+		images,
+	});
+}
+
+/**
+ * Reads [images] with [meta] (one request, no tools, not part of the chat's turns), records what it cost in the chat's
+ * file like any other request, and returns the text. Throws VISION_FAILED when it fails or reads nothing: the turn is
+ * then not sent, and nothing is made up.
+ */
+async function readPictures(s: AgentSession, meta: ModelMeta, images: any[], instruction: string, kind: "full" | "targeted") {
+	checkBudget();
+	const model = modelRuntime.getModel(GRIPHUB_ID, meta.id);
+	if (!model) throw new Error(VISION_NONE);
+	let reply: any;
+	try {
+		reply = await (s as any).modelRuntime.completeSimple(
+			model,
+			{ messages: [{ role: "user", content: [{ type: "text", text: instruction }, ...images], timestamp: Date.now() }] },
+			{ maxTokens: 2_000, cacheRetention: "none", signal: AbortSignal.timeout(120_000) },
+		);
+	} catch {
+		reply = { stopReason: "error" };
+	}
+	const usage = reply?.usage;
+	const failed = reply?.stopReason === "error" || reply?.stopReason === "aborted";
+	const credits = usage ? requestEstimate(meta.id, usageOf(usage), !failed) : null;
+	if (usage) {
+		// In the chat's file, so Usage, the daily budget and the chat's history count it (workbench.ts usageSummary).
+		s.sessionManager.appendCustomEntry("griphub-usage", { provider: GRIPHUB_ID, model: meta.id, usage, purpose: "vision", kind, ok: !failed, at: Date.now() });
+	}
+	const text = failed ? "" : (reply?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("").trim();
+	send({ type: "vision", sessionId: s.sessionId, reading: { model: meta.id, name: meta.name, kind, credits, ok: !!text } });
+	if (!text) throw new Error(VISION_FAILED);
+	return { model: meta.id, name: meta.name, credits, kind, text };
+}
+
+/**
+ * What the chat's model is given for a turn: unchanged when it reads pictures (or there are none to read); with the
+ * pictures read into text when it cannot. Asks first (returns visionConsent) when Settings say so and this chat has not
+ * agreed yet; refuses when the translator is off. A question about a picture sent earlier gets one targeted reading
+ * of that picture, never a second full one.
+ */
+async function prepareTurn(s: AgentSession, text: string, images: any[] | undefined, consent: boolean): Promise<Prepared> {
+	const mode = integrations.settings.visionTranslator ?? "auto";
+	const meta = s.model?.provider === GRIPHUB_ID ? routerCatalog().find((m) => m.id === s.model!.id) : undefined;
+	// A model of another provider (none in this build), or one that reads pictures: nothing to do.
+	if (!meta || readsImages(meta)) return { text, images };
+	const fresh = Array.isArray(images) ? images.filter((i) => i?.type === "image") : [];
+	let source = fresh;
+	let kind: "full" | "targeted" = "full";
+	if (!fresh.length) {
+		if (mode === "off" || !asksAboutPicture(text)) return { text, images };
+		const users = (s.messages as any[]).filter((m) => m?.role === "user").slice(-VISION_LOOKBACK);
+		const last = [...users].reverse().find((m) => Array.isArray(m.content) && m.content.some((c: any) => c?.type === "image"));
+		if (!last) return { text, images };
+		source = last.content.filter((c: any) => c?.type === "image");
+		kind = "targeted";
+	}
+	if (mode === "off") throw new Error(VISION_OFF);
+	const pick = visionTranslator(source.length);
+	if (!pick.ok) throw new Error(VISION_NONE);
+	if (mode === "ask" && !visionConsent.given(s.sessionId)) {
+		if (!consent) return { visionConsent: { model: pick.model.id, modelName: pick.model.name, estimate: estimateRead(pick.model, source.length) } };
+		visionConsent.give(s.sessionId);
+	}
+	const reading = await readPictures(s, pick.model, source, kind === "full" ? FULL_INSTRUCTION : targetedInstruction(text), kind);
+	// The pictures stay with the message (pi keeps them in the chat and leaves them out of requests to this model).
+	return { text: `${text}\n\n${readingBlock(reading)}`, images };
+}
+
 /** Estimated GripHub credits of one pi usage record (rate + floor + cache, see router.ts). */
 function estimateUsage(model: string, u: any): number | null {
 	return requestEstimate(model, usageOf(u));
@@ -1120,7 +1215,8 @@ function recentAsks(s: AgentSession, n = 3): string[] {
 	const out: string[] = [];
 	for (const m of s.messages as any[]) {
 		if (m.role !== "user") continue;
-		const text = typeof m.content === "string" ? m.content : (m.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+		const raw = typeof m.content === "string" ? m.content : (m.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+		const text = stripReadings(raw);
 		if (text.trim()) out.push(text.trim().slice(0, 600));
 	}
 	return out.slice(-n);
@@ -1543,17 +1639,21 @@ async function handle(cmd: Command): Promise<unknown> {
 			void integrations.githubFresh();
 			// The chat is being summarized: pi refuses prompts until it is done, so this one waits for it.
 			if (!s.isStreaming) await compactionDone(s);
+			// An automatic chat picks this turn's model first (smartrouter.ts); a follow-up while the agent works keeps the
+			// running model, and a message sent again after "ask first" was already routed.
+			if (!s.isStreaming && !cmd.visionConsent) await routeTurn(s, String(cmd.text ?? ""), Array.isArray(cmd.images) ? cmd.images.length : 0);
+			// Pictures for a model that cannot read them are read into text first (visiontranslate.ts).
+			const prepared = await prepareTurn(s, text, cmd.images, !!cmd.visionConsent);
+			if ("visionConsent" in prepared) return prepared;
 			// While the agent works, a follow-up waits for the turn's boundary; the
 			// app shows it as a waiting bubble and can cancel it (prompt_queue_remove).
 			const behavior = s.isStreaming ? (cmd.behavior ?? "followUp") : undefined;
 			if (behavior === "followUp") {
-				const id = await promptQueue.add(s, text, cmd.text, cmd.images);
+				const id = await promptQueue.add(s, prepared.text, cmd.text, prepared.images);
 				return id ? { queued: id } : null;
 			}
-			// An automatic chat picks this turn's model first; a follow-up that steers a running turn keeps its model.
-			if (!s.isStreaming) await routeTurn(s, String(cmd.text ?? ""), Array.isArray(cmd.images) ? cmd.images.length : 0);
 			// Don't await the run; progress arrives as events.
-			s.prompt(text, { images: cmd.images, streamingBehavior: behavior }).catch((e) =>
+			s.prompt(prepared.text, { images: prepared.images, streamingBehavior: behavior }).catch((e) =>
 				send({ type: "error", message: String(e?.message ?? e) }),
 			);
 			return null;
@@ -1569,9 +1669,12 @@ async function handle(cmd: Command): Promise<unknown> {
 			const unsent = lastPrompt && lastPrompt.sessionId === s.sessionId ? lastPrompt : null;
 			fallbackTried = false;
 			// Try again after a failure: an automatic chat climbs a class for it (smartrouter.ts failureOf).
-			await routeTurn(s, unsent?.text ?? routing.get(s.sessionId).last?.text ?? "", unsent?.images?.length ?? 0);
+			if (!cmd.visionConsent) await routeTurn(s, unsent?.text ?? routing.get(s.sessionId).last?.text ?? "", unsent?.images?.length ?? 0);
 			if (unsent) {
-				s.prompt(unsent.text, { images: unsent.images }).catch((e) =>
+				// The same preparation as a new message: the model may have been changed to one that reads pictures since.
+				const prepared = await prepareTurn(s, unsent.text, unsent.images, !!cmd.visionConsent);
+				if ("visionConsent" in prepared) return prepared;
+				s.prompt(prepared.text, { images: prepared.images }).catch((e) =>
 					send({ type: "error", message: String(e?.message ?? e) }),
 				);
 			} else if (failedTurn) {
@@ -1678,6 +1781,17 @@ async function handle(cmd: Command): Promise<unknown> {
 				});
 			}
 			return state();
+		}
+		// The vision translator's choices for Settings: vision models from the metadata, the default approved list, and
+		// the translator a picture would go to now.
+		case "vision_translator_info": {
+			const models = routerCatalog();
+			const pick = visionTranslator(1);
+			return {
+				models: models.filter((m) => m.vision === true && m.credits !== undefined).map((m) => ({ id: m.id, name: m.name, credits: m.credits, available: m.available })),
+				defaultAllowed: defaultAllowed(models),
+				current: pick.ok ? { id: pick.model.id, name: pick.model.name, manual: pick.manual } : null,
+			};
 		}
 		case "smart_router_set":
 			setSmartRouter(s, !!cmd.on);
@@ -1808,7 +1922,8 @@ async function handle(cmd: Command): Promise<unknown> {
 				name: info.name ?? null,
 				modified: info.modified.getTime(),
 				messageCount: info.messageCount,
-				firstMessage: info.firstMessage,
+				// What the user wrote, without a picture's reading (visiontranslate.ts).
+				firstMessage: typeof info.firstMessage === "string" ? stripReadings(info.firstMessage) : info.firstMessage,
 			}));
 		case "open_session":
 			if (s.sessionFile && resolve(cmd.path) === resolve(s.sessionFile)) return state();
@@ -2447,6 +2562,7 @@ async function main() {
 	});
 	usePricingRouter(router);
 	routing = new RoutingStore(join(stateDir, "routing"));
+	visionConsent = new VisionConsent(join(stateDir, "vision"));
 	modelBoard = new ModelBoard({
 		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
 		cacheFile: join(stateDir, "model-board-cache.json"),

@@ -20,6 +20,12 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Nama model yang benar-benar dipakai tetap tampil, dengan tanda kecil ✦ bahwa ia dipilih otomatis.
   - Setiap keputusan tercatat beserta alasan dan perkiraan biayanya: Pemakaian → Chat ini → Keputusan Router Pintar.
   - Memilih model sendiri menghentikan pilihan otomatis untuk chat itu. Bisa dimatikan, dan model tertentu bisa dikecualikan, di Pengaturan → Router Pintar.
+- **Penerjemah vision: kirim gambar ke model yang tidak bisa melihat.** Model vision membaca gambar menjadi teks (isinya, semua tulisan persis apa adanya, tata letaknya), lalu model chat menjawab dari situ, tanpa perlu ganti model.
+  - Di bawah jawaban tertulis "Gambar dibaca oleh …" beserta biayanya; biaya itu juga terhitung di Pemakaian dan anggaran harian.
+  - Pertanyaan lanjutan tentang detail gambar dijawab dengan pembacaan terarah, bukan membaca ulang seluruh gambar.
+  - Gambar aslinya tetap tersimpan di chat. Model chat tidak pernah dikirimi gambarnya.
+  - Pengaturan → Penerjemah vision: Otomatis, Tanya dulu (sekali per chat), atau Mati; pilih penerjemah sendiri dan daftar model yang disetujui.
+  - Bila pembacaan gagal, pesan tidak dikirim dan kamu diberi tahu apa adanya, dengan tawaran ganti model.
 
 ---
 

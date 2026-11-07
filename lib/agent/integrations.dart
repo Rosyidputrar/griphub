@@ -253,6 +253,19 @@ class AppSettings {
   /// Smart router (agent/src/smartrouter.ts): whether chats may pick their model automatically (on unless turned off).
   bool get smartRouter => json['smartRouter'] != false;
 
+  /// Vision translator (agent/src/visiontranslate.ts): auto, ask or off.
+  String get visionTranslator => switch (json['visionTranslator']) {
+    'ask' => 'ask',
+    'off' => 'off',
+    _ => 'auto',
+  };
+
+  /// The translator the user chose; null = the cheapest approved one.
+  String? get visionTranslatorModel => json['visionTranslatorModel'] as String?;
+
+  /// The approved translators the user set; null = the default from the router's metadata.
+  List<String>? get visionTranslatorAllowed => (json['visionTranslatorAllowed'] as List?)?.whereType<String>().toList();
+
   /// Model ids the smart router must never pick.
   List<String> get smartRouterBlocked => (json['smartRouterBlocked'] as List? ?? const []).whereType<String>().toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;

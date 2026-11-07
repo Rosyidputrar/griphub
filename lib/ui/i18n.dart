@@ -264,6 +264,35 @@ const _id = <String, String>{
   'none can use tools': 'tidak ada yang bisa memakai tools',
   'none holds this conversation': 'tidak ada yang muat percakapan ini',
   'none has a live price': 'tidak ada yang punya harga terkini',
+  // Vision translator (vision_translator_screen.dart, message_views.dart, chat_screen.dart).
+  'Vision translator': 'Penerjemah vision',
+  'Ask before reading a picture': 'Tanya dulu sebelum membaca gambar',
+  'Off: pictures go only to models that can see': 'Mati: gambar hanya untuk model yang bisa melihat',
+  'Reads pictures for models that cannot see': 'Membacakan gambar untuk model yang tidak bisa melihat',
+  'Automatic': 'Otomatis',
+  "When the chat's model cannot see pictures, a vision model reads the picture into text (what it shows, every readable text, the layout) and the chat's model answers from that. Each reading is a paid request, shown under the answer and counted in Usage. The picture stays in the chat.":
+      'Bila model chat tidak bisa melihat gambar, model vision membaca gambar itu menjadi teks (isinya, semua tulisan yang terbaca, tata letaknya), lalu model chat menjawab dari situ. Tiap pembacaan adalah permintaan berbayar, tertulis di bawah jawaban dan terhitung di Pemakaian. Gambarnya tetap tersimpan di chat.',
+  'Reads now: {model}': 'Yang membaca sekarang: {model}',
+  'GripHub Router lists no vision model with a price right now.': 'GripHub Router belum mencantumkan model vision berharga saat ini.',
+  'Translator': 'Penerjemah',
+  'The cheapest approved model': 'Model termurah yang disetujui',
+  'Approved to read pictures': 'Disetujui membaca gambar',
+  'Automatic picks only from these. By default: vision models outside the cheapest third of prices.':
+      'Pilihan otomatis hanya dari daftar ini. Bawaannya: model vision di luar sepertiga harga termurah.',
+  'Back to the default list': 'Kembali ke daftar bawaan',
+  'Picture read by {model}': 'Gambar dibaca oleh {model}',
+  'Read the picture with a vision model?': 'Baca gambar dengan model vision?',
+  'This model cannot see pictures. {model} will read it into text for it to answer from.':
+      'Model ini tidak bisa melihat gambar. {model} akan membacanya menjadi teks untuk dijawab.',
+  'Each reading is a paid request: {cost}.': 'Tiap pembacaan adalah permintaan berbayar: {cost}.',
+  'Asked once per chat.': 'Ditanyakan sekali per chat.',
+  'Read the picture': 'Baca gambar',
+  "This model can't read pictures, and the vision translator is off. Switch to a model that reads pictures, or turn the translator on in Settings → Vision translator.":
+      'Model ini tidak bisa membaca gambar, dan penerjemah vision sedang mati. Ganti ke model yang bisa membaca gambar, atau nyalakan penerjemah di Pengaturan → Penerjemah vision.',
+  'No approved vision model is available to read the picture. Switch to a model that reads pictures, or change the approved list in Settings → Vision translator.':
+      'Tidak ada model vision yang disetujui dan tersedia untuk membaca gambar. Ganti ke model yang bisa membaca gambar, atau ubah daftar yang disetujui di Pengaturan → Penerjemah vision.',
+  'The vision model could not read the picture, so nothing was sent. Try again, or switch to a model that reads pictures.':
+      'Model vision gagal membaca gambar, jadi tidak ada yang dikirim. Coba lagi, atau ganti ke model yang bisa membaca gambar.',
   'The smart router found no model that can do this message. Pick a model yourself for it.':
       'Router Pintar tidak menemukan model yang sanggup untuk pesan ini. Pilih model sendiri untuk pesan ini.',
   'Used when the current model hits a limit or errors': 'Dipakai saat model utama kena limit atau error',

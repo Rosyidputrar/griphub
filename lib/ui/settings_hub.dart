@@ -37,6 +37,7 @@ import 'templates_screen.dart';
 import 'theme.dart';
 import 'update_sheet.dart';
 import 'usage_screen.dart';
+import 'vision_translator_screen.dart';
 
 /// The settings home: everything the agent can use, grouped.
 class SettingsHub extends StatefulWidget {
@@ -383,6 +384,13 @@ builder: (context, scroll) => Column(
                     title: tr('Smart router'),
                     subtitle: smartRouterSummary(it.settings),
                     onTap: () => _open(SmartRouterSettingsScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.scanEye,
+                    color: const Color(0xFF0EA5E9),
+                    title: tr('Vision translator'),
+                    subtitle: visionTranslatorSummary(it.settings),
+                    onTap: () => _open(VisionTranslatorScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.chartColumn,

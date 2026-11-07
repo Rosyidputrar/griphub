@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../agent/agent_controller.dart';
 import '../agent/drafts.dart';
 import '../agent/models.dart';
+import '../agent/pricing.dart';
 import '../agent/features.dart';
 import 'i18n.dart';
 import 'chat_extras.dart';
@@ -116,6 +117,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (focus.hasFocus) _checkClipboard();
     });
     agent.addListener(_onAgentChanged);
+    agent.confirmVisionReading = _confirmVisionReading;
     draftChat = agent.sessionId;
     final prompt = widget.initialPrompt ?? Drafts.instance.get(draftChat);
     if (prompt.isNotEmpty) {
@@ -148,6 +150,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     agent.removeListener(_onAgentChanged);
+    if (agent.confirmVisionReading == _confirmVisionReading) agent.confirmVisionReading = null;
     _mentionTimer?.cancel();
     _lifecycle.dispose();
     Drafts.instance.flush();
@@ -303,6 +306,30 @@ class _ChatScreenState extends State<ChatScreen> {
   /// A message is on its way to the host: Send shows a spinner and a second tap does nothing, so the same text is
   /// never sent twice.
   bool _sending = false;
+
+  /// "Ask first" (Settings → Vision translator): may a vision model read the picture for this chat's model?
+  Future<bool> _confirmVisionReading(VisionAsk ask) async {
+    if (!mounted) return false;
+    final cost = ask.estimate == null ? '' : tr('about {n}').replaceAll('{n}', '${localNumber(formatCredits(ask.estimate!))} ${tr('credits')}');
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Read the picture with a vision model?')),
+        content: Text(
+          [
+            tr('This model cannot see pictures. {model} will read it into text for it to answer from.').replaceAll('{model}', ask.modelName),
+            if (cost.isNotEmpty) tr('Each reading is a paid request: {cost}.').replaceAll('{cost}', cost),
+            tr('Asked once per chat.'),
+          ].join(' '),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Read the picture'))),
+        ],
+      ),
+    );
+    return yes ?? false;
+  }
 
   Future<void> _send() async {
     if (_sending) return;
@@ -811,6 +838,14 @@ class _ChatScreenState extends State<ChatScreen> {
     return users > 0 && model != null && routed[users - 1] == model;
   }
 
+  /// The user message that started the turn entry [i] belongs to.
+  static UserEntry? _turnUser(List<ChatEntry> entries, int i) {
+    for (var k = i; k >= 0; k--) {
+      if (entries[k] is UserEntry) return entries[k] as UserEntry;
+    }
+    return null;
+  }
+
   Widget _transcript() {
     final entries = agent.entries;
     final placed = placeSubagents(agent);
@@ -857,6 +892,7 @@ class _ChatScreenState extends State<ChatScreen> {
               },
               footer: footers[i],
               autoRouted: footers[i] != null && routed.isNotEmpty && _routedTurn(entries, i, routed, footers[i]!.model),
+              visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
             ),
             NoticeEntry() => NoticeView(
               e,

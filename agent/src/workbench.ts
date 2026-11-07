@@ -389,6 +389,10 @@ export function usageSummary(
 							add(ts, m.provider, m.model, m.usage);
 						} else if (e.type === "usage" && e.usage && e.model) {
 							add(ts, e.provider, e.model, e.usage);
+						} else if (e.type === "custom" && e.customType === "griphub-usage" && e.data?.usage && e.data?.model) {
+							// A request made for the chat outside its own turns (the vision translator's reading).
+							const at = typeof e.data.at === "number" ? e.data.at : Date.parse(e.timestamp);
+							add(at, e.data.provider, e.data.model, e.data.usage);
 						} else if ((e.type === "compaction" || e.type === "branch_summary") && e.usage && last) {
 							add(ts, last.provider, last.model, e.usage);
 						}

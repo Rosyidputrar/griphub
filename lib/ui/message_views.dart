@@ -443,6 +443,7 @@ class AssistantMessageView extends StatelessWidget {
     this.subagentCost,
     this.footer,
     this.autoRouted = false,
+    this.visionReads = const [],
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
@@ -474,6 +475,9 @@ class AssistantMessageView extends StatelessWidget {
 
   /// The smart router picked this turn's model: the footer marks the model's name (agent/src/smartrouter.ts).
   final bool autoRouted;
+
+  /// The vision translator read this turn's pictures: one quiet line above the footer names the reader.
+  final List<VisionRead> visionReads;
 
   @override
   Widget build(BuildContext context) {
@@ -515,6 +519,7 @@ class AssistantMessageView extends StatelessWidget {
     if (entry.aborted) {
       children.add(Text(tr('Stopped'), style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint)));
     }
+    if (footer != null && visionReads.isNotEmpty) children.add(VisionReadNote(reads: visionReads));
     if (footer case final f?) {
       final model = f.model;
       final subagents = [for (final id in f.cost?.subagentCalls ?? const <String>[]) ?subagentCost?.call(id)];
@@ -536,6 +541,32 @@ class AssistantMessageView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var i = 0; i < children.length; i++) ...[if (i > 0) const SizedBox(height: 10), children[i]],
+      ],
+    );
+  }
+}
+
+/// "Pictures read by `model`": the vision translator read this turn's pictures for a model that cannot see them. One
+/// line, in the footer's quiet colour; the reading's estimate follows when known.
+class VisionReadNote extends StatelessWidget {
+  const VisionReadNote({super.key, required this.reads});
+  final List<VisionRead> reads;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final names = {for (final r in reads) r.name}.join(', ');
+    final known = reads.every((r) => r.credits != null);
+    final credits = reads.fold<double>(0, (a, r) => a + (r.credits ?? 0));
+    final text = [
+      tr('Picture read by {model}').replaceAll('{model}', names),
+      if (known) '~${localNumber(formatCredits(credits))} ${tr('credits')}',
+    ].join(' · ');
+    return Row(
+      children: [
+        Icon(LucideIcons.scanEye, size: 13, color: p.faint),
+        const SizedBox(width: 6),
+        Expanded(child: Text(text, style: TextStyle(fontSize: 11.5, color: p.faint))),
       ],
     );
   }

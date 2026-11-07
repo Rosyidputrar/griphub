@@ -11,6 +11,7 @@ import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/model_sheet.dart';
 import 'package:griphub_agent/ui/smart_router_screen.dart';
+import 'package:griphub_agent/ui/vision_translator_screen.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:griphub_agent/agent/sent_attachments.dart';
 import 'package:griphub_agent/ui/links.dart';
@@ -375,6 +376,7 @@ void main() {
         await pumpLook(tester, look, ChatScreen(agent: automaticChat()));
         await frames(tester);
         expect(layoutErrors, isEmpty);
+        await loadImages(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('smart_router_chat_${look.name}')));
       });
     }
@@ -445,7 +447,21 @@ void main() {
         sheetHost();
         await pumpSheet(tester, automaticChat(), look: look);
         expect(layoutErrors, isEmpty);
+        await loadImages(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('smart_router_picker_${look.name}')));
+      });
+    }
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: smart router settings ${look.name}', (tester) async {
+        final host = FakeHost();
+        host.stored['smartRouterBlocked'] = ['kimi-k3'];
+        final agent = newAgent()..models = [ModelInfo(Map.of(glm)), ModelInfo(Map.of(kimi))];
+        await pumpLook(tester, look, SmartRouterSettingsScreen(agent: agent));
+        await frames(tester, 12);
+        expect(layoutErrors, isEmpty);
+        await loadImages(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('smart_router_settings_${look.name}')));
       });
     }
 
@@ -463,4 +479,151 @@ void main() {
       expect(agent.autoRoutedTurns, {0});
     });
   });
+
+  group('vision translator', () {
+    const kimi = {'provider': 'griphub', 'id': 'kimi-k3', 'name': 'Kimi K3', 'input': ['text']};
+    const reading =
+        '<griphub-vision model="gemini-3.8-flash" name="Gemini 3.8 Flash" kind="full" credits="0.004200">\n'
+        '[Isi gambar menurut model vision Gemini 3.8 Flash:\nStruk INDOMARET\nTOTAL 22.800\n]\n'
+        '[Catatan: model utama tidak melihat gambar asli. Jawab berdasarkan uraian di atas.]\n</griphub-vision>';
+
+    test('the reading is taken out of the text and kept as who read it', () {
+      final (text, reads) = splitVisionReads('Berapa totalnya?\n\n$reading');
+      expect(text, 'Berapa totalnya?');
+      expect(reads.single.name, 'Gemini 3.8 Flash');
+      expect(reads.single.kind, 'full');
+      expect(reads.single.credits, closeTo(0.0042, 1e-9));
+      expect(splitVisionReads('biasa saja').$2, isEmpty);
+      final escaped = splitVisionReads('x\n\n<griphub-vision model="m" name="A &quot;B&quot;" kind="targeted" credits="">\n]\n</griphub-vision>');
+      expect(escaped.$1, 'x');
+      expect(escaped.$2.single.name, 'A "B"');
+      expect(escaped.$2.single.credits, isNull);
+    });
+
+    AgentController readChat() {
+      final agent = newAgent()
+        ..sessionId = 's1'
+        ..isChat = true
+        ..model = ModelInfo(Map.of(kimi))
+        ..models = [ModelInfo(Map.of(kimi))];
+      agent.addHistoryMessage({
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': 'Berapa total belanja di struk ini?\n\n$reading'},
+          {'type': 'image', 'data': 'iVBORw0KGgo=', 'mimeType': 'image/png'},
+        ],
+      });
+      agent.addHistoryMessage({
+        'role': 'assistant',
+        'model': 'kimi-k3',
+        'stopReason': 'stop',
+        'content': [
+          {'type': 'text', 'text': 'Total belanjanya Rp22.800.'},
+        ],
+        'usage': {'input': 1400, 'output': 20, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 1420},
+        'griphubCost': {'credits': 0.0213, 'floored': false},
+      });
+      return agent;
+    }
+
+    testWidgets('the bubble shows what the user wrote; the answer says which model read the picture', (tester) async {
+      FakeHost();
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      await pumpLook(tester, const Look(), ChatScreen(agent: readChat()));
+      await frames(tester);
+      expect(find.textContaining('Isi gambar menurut'), findsNothing);
+      expect(find.textContaining('griphub-vision'), findsNothing);
+      // In the bubble and as the chat's title: both without the reading.
+      expect(find.text('Berapa total belanja di struk ini?'), findsNWidgets(2));
+      expect(find.textContaining('Picture read by Gemini 3.8 Flash'), findsOneWidget);
+      expect(find.byType(VisionReadNote), findsOneWidget);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {
+      testWidgets('golden: answer from a reading ${look.name}', (tester) async {
+        FakeHost();
+        Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+        await pumpLook(tester, look, ChatScreen(agent: readChat()));
+        await frames(tester);
+        expect(layoutErrors, isEmpty);
+        await loadImages(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('vision_read_${look.name}')));
+      });
+    }
+
+    Future<FakeHost> askChat(WidgetTester tester, {Look look = const Look()}) async {
+      final host = FakeHost();
+      host.answers['prompt'] = (cmd) => cmd['visionConsent'] == true
+          ? null
+          : {
+              'visionConsent': {'model': 'gemini-3.8-flash', 'modelName': 'Gemini 3.8 Flash', 'estimate': 0.0042},
+            };
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      final agent = newAgent()
+        ..sessionId = 's1'
+        ..isChat = true
+        ..model = ModelInfo(Map.of(kimi))
+        ..models = [ModelInfo(Map.of(kimi))];
+      await pumpLook(tester, look, ChatScreen(agent: agent));
+      await frames(tester);
+      unawaitedSend(agent);
+      await frames(tester);
+      return host;
+    }
+
+    testWidgets('"ask first": a dialog before the paid reading; yes sends it with consent', (tester) async {
+      final host = await askChat(tester);
+      expect(find.text('Read the picture with a vision model?'), findsOneWidget);
+      expect(find.textContaining('Gemini 3.8 Flash will read it'), findsOneWidget);
+      await tester.tap(find.text('Read the picture'));
+      await frames(tester);
+      final prompts = host.sent('prompt');
+      expect(prompts, hasLength(2));
+      expect(prompts.first['visionConsent'], isNull);
+      expect(prompts.last['visionConsent'], true);
+    });
+
+    testWidgets('"ask first": Cancel sends nothing more', (tester) async {
+      final host = await askChat(tester);
+      await tester.tap(find.text('Cancel'));
+      await frames(tester);
+      expect(host.sent('prompt'), hasLength(1));
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: ask-first dialog ${look.name}', (tester) async {
+        await askChat(tester, look: look);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('vision_ask_${look.name}')));
+      });
+    }
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: vision translator settings ${look.name}', (tester) async {
+        final host = FakeHost();
+        host.answers['vision_translator_info'] = (_) => {
+          'models': [
+            {'id': 'gemini-3.8-flash', 'name': 'Gemini 3.8 Flash', 'credits': 1.5, 'available': true},
+            {'id': 'gemini-3.1-pro', 'name': 'Gemini 3.1 Pro', 'credits': 2, 'available': true},
+            {'id': 'claude-haiku-5.5', 'name': 'Claude Haiku 5.5', 'credits': 1, 'available': true},
+          ],
+          'defaultAllowed': ['gemini-3.8-flash', 'gemini-3.1-pro'],
+          'current': {'id': 'gemini-3.8-flash', 'name': 'Gemini 3.8 Flash', 'manual': false},
+        };
+        await pumpLook(tester, look, VisionTranslatorScreen(agent: newAgent()), height: 1200);
+        await frames(tester, 12);
+        expect(layoutErrors, isEmpty);
+        expect(find.text(look.language == 'id' ? 'Penerjemah vision' : 'Vision translator'), findsOneWidget);
+        await loadImages(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('vision_settings_${look.name}')));
+      });
+    }
+  });
+}
+
+/// Sends a message with a picture without waiting: the dialog it may open has to be answered first.
+void unawaitedSend(AgentController agent) {
+  agent.sendWith('Apa ini?', images: const [
+    {'type': 'image', 'data': 'iVBORw0KGgo=', 'mimeType': 'image/png'},
+  ]);
 }

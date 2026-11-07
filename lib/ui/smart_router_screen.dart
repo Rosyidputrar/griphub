@@ -160,7 +160,10 @@ class _SmartRouterSettingsScreenState extends State<SmartRouterSettingsScreen> {
                 SettingsGroup(
                   children: [
                     for (final m in models)
-                      CheckboxListTile(
+                      // The tile paints its splash on a Material: the group's own background would hide it.
+                      Material(
+                        type: MaterialType.transparency,
+                        child: CheckboxListTile(
                         value: blocked.contains(m.id),
                         title: Text(m.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                         secondary: BrandTile(id: m.provider, model: m.id, size: 28),
@@ -171,6 +174,7 @@ class _SmartRouterSettingsScreenState extends State<SmartRouterSettingsScreen> {
                                     ? [...blocked, m.id]
                                     : blocked.where((id) => id != m.id).toList(),
                               }),
+                        ),
                       ),
                   ],
                 ),

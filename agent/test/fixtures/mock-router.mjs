@@ -69,11 +69,27 @@ globalThis.fetch = async (input, init) => {
 		const system = request.messages?.find((m) => m.role === "system" || m.role === "developer");
 		const text = typeof system?.content === "string" ? system.content : JSON.stringify(system?.content ?? "");
 		const tools = (request.tools ?? []).map((t) => t.function?.name ?? t.name);
-		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary, model: request.model })}\n`);
+		// images: picture parts anywhere in the request, so a test can tell a model was never sent one.
+		const images = JSON.stringify(request.messages ?? []).split('"type":"image_url"').length - 1;
+		const vision = /model lain/i.test(JSON.stringify(last?.content ?? ""));
+		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary, model: request.model, images, vision })}\n`);
+	}
+	// A vision translator's reading (visiontranslate.ts: its instruction speaks of "model lain"): MOCK_VISION_TEXT is
+	// what it reads, MOCK_VISION_FAIL makes the router refuse it (500), MOCK_VISION_EMPTY makes it read nothing.
+	// Counted in MOCK_LOG as "vision", and not as a chat request.
+	if (!summary && /model lain/i.test(JSON.stringify(last?.content ?? ""))) {
+		if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, "vision\n");
+		if (process.env.MOCK_VISION_FAIL) {
+			return new Response('{"error":{"message":"Vision upstream failed in the mock router"}}', { status: 500, headers: { "content-type": "application/json" } });
+		}
+		const read = process.env.MOCK_VISION_EMPTY ? "" : (process.env.MOCK_VISION_TEXT ?? "Sebuah gambar.");
+		const usage = { usage: { prompt_tokens: 1_800, completion_tokens: 300 } };
+		const parts = [...(read ? [chunk({ role: "assistant", content: read })] : [chunk({ role: "assistant", content: "" })]), chunk({}, "stop", usage)];
+		return new Response(parts.join("") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
 	}
 	// MOCK_FAIL_CHAT: comma-separated numbers of the chat requests (not summaries) the router answers with a 500, as
 	// an upstream outage would; for tests of what the host does after a failed turn.
-	if (!summary) chatCount++;
+	if (!summary) chatCount++; // (vision readings returned above, so they are not counted)
 	if (!summary && (process.env.MOCK_FAIL_CHAT ?? "").split(",").includes(String(chatCount))) {
 		return new Response('{"error":{"message":"Upstream failed in the mock router"}}', { status: 500, headers: { "content-type": "application/json" } });
 	}

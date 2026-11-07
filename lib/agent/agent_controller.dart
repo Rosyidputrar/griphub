@@ -63,6 +63,15 @@ class AgentController extends ChangeNotifier {
   /// Set when the current model is billed differently than the user may expect.
   String? billingNotice;
 
+  /// Asks whether a vision model may read a picture for this chat ("ask first" in Settings → Vision translator); set by
+  /// the chat screen. Without it nothing is read: the message is not sent.
+  Future<bool> Function(VisionAsk ask)? confirmVisionReading;
+
+  static VisionAsk? _visionAsk(Object? r) =>
+      r is Map && r['visionConsent'] is Map ? VisionAsk((r['visionConsent'] as Map).cast<String, dynamic>()) : null;
+
+  Future<bool> _confirmVision(VisionAsk ask) async => await confirmVisionReading?.call(ask) ?? false;
+
   /// Smart router ("Otomatis (Pintar)") for the open chat.
   SmartRouterState smartRouter = const SmartRouterState();
 
@@ -765,10 +774,18 @@ class AgentController extends ChangeNotifier {
     if (_mustWait) return _hold(body, images: images, attachments: attachments);
     queueSentAttachments(attachments);
     try {
-      final r = await client.call<Object?>('prompt', {
+      var r = await client.call<Object?>('prompt', {
         'text': body,
         'images': images,
       });
+      // "Ask first": a picture for a model that cannot read it waits for a yes before the paid reading.
+      if (_visionAsk(r) case final ask?) {
+        if (!await _confirmVision(ask)) {
+          retractSentAttachments(attachments);
+          return false;
+        }
+        r = await client.call<Object?>('prompt', {'text': body, 'images': images, 'visionConsent': true});
+      }
       _noteQueued(r, attachments);
       return true;
     } on AgentError catch (e) {
@@ -826,7 +843,10 @@ class AgentController extends ChangeNotifier {
   /// Tries the last failed request again (on the current model, which may have been changed since).
   Future<void> retry() async {
     try {
-      await client.call('retry');
+      final r = await client.call<Object?>('retry');
+      if (_visionAsk(r) case final ask?) {
+        if (await _confirmVision(ask)) await client.call<Object?>('retry', {'visionConsent': true});
+      }
     } on AgentError catch (e) {
       _addNotice(e.message, error: true);
     }
@@ -1157,7 +1177,8 @@ class AgentController extends ChangeNotifier {
   }) {
     switch (m['role']) {
       case 'user':
-        entries.add(UserEntry(contentText(m['content']), images: contentImages(m['content']), attachments: attached));
+        final (text, reads) = splitVisionReads(contentText(m['content']));
+        entries.add(UserEntry(text, images: contentImages(m['content']), attachments: attached, visionReads: reads));
       case 'assistant':
         entries.add(
           AssistantEntry()
