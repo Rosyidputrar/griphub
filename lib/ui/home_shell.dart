@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/panel.dart';
 import '../agent/agent_fs.dart';
 import '../agent/integrations.dart';
 import '../agent/models.dart';
@@ -22,6 +23,7 @@ import 'image_gen_screen.dart';
 import 'kit.dart';
 import 'illustration.dart';
 import 'mesh.dart';
+import 'panel_settings_screen.dart';
 import 'new_chat_sheet.dart';
 import 'plus_menu.dart';
 import 'predictive_back.dart';
@@ -292,6 +294,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _takeLaunch() async {
+    // The floating panel shows the app now: it takes its own launches (panel_screen.dart).
+    if (PanelState.instance.isPanel) return;
     final launch = await agent.client.takeLaunch();
     if (launch == null || !mounted) return;
     // Close sheets and pages so the new chat opens on top of home — but
@@ -321,6 +325,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       case 'voice':
         if (!await agent.newSession()) return;
         if (mounted) await openChat(context, agent, listen: true);
+      // "Tanya GripHub" while the panel may not show over other apps: the selection in a new chat, and the way to the
+      // panel offered once, quietly.
+      case 'selection':
+        final text = (launch['text'] as String? ?? '').trim();
+        if (!await agent.newSession(chat: true)) return;
+        if (!mounted) return;
+        final quoted = text.isEmpty ? null : '${text.split('\n').map((l) => '> $l').join('\n')}\n\n';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(tr('To ask from any app without opening this one, turn on the floating panel.')),
+            action: SnackBarAction(
+              label: tr('Turn on'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PanelSettingsScreen(agent: agent))),
+            ),
+          ),
+        );
+        await openChat(context, agent, prompt: quoted);
       case 'share':
         final files = [
           for (final f in (launch['files'] as List? ?? const []).cast<Map>())

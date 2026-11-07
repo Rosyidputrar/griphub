@@ -22,6 +22,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
+import 'panel_screen.dart' show PanelHandoff;
 import 'read_only_chat.dart';
 import 'verify_view.dart';
 import 'smart_router_screen.dart' show SmartRouterMark;
@@ -50,8 +51,13 @@ class ChatScreen extends StatefulWidget {
     this.initialPrompt,
     this.initialAttachments = const [],
     this.listenOnOpen = false,
+    this.panel = false,
   });
   final AgentController agent;
+
+  /// Shown in the floating panel (Fitur 4): the panel draws its own header; there are no project tools, and anything
+  /// that needs approval or a coding chat is handed to the app with one tap instead of being done here.
+  final bool panel;
 
   /// Pre-filled into the composer (quick starts, shares), for the user to finish.
   final String? initialPrompt;
@@ -521,10 +527,39 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _attach() async {
-    final picked = await pickAttachments(context, client: agent.client);
+    final picked = await pickAttachments(context, client: agent.client, onScan: _scan);
     if (picked.isNotEmpty) {
       setState(() => attachments.addAll(picked));
       _saveFiles();
+    }
+  }
+
+  /// A photographed document or receipt, read into text by a vision model through the router (agent/src/host.ts
+  /// scan_document); the text goes into the composer as context. The photo is deleted once read.
+  Future<void> _scan(String path) async {
+    final file = File(path);
+    try {
+      final result = await runWithProgress(context, tr('Reading the document…'), () => agent.scanDocument(file));
+      if (!mounted || result == null) return;
+      final before = input.text.trim();
+      final block = '${tr('Text of the scanned document:')}\n---\n${result.text.trim()}\n---\n\n';
+      _prefill(before.isEmpty ? block : '$before\n\n$block');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            [
+              tr('Picture read by {model}').replaceAll('{model}', result.name),
+              if (result.credits != null) '~${localNumber(formatCredits(result.credits!))} ${tr('credits')}',
+            ].join(' · '),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      try {
+        if (file.existsSync()) file.deleteSync();
+      } catch (_) {}
     }
   }
 
@@ -629,7 +664,7 @@ class _ChatScreenState extends State<ChatScreen> {
         open: _suggesting,
         onClose: _closeSuggestions,
         child: Scaffold(
-        appBar: AppBar(
+        appBar: widget.panel ? null : AppBar(
           leading: Navigator.of(context).canPop()
               ? IconButton(
                   tooltip: tr('Back'),
@@ -701,7 +736,19 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Stack(
                 children: [
                   // A first message still waiting for the server is the chat's start: show it, not the welcome.
-                  agent.entries.isEmpty && agent.offlineForCurrent.isEmpty
+                  // The panel is small: one quiet line instead of the welcome and its quick starts.
+                  agent.entries.isEmpty && agent.offlineForCurrent.isEmpty && widget.panel
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              tr('Ask anything, or pick an action above.'),
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: context.palette.muted),
+                            ),
+                          ),
+                        )
+                      : agent.entries.isEmpty && agent.offlineForCurrent.isEmpty
                       ? _EmptyState(
                           agent: agent,
                           onConnect: _connectProvider,
@@ -747,8 +794,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
-            if (!agent.isChat) DevServerBanner(agent: agent),
-            ApprovalCards(features: agent.features, agent: agent),
+            if (!agent.isChat && !widget.panel) DevServerBanner(agent: agent),
+            // The panel decides nothing privileged: approvals and coding chats go to the app (one tap).
+            if (widget.panel)
+              PanelHandoff(agent: agent)
+            else
+              ApprovalCards(features: agent.features, agent: agent),
             // A plain conversation has nothing to bypass, review or plan: no bars for them.
             if (!agent.isChat) BypassBar(agent: agent),
             if (!agent.isChat && _changedFiles > 0 && !_reviewClosed && !agent.busy)
@@ -815,7 +866,7 @@ class _ChatScreenState extends State<ChatScreen> {
         if (!didPop) agent.leaveView();
       },
       child: Scaffold(
-        appBar: AppBar(
+        appBar: widget.panel ? null : AppBar(
           leading: IconButton(
             tooltip: tr('Back'),
             icon: const Icon(LucideIcons.chevronLeft, size: 24),

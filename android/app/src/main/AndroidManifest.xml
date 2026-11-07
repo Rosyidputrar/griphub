@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- The floating panel's bubble over other apps (Fitur 4); asked for only when the user first turns the panel on. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <!-- Lets sessions work in folders on shared storage (Download, Documents...). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
@@ -48,17 +50,58 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- Share text, links, images and files from other apps into a chat. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <data android:mimeType="*/*"/>
-            </intent-filter>
+            <!-- Several files shared from other apps go into a chat in the app; a single share goes to ShareActivity. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="*/*"/>
             </intent-filter>
+        </activity>
+        <!-- One shared text, link, picture or file: the floating panel when it may show, else the app as before. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:label="GripHub AI Agent"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+        </activity>
+        <!-- "Tanya GripHub" in any app's text selection menu: to the panel (with the result forwarded), or the app. -->
+        <activity
+            android:name=".ProcessTextActivity"
+            android:exported="true"
+            android:label="@string/ask_griphub"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
+        <!-- The floating panel (Fitur 4): a sheet over the app in use, the same app and chat as the main window. Not
+             exported: only the app's own ways in open it. Standard launch mode: opened for a selection it sits in that
+             app's task, so its answer can go back into the selection. -->
+        <activity
+            android:name=".PanelActivity"
+            android:exported="false"
+            android:label="@string/ask_griphub"
+            android:taskAffinity="id.griphub.agent.panel"
+            android:excludeFromRecents="true"
+            android:theme="@style/PanelTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/PanelTheme"
+              />
         </activity>
         <receiver android:name=".QuickWidget" android:exported="false" android:label="GripHub AI Agent">
             <intent-filter>
@@ -83,6 +126,14 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE"/>
             </intent-filter>
+        </service>
+        <service
+            android:name=".BubbleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Shows the user's floating assistant bubble over other apps while the user keeps it on screen"/>
         </service>
         <service
             android:name=".AgentService"

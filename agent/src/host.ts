@@ -86,7 +86,7 @@ import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
 import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt } from "./memory.js";
 import { detectVerifyCommand, type Evidence, evidenceText, isTestPath, outputSummary, runVerify, VERIFY_MESSAGE, VERIFY_NOTE, VerifyOutputs } from "./verify.js";
-import { asksAboutPicture, defaultAllowed, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
+import { asksAboutPicture, defaultAllowed, SCAN_INSTRUCTION, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
 import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
@@ -2005,6 +2005,18 @@ async function handle(cmd: Command): Promise<unknown> {
 				defaultAllowed: defaultAllowed(models),
 				current: pick.ok ? { id: pick.model.id, name: pick.model.name, manual: pick.manual } : null,
 			};
+		}
+		// Scanning a document (Fitur 4): a photo read into text by a vision model through the router, for the user to ask
+		// about. The photo is not kept: the app deletes its copy; the reading's cost is in the chat like any request.
+		case "scan_document": {
+			const image = cmd.image;
+			if (!image || image.type !== "image" || typeof image.data !== "string" || typeof image.mimeType !== "string") {
+				throw new Error("No picture to scan");
+			}
+			const pick = visionTranslator(1);
+			if (!pick.ok) throw new Error(VISION_NONE);
+			const reading = await readPictures(s, pick.model, [image], SCAN_INSTRUCTION, "full");
+			return { text: reading.text, model: reading.model, name: reading.name, credits: reading.credits };
 		}
 		// Agent memory (memory.ts).
 		case "memory_list": {

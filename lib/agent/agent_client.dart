@@ -6,6 +6,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'panel.dart';
+
 import 'agent_backend.dart';
 import 'drafts.dart';
 
@@ -277,6 +279,36 @@ class AgentClient {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // The floating panel (Fitur 4; android PanelActivity / BubbleService)
+
+  /// Whether the app may show above other apps (the panel's bubble). False where there is no platform side.
+  Future<bool> overlayPermission() async {
+    try {
+      return await _method.invokeMethod<bool>('overlayPermission') ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Opens the system page where the user allows it.
+  Future<void> requestOverlayPermission() => _method.invokeMethod('requestOverlayPermission');
+
+  /// Opens the panel over whatever is on screen; false without the permission.
+  Future<bool> panelOpen() async => await _method.invokeMethod<bool>('panelOpen') ?? false;
+
+  /// The panel folds into its bubble at the screen's edge.
+  Future<void> panelMinimize() => _method.invokeMethod('panelMinimize');
+
+  /// The panel and its bubble go away.
+  Future<void> panelClose() => _method.invokeMethod('panelClose');
+
+  /// The panel's chat in the whole app.
+  Future<void> panelOpenFull() => _method.invokeMethod('panelOpenFull');
+
+  /// The other app's selection is replaced by [text] (only when it allowed that).
+  Future<void> panelReplaceText(String text) => _method.invokeMethod('panelReplaceText', text);
+
   /// Opens the system page where the user grants "All files access".
   Future<void> requestStorageAccess() => _method.invokeMethod('requestStorageAccess');
 
@@ -434,6 +466,9 @@ class AgentClient {
       // A share, widget or tile opened the app; details come from takeLaunch().
       case 'launch':
         _records.add({'type': 'launch'});
+      // Which window shows the app now: the main one, or the floating panel (with what it was opened for).
+      case 'surface':
+        PanelState.instance.apply(event);
     }
   }
 

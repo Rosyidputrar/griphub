@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'agent/agent_client.dart';
 import 'agent/agent_controller.dart';
+import 'ui/panel_screen.dart';
 import 'ui/app_lock.dart';
 import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger;
 import 'ui/home_shell.dart';
@@ -55,7 +56,8 @@ class GripHubApp extends StatelessWidget {
               // Every animation goes through Motion.of / Motion.reduced, which read this.
               disableAnimations: MediaQuery.of(context).disableAnimations || appearance.animationsOff,
             ),
-            child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
+            // The floating panel (Fitur 4) sits inside the app lock: a locked app shows no chat in the panel either.
+            child: AppLockGate(child: PanelGate(agent: agent, child: StopToSwitchOverlay(agent: agent, child: child!))),
           ),
         ),
         home: ListenableBuilder(

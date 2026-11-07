@@ -2,4 +2,6 @@
 <resources>
     <string name="widget_description">Start a chat with pi or talk to it</string>
     <string name="tile_label">New GripHub chat</string>
+    <!-- In every app's text selection menu (Fitur 4). -->
+    <string name="ask_griphub">Tanya GripHub</string>
 </resources>

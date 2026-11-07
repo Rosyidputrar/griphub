@@ -195,7 +195,10 @@ int _fileSize(File file) {
 }
 
 /// Asks where to attach from. With [client], a picture on the clipboard is offered too ("Paste image").
-Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
+///
+/// With [onScan], "Scan a document" is offered: a photo taken now goes to [onScan] (read into text) instead of being
+/// attached.
+Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client, Future<void> Function(String path)? onScan}) async {
   final clipboardImage = await client?.clipboardHasImage() ?? false;
   if (!context.mounted) return const [];
   final choice = await showAppSheet<String>(
@@ -219,6 +222,14 @@ Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? cli
               subtitle: tr('Take a picture now'),
               onTap: () => Navigator.pop(context, 'camera'),
             ),
+            if (onScan != null)
+              SettingsRow(
+                icon: LucideIcons.scanText,
+                color: const Color(0xFF0EA5E9),
+                title: tr('Scan a document'),
+                subtitle: tr('A photo of a page or receipt, read into text'),
+                onTap: () => Navigator.pop(context, 'scan'),
+              ),
             SettingsRow(
               icon: LucideIcons.paperclip,
               color: const Color(0xFFF76B15),
@@ -247,6 +258,10 @@ Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? cli
     case 'camera':
       final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 2048);
       return x == null ? [] : [Attachment(x.path, x.name, mime: x.mimeType)];
+    case 'scan':
+      final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 90, maxWidth: 2400);
+      if (x != null) await onScan?.call(x.path);
+      return const [];
     case 'clipboard':
       final image = await client?.clipboardImage();
       return image == null ? const [] : [Attachment(image['path']!, image['name']!, mime: image['mime'])];

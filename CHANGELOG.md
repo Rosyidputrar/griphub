@@ -43,6 +43,13 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Pengaturan → Ingatan agent dan alat proyek → Ingatan agent untuk proyek: lihat, ubah, hapus satu per satu atau semuanya. Yang dihapus benar-benar hilang.
   - Pemakaian → Chat ini → Yang diingat agent: persis apa yang dibawa chat ini saat dimulai.
   - Ingatan tersimpan di HP atau server tempat agent berjalan, dan tidak ikut pindah bila mode berganti.
+- **Tanya GripHub dari aplikasi mana pun: panel mengambang.**
+  - Pilih teks di aplikasi apa saja → "Tanya GripHub": panel setengah layar terbuka dengan teks itu, plus aksi satu ketuk Jelaskan, Ringkas, Terjemahkan, dan Balas. Bila aplikasinya mengizinkan, hasil terjemahan atau balasan bisa langsung menggantikan teks aslinya.
+  - Bagikan teks, tautan, atau satu gambar ke GripHub: terbuka di panel di atas aplikasi yang sedang dipakai. Beberapa file sekaligus tetap masuk ke aplikasi seperti biasa.
+  - Panel adalah chat yang sama dengan di aplikasi: "Buka di aplikasi" melanjutkannya di sana. Panel hanya untuk chat biasa; persetujuan dan alat proyek diarahkan ke aplikasi dengan satu ketuk.
+  - Kecilkan panel jadi gelembung di tepi layar (seret ke bawah untuk menyingkirkannya); selama gelembung ada, notifikasinya juga ada.
+  - Izin "Tampilkan di atas aplikasi lain" diminta hanya saat kamu menyalakan panel (Pengaturan → Panel mengambang), dengan penjelasan. Tanpa izin itu, semua pintu masuk tadi membuka aplikasi.
+  - Pindai dokumen dari menu + (di aplikasi dan panel): foto halaman atau struk dibaca jadi teks oleh model vision lewat GripHub Router, lalu masuk ke kolom ketik. Fotonya langsung dihapus setelah dibaca.
 
 ---
 

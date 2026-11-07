@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -71,6 +73,18 @@ class AgentController extends ChangeNotifier {
       r is Map && r['visionConsent'] is Map ? VisionAsk((r['visionConsent'] as Map).cast<String, dynamic>()) : null;
 
   Future<bool> _confirmVision(VisionAsk ask) async => await confirmVisionReading?.call(ask) ?? false;
+
+  /// A photographed document read into text by a vision model through the router (Fitur 4); null when nothing was read.
+  Future<({String text, String name, double? credits})?> scanDocument(File photo) async {
+    final bytes = await photo.readAsBytes();
+    final lower = photo.path.toLowerCase();
+    final mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    final r = (await client.call<Map>('scan_document', {
+      'image': {'type': 'image', 'data': base64Encode(bytes), 'mimeType': mime},
+    })).cast<String, dynamic>();
+    final text = r['text'] as String? ?? '';
+    return text.trim().isEmpty ? null : (text: text, name: r['name'] as String? ?? '', credits: (r['credits'] as num?)?.toDouble());
+  }
 
   /// The verification command running now for the open chat (agent/src/verify.ts), for the activity line; null when
   /// none runs.

@@ -77,6 +77,13 @@ export const FULL_INSTRUCTION = [
 	"Jangan menebak bagian yang tidak terbaca: tulis [tidak terbaca].",
 ].join("\n");
 
+/** A document or receipt photographed to scan (Fitur 4 butir A3): its text, as it is, for another model to use. */
+export const SCAN_INSTRUCTION = [
+	"Pindai dokumen atau struk pada gambar ini untuk model lain: salin SEMUA teks yang terbaca persis apa adanya,",
+	"dengan susunan baris aslinya (tabel sebagai baris dengan kolom dipisah ' | '). Tanpa komentar, tanpa ringkasan.",
+	"Tulis [tidak terbaca] untuk bagian yang tidak terbaca. Jangan menebak.",
+].join("\n");
+
 /** The instruction for a follow-up about a picture read earlier: only what the question needs, copied exactly. */
 export function targetedInstruction(question: string): string {
 	return [

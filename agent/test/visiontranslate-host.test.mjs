@@ -142,3 +142,17 @@ test("the translator the user chose reads the picture", async (t) => {
 	assert.equal(h.records.find((r) => r.type === "vision").reading.model, "gemini-3.1-pro");
 	assert.match(h.bodies().at(-1), /model vision Gemini 3\.1 Pro/);
 });
+
+test("scanning a document: a vision model reads it through the router, the cost is in the chat, the text comes back", async (t) => {
+	const h = await host(t, { MOCK_VISION_TEXT: RECEIPT });
+	await h.call("new_session", { chatMode: "chat" });
+	await h.turn("Halo");
+	const r = await h.call("scan_document", { image: photo[0] });
+	assert.match(r.text, /TOTAL 22\.800/);
+	assert.ok(["gemini-3.8-flash", "gemini-3.1-pro"].includes(r.model));
+	assert.ok(r.credits > 0);
+	assert.equal(h.log().filter((x) => x === "vision").length, 1);
+	assert.equal(usageEntries(h.agentDir).length, 1, "recorded like any other request");
+	const bad = await h.raw("scan_document", { image: { type: "text" } });
+	assert.equal(bad.ok, false);
+});

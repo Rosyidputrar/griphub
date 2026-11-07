@@ -38,6 +38,7 @@ import 'theme.dart';
 import 'update_sheet.dart';
 import 'usage_screen.dart';
 import 'memory_screen.dart';
+import 'panel_settings_screen.dart';
 import 'verify_settings_screen.dart';
 import 'vision_translator_screen.dart';
 
@@ -407,6 +408,13 @@ builder: (context, scroll) => Column(
                     title: tr("Agent's memory"),
                     subtitle: memorySummary(it.settings),
                     onTap: () => _open(MemoryScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.panelBottom,
+                    color: const Color(0xFF6366F1),
+                    title: tr('Floating panel'),
+                    subtitle: tr('Ask GripHub from any app'),
+                    onTap: () => _open(PanelSettingsScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.chartColumn,
