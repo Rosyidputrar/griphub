@@ -172,6 +172,9 @@ class FakeHost {
 
   void emit(Map<String, dynamic> record) => _sink?.success({'kind': 'stdout', 'line': jsonEncode(record)});
 
+  /// An event from the platform side itself (not a host record): a window change, the companion stopping.
+  void emitPlatform(Map<String, dynamic> event) => _sink?.success(event);
+
   List<Map<String, dynamic>> sent(String type) => commands.where((c) => c['type'] == type).toList();
 }
 

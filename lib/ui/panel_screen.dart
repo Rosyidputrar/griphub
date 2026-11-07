@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/companion.dart';
 import '../agent/models.dart';
 import '../agent/panel.dart';
 import 'chat_extras.dart' show Attachment;
 import 'chat_screen.dart';
+import 'companion_screen.dart';
 import 'errors.dart';
 import 'i18n.dart';
 import 'kit.dart';
@@ -195,6 +197,16 @@ class _PanelScreenState extends State<PanelScreen> {
                     const LogoMark(size: 22, glow: false),
                     const SizedBox(width: 8),
                     Expanded(child: Text('GripHub', style: text.titleMedium)),
+                    ListenableBuilder(
+                      listenable: ScreenCompanion.instance,
+                      builder: (context, _) => ScreenCompanion.instance.active
+                          ? const SizedBox.shrink()
+                          : IconButton(
+                              tooltip: tr('Screen companion'),
+                              onPressed: () => startCompanion(context, agent),
+                              icon: const Icon(LucideIcons.scanEye, size: 18),
+                            ),
+                    ),
                     IconButton(
                       tooltip: tr('Open in the app'),
                       onPressed: () => _call(agent.client.panelOpenFull),
@@ -213,6 +225,7 @@ class _PanelScreenState extends State<PanelScreen> {
                   ],
                 ),
               ),
+              CompanionBar(agent: agent),
               if (selection != null && selection.trim().isNotEmpty)
                 _SelectionBar(
                   text: selection,

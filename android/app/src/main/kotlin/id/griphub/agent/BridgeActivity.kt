@@ -35,6 +35,7 @@ import java.io.File
 abstract class BridgeActivity : FlutterFragmentActivity() {
     companion object {
         private const val VOICE_REQUEST = 4101
+        private const val COMPANION_REQUEST = 4102
 
         /** How old a pasted or shared copy in the cache is before it is swept. */
         private const val OLD_COPY_MS = 24L * 60 * 60 * 1000
@@ -70,6 +71,7 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
     open fun surfaceInfo(): Map<String, Any?> = emptyMap()
 
     private var pendingVoice: MethodChannel.Result? = null
+    private var pendingCompanion: MethodChannel.Result? = null
 
     /** Both windows show the one cached engine; it outlives either of them. */
     override fun getCachedEngineId(): String = EngineHolder.ensure(applicationContext)
@@ -343,6 +345,39 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                     "panelOpen" -> {
                         result.success(Overlay.openPanel(this, null))
                     }
+                    // Screen companion (Companion.kt, Fitur 5): Android's own consent every session, frames only on request,
+                    // a highlight that takes no touches, and the optional read-only accessibility tree.
+                    "companionStart" -> {
+                        pendingCompanion?.success(false)
+                        pendingCompanion = result
+                        @Suppress("DEPRECATION")
+                        startActivityForResult(ScreenCompanion.consentIntent(this), COMPANION_REQUEST)
+                    }
+                    "companionActive" -> result.success(ScreenCompanion.active)
+                    "companionCapture" -> Thread {
+                        val frame = try { ScreenCompanion.capture(applicationContext) } catch (e: Exception) { null }
+                        runOnUiThread { result.success(frame) }
+                    }.start()
+                    "companionStop" -> {
+                        ScreenCompanion.end(applicationContext)
+                        result.success(null)
+                    }
+                    "companionHighlight" -> {
+                        val x = call.argument<Int>("x") ?: 0
+                        val y = call.argument<Int>("y") ?: 0
+                        Highlight.show(applicationContext, android.graphics.Rect(x, y, x + (call.argument<Int>("w") ?: 0), y + (call.argument<Int>("h") ?: 0)))
+                        result.success(null)
+                    }
+                    "companionClearHighlight" -> {
+                        Highlight.clear(applicationContext)
+                        result.success(null)
+                    }
+                    "a11yStatus" -> result.success(CompanionAccessibilityService.enabled(this))
+                    "a11yOpenSettings" -> {
+                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        result.success(null)
+                    }
+                    "a11yTree" -> result.success(CompanionAccessibilityService.instance?.tree() ?: emptyList<Map<String, Any?>>())
                     // The home-screen widgets' snapshot (Widgets.kt), pushed whenever what they show changes.
                     "widgetState" -> {
                         WidgetState.save(applicationContext, call.arguments as String)
@@ -359,6 +394,20 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == COMPANION_REQUEST) {
+            val waiting = pendingCompanion
+            pendingCompanion = null
+            if (resultCode != RESULT_OK || data == null) {
+                waiting?.success(false)
+                return
+            }
+            val service = Intent(this, CompanionService::class.java)
+                .putExtra(CompanionService.EXTRA_CODE, resultCode)
+                .putExtra(CompanionService.EXTRA_DATA, data)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
+            waiting?.success(true)
+            return
+        }
         if (requestCode != VOICE_REQUEST) return
         val text = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         pendingVoice?.success(text)

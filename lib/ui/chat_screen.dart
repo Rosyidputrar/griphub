@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/drafts.dart';
+import '../agent/companion.dart';
 import '../agent/models.dart';
 import '../agent/pricing.dart';
 import '../agent/features.dart';
@@ -372,6 +373,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendNow(String text) async {
+    // In the panel with the screen companion on, a message is the next step: the screen goes with it (Fitur 5).
+    if (widget.panel && ScreenCompanion.instance.active && attachments.isEmpty) {
+      try {
+        await ScreenCompanion.instance.step(agent, text);
+        input.clear();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+      return;
+    }
     final files = List<Attachment>.of(attachments);
     // Clear only on success: a refused message (budget, host error) never
     // reaches the transcript, so clearing first would lose it.

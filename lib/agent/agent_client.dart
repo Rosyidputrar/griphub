@@ -469,6 +469,9 @@ class AgentClient {
       // Which window shows the app now: the main one, or the floating panel (with what it was opened for).
       case 'surface':
         PanelState.instance.apply(event);
+      // Capture started or ended on the phone (the notification's Stop, or Android ending it).
+      case 'companion':
+        _records.add({'type': 'companion_native', 'active': event['active'] == true});
     }
   }
 

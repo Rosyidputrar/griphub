@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.CAMERA"/>
     <!-- The floating panel's bubble over other apps (Fitur 4); asked for only when the user first turns the panel on. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- Screen companion (Fitur 5): capture with the user's consent each session, in a mediaProjection service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <!-- Lets sessions work in folders on shared storage (Download, Documents...). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
@@ -147,6 +149,22 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE"/>
             </intent-filter>
+        </service>
+        <service
+            android:name=".CompanionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"/>
+        <!-- Optional, turned on only by the user in Android's settings after the app explains it: reads the screen's
+             elements to point precisely. Read-only (no gestures, no actions); password fields are never read. -->
+        <service
+            android:name=".CompanionAccessibilityService"
+            android:exported="false"
+            android:label="@string/companion_a11y_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/companion_accessibility"/>
         </service>
         <service
             android:name=".BubbleService"

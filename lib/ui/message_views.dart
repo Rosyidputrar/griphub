@@ -24,6 +24,7 @@ import 'preview_screen.dart';
 import 'kit.dart';
 import 'smart_router_screen.dart' show SmartRouterMark;
 import 'memory_screen.dart' show MemoryProposalCard;
+import 'companion_screen.dart' show hideCompanionPointer;
 import 'verify_view.dart';
 import 'links.dart';
 import 'live_clock.dart';
@@ -494,7 +495,7 @@ class AssistantMessageView extends StatelessWidget {
       switch (b.kind) {
         case BlockKind.text:
           if (b.text.trim().isNotEmpty) {
-            children.add(TypewriterMarkdown(text: b.text, live: entry.streaming && identical(b, blocks.last)));
+            children.add(TypewriterMarkdown(text: hideCompanionPointer(b.text), live: entry.streaming && identical(b, blocks.last)));
           }
         case BlockKind.thinking:
           if (b.text.trim().isNotEmpty) {

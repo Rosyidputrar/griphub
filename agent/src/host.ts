@@ -85,6 +85,7 @@ import { PromptQueue } from "./promptqueue.js";
 import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
 import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt } from "./memory.js";
+import { COMPANION_MARK, companionInstruction, type Frame, pointerOf, treeText, type TreeNode, withFrame } from "./companion.js";
 import { detectVerifyCommand, type Evidence, evidenceText, isTestPath, outputSummary, runVerify, VERIFY_MESSAGE, VERIFY_NOTE, VerifyOutputs } from "./verify.js";
 import { asksAboutPicture, defaultAllowed, SCAN_INSTRUCTION, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
 import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
@@ -128,6 +129,14 @@ let memoryStore: MemoryStore;
 let memoryProposals: Proposals;
 /** The verification command running now, so Stop stops it too. */
 let verifyAbort: AbortController | null = null;
+/**
+ * Screen companion (companion.ts): the chat it runs in, and the frame held for the one request it was taken for. The
+ * frame lives here only (never in a message, a file or a log) and is dropped when the turn ends or the companion stops.
+ */
+let companionSession: string | null = null;
+let companionFrame: Frame | null = null;
+/** A companion step is running: when it ends, where it points goes to the phone (companion_pointer). */
+let companionStep = false;
 let modelBoard: ModelBoard;
 let fsService: Fs;
 let preview: Preview;
@@ -437,6 +446,11 @@ async function buildSession(
 			...(chat ? [{ name: "griphub-chat", factory: chatModeExtension({ dir: cwd, stopped: opts.onLimit }), hidden: true }] : []),
 			{ name: "griphub-images", factory: (pi: any) => pi.on("agent_start", () => images.startRun(runKey)), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+			// Screen companion (companion.ts): the held frame goes onto the request only, never into the chat's file.
+			...(opts.interactive ? [{ name: "griphub-companion", factory: (pi: any) => pi.on("context", (event: any) => {
+				const out = withFrame(event.messages, companionFrame);
+				return out ? { messages: out } : undefined;
+			}), hidden: true }] : []),
 			// Agent memory (memory.ts): what the agent remembers, in the system prompt of every chat someone watches.
 			...(opts.interactive ? [{ name: "griphub-memory", factory: memoryExtension(sessionManager, chat), hidden: true }] : []),
 			// Self-verification (verify.ts): a coding chat someone watches; after the guard, so its own command is asked about.
@@ -645,6 +659,12 @@ function onSessionEvent(event: AgentSessionEvent) {
 		if (over) {
 			if (turnMs !== undefined) recordTurnTime(turnMs);
 			turnStartedAt = null;
+			// The companion's frame was for this turn only; where the step points goes to the phone to highlight.
+			companionFrame = null;
+			if (companionStep) {
+				companionStep = false;
+				send({ type: "companion_pointer", sessionId: session?.sessionId ?? null, pointer: pointerOf(text) });
+			}
 		}
 		send({
 			type: "agent_done",
@@ -1032,6 +1052,11 @@ async function routeTurn(s: AgentSession, text: string, images: number) {
 
 // ---------------------------------------------------------------------------
 // Vision translator (visiontranslate.ts): pictures for a model that cannot read them
+
+/** The record of the screen companion starting or stopping, in the chat. */
+const COMPANION_RECORD = "griphub_companion";
+const COMPANION_NEEDS_VISION =
+	"The screen companion needs a model that can see pictures. Choose one in the model picker, or Automatic (Smart).";
 
 /** Fixed sentences, so the app can say them in the user's language. */
 const VISION_OFF =
@@ -2005,6 +2030,45 @@ async function handle(cmd: Command): Promise<unknown> {
 				defaultAllowed: defaultAllowed(models),
 				current: pick.ok ? { id: pick.model.id, name: pick.model.name, manual: pick.manual } : null,
 			};
+		}
+		// Screen companion (Fitur 5; companion.ts). Started and stopped only by the user; both are recorded in the chat.
+		case "companion_start": {
+			if (s.isStreaming) throw new Error("The agent is still working in this chat.");
+			companionSession = s.sessionId;
+			companionFrame = null;
+			s.sessionManager.appendCustomMessageEntry(COMPANION_RECORD, "Screen companion started by the user.", true, { event: "start", at: Date.now() });
+			send({ type: "companion", sessionId: s.sessionId, event: "start" });
+			return { active: true };
+		}
+		case "companion_stop": {
+			const was = companionSession;
+			companionSession = null;
+			companionFrame = null;
+			companionStep = false;
+			if (was) {
+				s.sessionManager.appendCustomMessageEntry(COMPANION_RECORD, "Screen companion stopped by the user.", true, { event: "stop", at: Date.now() });
+				send({ type: "companion", sessionId: was, event: "stop" });
+			}
+			return { active: false };
+		}
+		// One step: the user's words, and the screen as it is now (or the fact that it cannot be seen).
+		case "companion_turn": {
+			if (companionSession !== s.sessionId) throw new Error("The screen companion is not on in this chat.");
+			if (s.isStreaming) throw new Error("The agent is still working in this chat.");
+			checkBudget();
+			const goal = String(cmd.text ?? "").trim() || "Lanjut.";
+			const secure = cmd.secure === true;
+			const frame = cmd.frame;
+			if (!secure && (!frame || typeof frame.data !== "string" || typeof frame.mimeType !== "string")) throw new Error("No screen to look at");
+			await routeTurn(s, goal, secure ? 0 : 1);
+			const meta = s.model?.provider === GRIPHUB_ID ? routerCatalog().find((m) => m.id === s.model!.id) : undefined;
+			if (!secure && !readsImages(meta)) throw new Error(COMPANION_NEEDS_VISION);
+			const nodes: TreeNode[] = Array.isArray(cmd.tree) ? cmd.tree : [];
+			companionFrame = secure ? null : { data: frame.data, mimeType: frame.mimeType, ...(nodes.length ? { tree: treeText(nodes) } : {}) };
+			const text = companionInstruction({ goal, tree: nodes.length > 0, width: Number(frame?.width) || 0, height: Number(frame?.height) || 0, secure });
+			companionStep = true;
+			s.prompt(text).catch((e) => send({ type: "error", message: String(e?.message ?? e) }));
+			return null;
 		}
 		// Scanning a document (Fitur 4): a photo read into text by a vision model through the router, for the user to ask
 		// about. The photo is not kept: the app deletes its copy; the reading's cost is in the chat like any request.

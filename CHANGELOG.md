@@ -55,6 +55,12 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - **Status Agent** (4×2, bisa diperbesar ke 4×4): sisa kredit dan model aktif, lalu apa yang sedang berjalan: chat yang dikerjakan agent, job latar, subagent, dan tugas terjadwal berikutnya. Ketuk barisnya untuk langsung ke tempatnya. Lencana merah hanya muncul bila ada persetujuan yang menunggu. Bila tidak ada apa-apa: "Tidak ada yang berjalan" beserta tugas terjadwal berikutnya.
   - Isinya mengikuti keadaan aplikasi saat berubah, tanpa polling; mengikuti tema terang atau gelap aplikasi. Ketukan widget hanya membuka, tidak pernah menjalankan apa pun.
   - Widget lama (Chat baru dan Suara) tetap ada.
+- **Pendamping layar: GripHub melihat layarmu dan memandu langkah demi langkah di aplikasi lain.**
+  - Mulai dari panel mengambang atau Pengaturan → Pendamping layar. Android meminta izinmu setiap kali dimulai dan menampilkan indikatornya sendiri; tombol Berhenti selalu ada di panel dan di notifikasi.
+  - Layar diambil hanya saat sebuah langkah membutuhkannya (satu gambar, bukan rekaman), dikirim ke GripHub Router untuk langkah itu saja, dan tidak disimpan di chat, ingatan, atau file mana pun.
+  - Agent menjelaskan satu langkah dan menyorot elemen yang dimaksud; ketuk "Sudah" untuk langkah berikutnya. Agent tidak pernah mengetuk, menggeser, atau mengetik untukmu.
+  - Opsional: nyalakan "GripHub Pendamping Layar" di pengaturan aksesibilitas Android agar sorotan lebih tepat (hanya membaca, tanpa kolom kata sandi; dijelaskan dulu di aplikasi).
+  - Layar aplikasi bank dan kolom kata sandi tidak bisa dilihat; agent mengatakannya, bukan menebak.
 
 ---
 

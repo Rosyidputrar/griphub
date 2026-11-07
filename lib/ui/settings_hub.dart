@@ -38,6 +38,7 @@ import 'theme.dart';
 import 'update_sheet.dart';
 import 'usage_screen.dart';
 import 'memory_screen.dart';
+import 'companion_screen.dart';
 import 'panel_settings_screen.dart';
 import 'verify_settings_screen.dart';
 import 'vision_translator_screen.dart';
@@ -415,6 +416,13 @@ builder: (context, scroll) => Column(
                     title: tr('Floating panel'),
                     subtitle: tr('Ask GripHub from any app'),
                     onTap: () => _open(PanelSettingsScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.scanEye,
+                    color: const Color(0xFF8B5CF6),
+                    title: tr('Screen companion'),
+                    subtitle: tr('GripHub looks at your screen and guides you, step by step'),
+                    onTap: () => _open(CompanionScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.chartColumn,
