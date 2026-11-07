@@ -10,6 +10,7 @@ import '../agent/pricing.dart';
 import '../agent/router_account.dart';
 import 'errors.dart';
 import 'kit.dart';
+import 'memory_screen.dart';
 import 'smart_router_screen.dart';
 import 'subagent_card.dart' show thinkingLabel;
 import 'i18n.dart';
@@ -325,6 +326,18 @@ class _UsageScreenState extends State<UsageScreen> {
               ..._summary(context, rows),
             SectionLabel(tr('This chat')),
             _sessionCard(context),
+            const SizedBox(height: 10),
+            SettingsGroup(
+              children: [
+                SettingsRow(
+                  icon: LucideIcons.brain,
+                  color: const Color(0xFFEC4899),
+                  title: tr('What the agent remembered'),
+                  subtitle: tr('What this chat started with from memory'),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => MemorySnapshotScreen(agent: agent))),
+                ),
+              ],
+            ),
             // What the smart router decided for this chat, when it was used here (agent/src/smartrouter.ts).
             if (agent.routingLog.isNotEmpty) ...[
               const SizedBox(height: 10),

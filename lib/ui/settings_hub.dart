@@ -37,6 +37,7 @@ import 'templates_screen.dart';
 import 'theme.dart';
 import 'update_sheet.dart';
 import 'usage_screen.dart';
+import 'memory_screen.dart';
 import 'verify_settings_screen.dart';
 import 'vision_translator_screen.dart';
 
@@ -399,6 +400,13 @@ builder: (context, scroll) => Column(
                     title: tr('Self-verification'),
                     subtitle: verifySummary(it.settings),
                     onTap: () => _open(VerifySettingsScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.brain,
+                    color: const Color(0xFFEC4899),
+                    title: tr("Agent's memory"),
+                    subtitle: memorySummary(it.settings),
+                    onTap: () => _open(MemoryScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.chartColumn,

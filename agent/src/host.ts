@@ -84,6 +84,7 @@ import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter
 import { PromptQueue } from "./promptqueue.js";
 import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
+import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt } from "./memory.js";
 import { detectVerifyCommand, type Evidence, evidenceText, isTestPath, outputSummary, runVerify, VERIFY_MESSAGE, VERIFY_NOTE, VerifyOutputs } from "./verify.js";
 import { asksAboutPicture, defaultAllowed, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
 import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
@@ -122,6 +123,9 @@ let routing: RoutingStore;
 let visionConsent: VisionConsent;
 /** Whole outputs of verification runs (verify.ts), for "show the full output". */
 let verifyOutputs: VerifyOutputs;
+/** Agent memory (memory.ts): the facts, and what the user decided about the agent's proposals. */
+let memoryStore: MemoryStore;
+let memoryProposals: Proposals;
 /** The verification command running now, so Stop stops it too. */
 let verifyAbort: AbortController | null = null;
 let modelBoard: ModelBoard;
@@ -433,6 +437,8 @@ async function buildSession(
 			...(chat ? [{ name: "griphub-chat", factory: chatModeExtension({ dir: cwd, stopped: opts.onLimit }), hidden: true }] : []),
 			{ name: "griphub-images", factory: (pi: any) => pi.on("agent_start", () => images.startRun(runKey)), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+			// Agent memory (memory.ts): what the agent remembers, in the system prompt of every chat someone watches.
+			...(opts.interactive ? [{ name: "griphub-memory", factory: memoryExtension(sessionManager, chat), hidden: true }] : []),
 			// Self-verification (verify.ts): a coding chat someone watches; after the guard, so its own command is asked about.
 			...(opts.interactive && !chat ? [{ name: "griphub-verify", factory: verifyExtension(cwd), hidden: true }] : []),
 			// A server's background runs go on while nobody is there: what would need approval is refused instead.
@@ -452,6 +458,8 @@ async function buildSession(
 		activeModel: session?.model?.id ?? "",
 	});
 	// Pictures (image.ts): over the user's limit the open chat asks; a run nobody watches is refused instead.
+	// Proposing memories needs someone to decide on them: chats the user watches, with memory on.
+	const remember = opts.interactive && integrations.settings.memory !== false;
 	const imageTool = () =>
 		images.tool(runKey, () => sessionManager.getCwd(), opts.interactive ? (summary, reason) => guard.askSpend(IMAGE_TOOL, summary, reason) : undefined);
 	const result = await createAgentSession({
@@ -464,10 +472,10 @@ async function buildSession(
 		// "subagent" must be named here: the SDK drops custom tools whose
 		// name is not in this allow-list (that is why 1.0.42 never showed it).
 		tools: chat
-			? [...CHAT_TOOLS, ...(pictures ? [IMAGE_TOOL] : [])]
-			: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...mcpTools.map((t) => t.name)],
+			? [...CHAT_TOOLS, ...(pictures ? [IMAGE_TOOL] : []), ...(remember ? [REMEMBER_TOOL] : [])]
+			: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...(remember ? [REMEMBER_TOOL] : []), ...mcpTools.map((t) => t.name)],
 		customTools: (chat
-			? [...webTools(searchKeys, () => sessionManager.getCwd(), { chat: true }), ...(pictures ? [imageTool()] : [])]
+			? [...webTools(searchKeys, () => sessionManager.getCwd(), { chat: true }), ...(pictures ? [imageTool()] : []), ...(remember ? [rememberToolFor(sessionManager)] : [])]
 			: [
 					...webTools(searchKeys, () => sessionManager.getCwd()),
 					todoTool(),
@@ -479,6 +487,7 @@ async function buildSession(
 					// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
 					...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
 					...(pictures ? [imageTool()] : []),
+					...(remember ? [rememberToolFor(sessionManager)] : []),
 				]) as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
@@ -1231,6 +1240,82 @@ function verifyExtension(cwd: string) {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Agent memory (memory.ts)
+
+/** The custom entry that keeps what a chat started with, so the user can see it. */
+const MEMORY_SNAPSHOT = "griphub-memory-snapshot";
+
+/** The project folder a chat works in, for its project memory: a coding chat in a folder other than the workspace. */
+function projectOf(cwd: string, chat: boolean): string | null {
+	if (chat || !cwd) return null;
+	return resolve(cwd) === resolve(workspace) ? null : resolve(cwd);
+}
+
+/** What the chat in [sm] started with: the snapshot it keeps, or null when it has none yet. */
+function chatSnapshot(sm: SessionManager): MemorySnapshot | null {
+	const e = (sm.getEntries() as any[]).find((x) => x.type === "custom" && x.customType === MEMORY_SNAPSHOT);
+	return e?.data ?? null;
+}
+
+/**
+ * The memory extension of a chat: at its first run, what the agent remembers (global, and the project's when the chat
+ * works in one) is taken within the budget and kept in the chat; every run of the chat then starts with that same
+ * snapshot in its system prompt.
+ */
+function memoryExtension(sm: SessionManager, chat: boolean) {
+	return (pi: any) => {
+		pi.on("before_agent_start", (event: any) => {
+			if (integrations.settings.memory === false) return undefined;
+			let snap = chatSnapshot(sm);
+			if (!snap) {
+				const project = projectOf(sm.getCwd(), chat);
+				snap = memorySnapshot(
+					memoryStore.list("global"),
+					project ? memoryStore.list("project", project) : [],
+					project,
+					integrations.settings.memoryBudget ?? DEFAULT_BUDGET,
+				);
+				sm.appendCustomEntry(MEMORY_SNAPSHOT, snap);
+			}
+			const add = snapshotPrompt(snap);
+			return add ? { systemPrompt: `${event.systemPrompt}${add}` } : undefined;
+		});
+	};
+}
+
+function rememberToolFor(sm: SessionManager) {
+	return rememberTool({
+		proposals: memoryProposals,
+		store: memoryStore,
+		chat: () => ({ sessionId: sm.getSessionId(), project: projectOf(sm.getCwd(), isChatCwd(sm.getCwd(), workspace)) }),
+		send: (r) => send(r),
+	});
+}
+
+/** "ingat ini: …" at the start of a message: the user's own words are the consent; kept now, or refused with why. */
+function rememberFromMessage(s: AgentSession, text: string) {
+	const fact = rememberThis(text);
+	if (!fact || integrations.settings.memory === false) return;
+	try {
+		const entry = memoryStore.add("global", fact, { source: s.sessionName || "chat", sessionId: s.sessionId });
+		send({ type: "memory_saved", layer: "global", entry });
+	} catch (e) {
+		send({ type: "memory_refused", reason: (e as Error).message });
+	}
+}
+
+/** Layer and project of a memory command; a project needs its folder. */
+function memoryTarget(cmd: any): { layer: Layer; project?: string } {
+	const layer: Layer = cmd.layer === "project" ? "project" : "global";
+	if (layer === "project") {
+		const project = typeof cmd.project === "string" && cmd.project ? resolve(cmd.project) : null;
+		if (!project) throw new Error("A project's memory needs its folder");
+		return { layer, project };
+	}
+	return { layer };
+}
+
 /** Estimated GripHub credits of one pi usage record (rate + floor + cache, see router.ts). */
 function estimateUsage(model: string, u: any): number | null {
 	return requestEstimate(model, usageOf(u));
@@ -1770,6 +1855,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			// Pictures for a model that cannot read them are read into text first (visiontranslate.ts).
 			const prepared = await prepareTurn(s, text, cmd.images, !!cmd.visionConsent);
 			if ("visionConsent" in prepared) return prepared;
+			// "ingat ini: …": kept now, by the user's own words (memory.ts).
+			rememberFromMessage(s, String(cmd.text ?? ""));
 			// While the agent works, a follow-up waits for the turn's boundary; the
 			// app shows it as a waiting bubble and can cancel it (prompt_queue_remove).
 			const behavior = s.isStreaming ? (cmd.behavior ?? "followUp") : undefined;
@@ -1918,6 +2005,63 @@ async function handle(cmd: Command): Promise<unknown> {
 				defaultAllowed: defaultAllowed(models),
 				current: pick.ok ? { id: pick.model.id, name: pick.model.name, manual: pick.manual } : null,
 			};
+		}
+		// Agent memory (memory.ts).
+		case "memory_list": {
+			const t = memoryTarget(cmd);
+			return { entries: memoryStore.list(t.layer, t.project), host: mode === "server" ? "server" : "phone", on: integrations.settings.memory !== false };
+		}
+		case "memory_add": {
+			const t = memoryTarget(cmd);
+			return memoryStore.add(t.layer, String(cmd.text ?? ""), { project: t.project, source: "you" });
+		}
+		case "memory_update": {
+			const t = memoryTarget(cmd);
+			return memoryStore.update(t.layer, String(cmd.entryId ?? ""), String(cmd.text ?? ""), { project: t.project });
+		}
+		case "memory_remove": {
+			const t = memoryTarget(cmd);
+			return { removed: memoryStore.remove(t.layer, String(cmd.entryId ?? ""), t.project) };
+		}
+		case "memory_clear": {
+			const t = memoryTarget(cmd);
+			memoryStore.clear(t.layer, t.project);
+			return { cleared: true };
+		}
+		// The user's answer to a proposal card: save (as proposed, or with their own text) or refuse.
+		case "memory_decide": {
+			const p = memoryProposals.get(String(cmd.proposalId ?? ""));
+			if (!p) throw new Error("This proposal is no longer known");
+			if (p.status !== "pending") return p;
+			if (cmd.action === "reject") {
+				p.status = "rejected";
+			} else {
+				const text = typeof cmd.text === "string" && cmd.text.trim() ? cmd.text : p.text;
+				const entry = memoryStore.add(p.layer, text, {
+					project: p.project ?? undefined,
+					source: s.sessionId === p.sessionId ? s.sessionName || "chat" : "chat",
+					sessionId: p.sessionId,
+					replaces: p.replaces ?? undefined,
+				});
+				p.status = "saved";
+				p.entryId = entry.id;
+				p.text = entry.text;
+			}
+			memoryProposals.put(p);
+			send({ type: "memory_proposal", proposal: p });
+			return p;
+		}
+		case "memory_proposals":
+			return memoryProposals.many(Array.isArray(cmd.ids) ? cmd.ids.map(String) : []);
+		// What a chat started with (the open one by default): the snapshot it keeps.
+		case "memory_snapshot": {
+			if (typeof cmd.path === "string" && cmd.path) {
+				const sessions = resolve(join(agentDir, "sessions"));
+				const path = resolve(cmd.path);
+				if (!path.startsWith(sessions + sep) || !existsSync(path)) throw new Error("Not a chat of this agent");
+				return chatSnapshot(SessionManager.open(path));
+			}
+			return chatSnapshot(s.sessionManager);
 		}
 		// The whole output of a verification run, for the evidence block's "show all".
 		case "verify_output":
@@ -2721,6 +2865,8 @@ async function main() {
 	routing = new RoutingStore(join(stateDir, "routing"));
 	visionConsent = new VisionConsent(join(stateDir, "vision"));
 	verifyOutputs = new VerifyOutputs(join(stateDir, "verify-output"));
+	memoryStore = new MemoryStore(join(stateDir, "memory"));
+	memoryProposals = new Proposals(join(stateDir, "memory", "proposals.json"));
 	modelBoard = new ModelBoard({
 		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
 		cacheFile: join(stateDir, "model-board-cache.json"),

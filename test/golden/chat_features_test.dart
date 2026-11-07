@@ -10,6 +10,7 @@ import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
 import 'package:griphub_agent/ui/chat_extras.dart' show ApprovalCards, editProjectCheck;
+import 'package:griphub_agent/ui/memory_screen.dart';
 import 'package:griphub_agent/ui/model_sheet.dart';
 import 'package:griphub_agent/ui/read_only_chat.dart';
 import 'package:griphub_agent/ui/verify_settings_screen.dart';
@@ -919,6 +920,173 @@ void main() {
       await tester.tap(find.text('Save'));
       await frames(tester);
       expect(host.stored['projectVerify'], {'/w/proj': 'make check'});
+    });
+  });
+
+  group('agent memory', () {
+    Map<String, dynamic> proposal({String status = 'pending', String? replaces}) => {
+      'id': 'p-1',
+      'toolCallId': 'call_1',
+      'text': 'Pengguna lebih suka jawaban singkat',
+      'layer': 'global',
+      'project': null,
+      'replaces': replaces == null ? null : 'm-1',
+      'replacesText': replaces,
+      'sessionId': 's1',
+      'status': status,
+      'at': 0,
+    };
+
+    AgentController proposingChat({Map<String, dynamic>? details}) {
+      final agent = newAgent()..sessionId = 's1'..isChat = true;
+      for (final m in <Map<String, dynamic>>[
+        {'role': 'user', 'content': 'Jawab singkat saja ya'},
+        {
+          'role': 'assistant',
+          'model': 'kimi-k3',
+          'stopReason': 'toolUse',
+          'content': [
+            {'type': 'toolCall', 'id': 'call_1', 'name': 'remember', 'arguments': {'text': 'Pengguna lebih suka jawaban singkat', 'layer': 'global'}},
+          ],
+        },
+        {'role': 'toolResult', 'toolCallId': 'call_1', 'toolName': 'remember', 'content': [{'type': 'text', 'text': 'Proposed'}], 'details': details ?? {'proposal': proposal(replaces: 'Pengguna suka jawaban panjang')}},
+        {
+          'role': 'assistant',
+          'model': 'kimi-k3',
+          'stopReason': 'stop',
+          'content': [{'type': 'text', 'text': 'Baik, saya usulkan untuk diingat.'}],
+        },
+      ]) {
+        agent.addHistoryMessage(m);
+      }
+      return agent;
+    }
+
+    Future<FakeHost> pumpProposal(WidgetTester tester, {Look look = const Look(), Map<String, dynamic>? details}) async {
+      final host = FakeHost();
+      host.answers['memory_decide'] = (cmd) => {...proposal(), 'status': cmd['action'] == 'save' ? 'saved' : 'rejected', if (cmd['text'] != null) 'text': cmd['text']};
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      await pumpLook(tester, look, ChatScreen(agent: proposingChat(details: details)));
+      await frames(tester);
+      return host;
+    }
+
+    testWidgets('the proposal waits for the user: Save keeps it, and the card says so', (tester) async {
+      final host = await pumpProposal(tester);
+      expect(find.text('Remember this?'), findsOneWidget);
+      expect(find.text('Pengguna lebih suka jawaban singkat'), findsOneWidget);
+      expect(find.text('Replaces: Pengguna suka jawaban panjang'), findsOneWidget);
+      await tester.tap(find.text('Save'));
+      await frames(tester);
+      expect(host.sent('memory_decide').single, containsPair('action', 'save'));
+      expect(find.text('Saved to memory'), findsOneWidget);
+      expect(find.text('Save'), findsNothing);
+    });
+
+    testWidgets('Refuse keeps nothing; Edit saves the user\'s own words', (tester) async {
+      var host = await pumpProposal(tester);
+      await tester.tap(find.text('Refuse'));
+      await frames(tester);
+      expect(host.sent('memory_decide').single['action'], 'reject');
+      expect(find.text('Not saved'), findsOneWidget);
+    });
+
+    testWidgets('Edit saves the user\'s words', (tester) async {
+      final host = await pumpProposal(tester);
+      await tester.tap(find.text('Edit'));
+      await frames(tester);
+      await tester.enterText(find.byType(TextField).last, 'Jawaban singkat, bahasa Indonesia');
+      await tester.tap(find.text('Save').last);
+      await frames(tester);
+      expect(host.sent('memory_decide').single['text'], 'Jawaban singkat, bahasa Indonesia');
+    });
+
+    testWidgets('a secret is not proposed: the card says why, with no buttons', (tester) async {
+      await pumpProposal(tester, details: {'refused': 'This looks like an API key. Memory never keeps passwords, keys or tokens; keep those in the app\'s accounts or a password manager.'});
+      expect(find.text('Not proposed to remember'), findsOneWidget);
+      expect(find.textContaining('This looks like an API key'), findsOneWidget);
+      expect(find.text('Save'), findsNothing);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {
+      testWidgets('golden: memory proposal in the chat ${look.name}', (tester) async {
+        await pumpProposal(tester, look: look);
+        expect(layoutErrors, isEmpty);
+        await loadImages(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('memory_proposal_${look.name}')));
+      });
+    }
+
+    Map<String, dynamic> listed(String host) => {
+      'host': host,
+      'on': true,
+      'entries': [
+        {'id': 'm-1', 'text': 'Pengguna lebih suka TypeScript', 'source': 'Refactor auth', 'sessionId': 's1', 'createdAt': '2026-11-01', 'confirmedAt': '2026-11-06', 'replaced': ['m-0 (2026-11-06): "Pengguna suka JavaScript"']},
+        {'id': 'm-2', 'text': 'Nama panggilannya Rosdi', 'source': 'you', 'createdAt': '2026-11-02', 'confirmedAt': '2026-11-02', 'replaced': <String>[]},
+      ],
+    };
+
+    testWidgets('the memory screen: edit, delete one, delete all; it says where memory is kept', (tester) async {
+      final host = FakeHost();
+      host.answers['memory_list'] = (_) => listed('server');
+      await pumpLook(tester, const Look(), MemoryScreen(agent: newAgent()));
+      await frames(tester, 12);
+      expect(find.text('Pengguna lebih suka TypeScript'), findsOneWidget);
+      expect(find.textContaining('Kept on the server agent'), findsOneWidget);
+      expect(find.textContaining('from Refactor auth'), findsOneWidget);
+      await tester.tap(find.text('Nama panggilannya Rosdi'));
+      await frames(tester);
+      await tester.enterText(find.byType(TextField), 'Panggil aku Rosdi');
+      await tester.tap(find.text('Save'));
+      await frames(tester, 12);
+      expect(host.sent('memory_update').single, allOf(containsPair('entryId', 'm-2'), containsPair('text', 'Panggil aku Rosdi')));
+      await tester.tap(find.byTooltip('Delete').first);
+      await frames(tester, 12);
+      expect(host.sent('memory_remove').single['entryId'], 'm-1');
+      await tester.tap(find.byTooltip('Delete all'));
+      await frames(tester);
+      await tester.tap(find.text('Delete all').last);
+      await frames(tester, 12);
+      expect(host.sent('memory_clear'), hasLength(1));
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: memory screen ${look.name}', (tester) async {
+        final host = FakeHost();
+        host.answers['memory_list'] = (_) => listed('phone');
+        await pumpLook(tester, look, MemoryScreen(agent: newAgent()));
+        await frames(tester, 12);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('memory_screen_${look.name}')));
+      });
+    }
+
+    testWidgets('what the chat started with is shown as it was', (tester) async {
+      final host = FakeHost();
+      host.answers['memory_snapshot'] = (_) => {
+        'global': [{'id': 'm-1', 'text': 'Pengguna lebih suka TypeScript'}],
+        'project': [{'id': 'm-3', 'text': 'Proyek ini memakai Riverpod'}],
+        'projectPath': '/w/app',
+        'left': 2,
+        'at': 0,
+      };
+      await pumpLook(tester, const Look(), MemorySnapshotScreen(agent: newAgent()));
+      await frames(tester, 12);
+      expect(find.text('Pengguna lebih suka TypeScript'), findsOneWidget);
+      expect(find.text('Proyek ini memakai Riverpod'), findsOneWidget);
+      expect(find.text('2 older facts did not fit the budget.'), findsOneWidget);
+    });
+
+    testWidgets('"ingat ini" saved or refused: said quietly in the chat', (tester) async {
+      final host = FakeHost();
+      final agent = newAgent()..sessionId = 's1';
+      await tester.pump();
+      host.emit({'type': 'memory_saved', 'layer': 'global', 'entry': {'text': 'aku pakai Vim'}});
+      host.emit({'type': 'memory_refused', 'reason': 'This looks like a password or key. Memory never keeps passwords, keys or tokens; keep those in the app\'s accounts or a password manager.'});
+      await frames(tester);
+      final notices = agent.entries.whereType<NoticeEntry>().map((n) => n.text).toList();
+      expect(notices.first, 'Remembered: aku pakai Vim');
+      expect(notices.last, startsWith('Not remembered: This looks like a password or key'));
     });
   });
 }

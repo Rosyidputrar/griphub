@@ -201,6 +201,12 @@ export interface AppSettings {
 	 * tasks that changed nothing too (unset = off). [projectVerify]: the command per project folder the user set.
 	 */
 	verify?: boolean;
+	/**
+	 * Agent memory (memory.ts): whether chats start with what the agent remembers and may propose more; unset = on.
+	 * [memoryBudget]: the most tokens of memory a chat starts with (unset = memory.ts DEFAULT_BUDGET).
+	 */
+	memory?: boolean;
+	memoryBudget?: number;
 	verifyRounds?: number;
 	verifyAlways?: boolean;
 	projectVerify?: Record<string, string>;
@@ -400,6 +406,8 @@ export class Integrations {
 			smartRouterBlocked: (this.settings.smartRouterBlocked ?? []).filter((id) => typeof id === "string" && id),
 			visionTranslator: this.settings.visionTranslator ?? "auto",
 			verify: this.settings.verify ?? true,
+			memory: this.settings.memory ?? true,
+			memoryBudget: this.settings.memoryBudget ?? 600,
 			verifyRounds: this.settings.verifyRounds ?? 3,
 			verifyAlways: this.settings.verifyAlways ?? false,
 			projectVerify: this.settings.projectVerify ?? {},
@@ -471,6 +479,10 @@ export class Integrations {
 			next.smartRouterBlocked = [...new Set(next.smartRouterBlocked.map((id) => id.trim()))];
 		}
 		if (next.verify !== undefined && typeof next.verify !== "boolean") throw new Error("Self-verification is on or off");
+		if (next.memory !== undefined && typeof next.memory !== "boolean") throw new Error("Memory is on or off");
+		if (next.memoryBudget !== undefined && !(Number.isInteger(next.memoryBudget) && next.memoryBudget >= 100 && next.memoryBudget <= 8000)) {
+			throw new Error("The memory budget is a whole number of tokens from 100 to 8000");
+		}
 		if (next.verifyAlways !== undefined && typeof next.verifyAlways !== "boolean") throw new Error("Self-verification is on or off");
 		if (next.verifyRounds !== undefined && !(Number.isInteger(next.verifyRounds) && next.verifyRounds >= 0 && next.verifyRounds <= 20)) {
 			throw new Error("Fix rounds are a whole number from 0 to 20");

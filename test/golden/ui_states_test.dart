@@ -552,7 +552,9 @@ void textScaleTests() {
       ..reduceMotion = null
       ..lowRamDevice = false;
     FakeHost();
-    await pumpLook(tester, const Look(), SettingsHub(agent: newAgent()), height: 2400);
+    // Tall enough for the whole of Settings (it grew with the smart router, vision translator, self-verification and
+    // memory rows): the list only builds the rows on screen.
+    await pumpLook(tester, const Look(), SettingsHub(agent: newAgent()), height: 3600);
     await frames(tester);
     final row = find.ancestor(of: find.text('Reduce animations').first, matching: find.byType(SettingsRow));
     expect(find.descendant(of: row, matching: find.text('Screens and sheets appear at once')), findsOneWidget);

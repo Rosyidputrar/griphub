@@ -25,6 +25,7 @@ import 'files_screen.dart';
 import 'git_screen.dart';
 import 'image_tool_card.dart';
 import 'kit.dart';
+import 'memory_screen.dart';
 import 'predictive_back.dart';
 import 'preview_open.dart';
 import 'review_screen.dart';
@@ -1432,6 +1433,14 @@ Future<void> showProjectTools(
                         subtitle: tr('Allow the agent to search the web in this project'),
                         onTap: () => set(!on),
                         trailing: LabeledSwitch(label: tr('Web search'), value: on, onChanged: set),
+                      ),
+                      // What the agent remembers about this project (agent/src/memory.ts), apart from AGENTS.md above.
+                      SettingsRow(
+                        icon: LucideIcons.brain,
+                        color: const Color(0xFFEC4899),
+                        title: tr('Project memory (agent)'),
+                        subtitle: tr('Facts the agent keeps for this project'),
+                        onTap: () => go(MemoryScreen(agent: agent, project: agent.cwd)),
                       ),
                       // Self-verification's command for this project (agent/src/verify.ts); empty = found by itself.
                       SettingsRow(

@@ -351,6 +351,9 @@ class ToolRun {
 
   /// generate_image's progress and result (its `details`), while running and once done.
   ImageJob? imageJob;
+
+  /// The result's `details`, for tools whose card reads them (remember: the memory proposal).
+  Map<String, dynamic>? details;
 }
 
 /// One picture of a generate_image call.
@@ -899,4 +902,58 @@ VerifyEntry? lastVerifyOfTurn(List<ChatEntry> entries, int i) {
     if (e is UserEntry || e is JobEntry) return null;
   }
   return null;
+}
+
+/// A fact in the agent's memory (agent/src/memory.ts).
+class MemoryEntry {
+  MemoryEntry(Map<String, dynamic> j)
+    : id = j['id'] as String? ?? '',
+      text = j['text'] as String? ?? '',
+      source = j['source'] as String? ?? '',
+      sessionId = j['sessionId'] as String?,
+      createdAt = j['createdAt'] as String? ?? '',
+      confirmedAt = j['confirmedAt'] as String? ?? '',
+      replaced = (j['replaced'] as List? ?? const []).whereType<String>().toList();
+  final String id;
+  final String text;
+  final String source;
+  final String? sessionId;
+  final String createdAt;
+  final String confirmedAt;
+  final List<String> replaced;
+}
+
+/// The agent proposed to remember something; the user decides.
+class MemoryProposal {
+  MemoryProposal(Map<String, dynamic> j)
+    : id = j['id'] as String? ?? '',
+      text = j['text'] as String? ?? '',
+      layer = j['layer'] as String? ?? 'global',
+      project = j['project'] as String?,
+      replacesText = j['replacesText'] as String?,
+      status = j['status'] as String? ?? 'pending';
+  final String id;
+  final String text;
+  final String layer;
+  final String? project;
+  final String? replacesText;
+
+  /// pending, saved or rejected.
+  final String status;
+}
+
+/// What a chat started with from memory.
+class MemorySnapshotInfo {
+  MemorySnapshotInfo(Map<String, dynamic> j)
+    : global = [for (final e in (j['global'] as List? ?? const [])) ((e as Map)['text'] as String? ?? '')],
+      project = [for (final e in (j['project'] as List? ?? const [])) ((e as Map)['text'] as String? ?? '')],
+      projectPath = j['projectPath'] as String?,
+      left = (j['left'] as num?)?.toInt() ?? 0;
+  final List<String> global;
+  final List<String> project;
+  final String? projectPath;
+
+  /// Facts left out to stay within the budget.
+  final int left;
+  bool get isEmpty => global.isEmpty && project.isEmpty;
 }

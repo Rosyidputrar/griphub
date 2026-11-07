@@ -23,6 +23,7 @@ import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
 import 'smart_router_screen.dart' show SmartRouterMark;
+import 'memory_screen.dart' show MemoryProposalCard;
 import 'verify_view.dart';
 import 'links.dart';
 import 'live_clock.dart';
@@ -506,6 +507,8 @@ class AssistantMessageView extends StatelessWidget {
             card ??
                 (b.toolName == 'todo_write'
                     ? TodoCard(block: b, run: tools[b.toolCallId])
+                    : b.toolName == 'remember' && agent != null
+                    ? MemoryProposalCard(agent: agent!, run: tools[b.toolCallId])
                     : b.toolName == 'generate_image' && tools[b.toolCallId]?.imageJob != null
                     ? _imageCard(context, tools[b.toolCallId]!, agent: agent)
                     : ToolCallView(

@@ -802,7 +802,71 @@ class AgentController extends ChangeNotifier {
       if (q is List) _applyQueue({'items': q});
     } catch (_) {}
     await _loadRoutingLog();
+    await _loadMemoryDecisions();
     notifyListeners();
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent memory (agent/src/memory.ts)
+
+  /// The agent's memory proposals by id, as decided so far (their cards show Save / Edit / Refuse until then).
+  final memoryProposals = <String, MemoryProposal>{};
+
+  /// What the user decided about the proposals in the loaded chat.
+  Future<void> _loadMemoryDecisions() async {
+    final ids = [
+      for (final r in tools.values)
+        if (r.details?['proposal'] case final Map p) p['id'] as String? ?? '',
+    ].where((id) => id.isNotEmpty).toList();
+    if (ids.isEmpty) return;
+    try {
+      final r = (await client.call<Map>('memory_proposals', {'ids': ids})).cast<String, dynamic>();
+      for (final v in r.values) {
+        final p = MemoryProposal((v as Map).cast<String, dynamic>());
+        memoryProposals[p.id] = p;
+      }
+    } catch (_) {}
+  }
+
+  /// Saves a proposal (as proposed, or with the user's [text]) or refuses it.
+  Future<void> decideMemory(String proposalId, {required bool save, String? text}) async {
+    final r = await client.call<Map>('memory_decide', {
+      'proposalId': proposalId,
+      'action': save ? 'save' : 'reject',
+      'text': ?text,
+    });
+    final p = MemoryProposal(r.cast<String, dynamic>());
+    memoryProposals[p.id] = p;
+    notifyListeners();
+  }
+
+  Map<String, dynamic> _memoryArgs(String layer, String? project) => {'layer': layer, 'project': ?project};
+
+  /// A layer's entries, where they are kept (phone or server), and whether memory is on.
+  Future<({List<MemoryEntry> entries, String host, bool on})> memoryList(String layer, {String? project}) async {
+    final r = (await client.call<Map>('memory_list', _memoryArgs(layer, project))).cast<String, dynamic>();
+    return (
+      entries: [for (final e in (r['entries'] as List? ?? const [])) MemoryEntry((e as Map).cast<String, dynamic>())],
+      host: r['host'] as String? ?? 'phone',
+      on: r['on'] != false,
+    );
+  }
+
+  Future<void> memoryAdd(String layer, String text, {String? project}) =>
+      client.call('memory_add', {..._memoryArgs(layer, project), 'text': text});
+
+  Future<void> memoryUpdate(String layer, String id, String text, {String? project}) =>
+      client.call('memory_update', {..._memoryArgs(layer, project), 'entryId': id, 'text': text});
+
+  Future<void> memoryRemove(String layer, String id, {String? project}) =>
+      client.call('memory_remove', {..._memoryArgs(layer, project), 'entryId': id});
+
+  Future<void> memoryClear(String layer, {String? project}) => client.call('memory_clear', _memoryArgs(layer, project));
+
+  /// What a chat started with (the open one when [path] is null); null when it kept none.
+  Future<MemorySnapshotInfo?> memorySnapshot([String? path]) async {
+    final r = await client.call<Object?>('memory_snapshot', {'path': ?path});
+    return r is Map ? MemorySnapshotInfo(r.cast<String, dynamic>()) : null;
   }
 
   /// The open chat's routing log; an older host without the smart router has none.
@@ -1136,6 +1200,17 @@ class AgentController extends ChangeNotifier {
       case 'state':
         _applyState((record['state'] as Map).cast<String, dynamic>());
         notifyListeners();
+      // A memory proposal was made or decided (agent/src/memory.ts).
+      case 'memory_proposal':
+        final p = MemoryProposal((record['proposal'] as Map).cast<String, dynamic>());
+        memoryProposals[p.id] = p;
+        notifyListeners();
+      // "ingat ini": kept at once, or refused (a secret, not a fact): said quietly in the chat.
+      case 'memory_saved':
+        final entry = (record['entry'] as Map?)?['text'] as String? ?? '';
+        _addNotice(translate('Remembered: {fact}').replaceAll('{fact}', entry));
+      case 'memory_refused':
+        _addNotice('${translate('Not remembered')}: ${translate(record['reason'] as String? ?? '')}');
       // Self-verification's check started or ended (agent/src/verify.ts).
       case 'verify' when record['sessionId'] == null || record['sessionId'] == sessionId:
         verifying = record['phase'] == 'running' ? record['command'] as String? : null;
@@ -1199,6 +1274,7 @@ class AgentController extends ChangeNotifier {
         run.output = contentText((e['result'] as Map?)?['content']);
         run.images = contentImageData((e['result'] as Map?)?['content']);
         run.imageJob = ImageJob.fromDetails((e['result'] as Map?)?['details']) ?? run.imageJob;
+        run.details = ((e['result'] as Map?)?['details'] as Map?)?.cast<String, dynamic>();
         run.status = e['isError'] == true ? ToolStatus.failed : ToolStatus.done;
         runningTool = null;
       // The older turns are being summarized; the line it adds runs a clock until compaction_end says how it went.
@@ -1305,6 +1381,7 @@ class AgentController extends ChangeNotifier {
         run.output = contentText(m['content']);
         run.images = contentImageData(m['content']);
         run.imageJob = ImageJob.fromDetails(m['details']);
+        run.details = (m['details'] as Map?)?.cast<String, dynamic>();
         run.status = m['isError'] == true ? ToolStatus.failed : ToolStatus.done;
       case 'bashExecution':
         entries.add(NoticeEntry('\$ ${m['command']}\n${m['output']}'));

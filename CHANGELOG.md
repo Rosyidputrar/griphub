@@ -36,6 +36,13 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Bila gagal, agent memperbaikinya (maks 3 putaran, bisa diubah) dan tiap putaran diperiksa lagi. Mengubah atau melewati tes agar lulus tidak diterima. Bila tetap gagal, agent melaporkannya apa adanya.
   - Proyek tanpa tes dinyatakan terus terang: "tidak ada tes yang bisa dijalankan".
   - Perintah pemeriksaan meminta persetujuan seperti perintah lain. Atur di Pengaturan → Verifikasi mandiri, dan perintah per proyek di alat proyek.
+- **Ingatan agent: tidak perlu mengulang konteks di chat baru.** Agent membawa fakta singkat tentang kamu (ingatan global) dan tentang proyek (ingatan proyek) ke setiap chat baru.
+  - Agent hanya bisa mengusulkan: kartu "Ingat ini?" dengan Simpan, Ubah, atau Tolak. Tidak ada yang tersimpan tanpa persetujuanmu, kecuali kamu sendiri menulis "ingat ini: …".
+  - Fakta baru yang bertentangan menggantikan yang lama (jejaknya tetap tercatat), jadi tidak ada dua fakta yang saling bertentangan.
+  - Kata sandi, kunci API, dan token selalu ditolak beserta alasannya; begitu pula isi file atau salinan chat.
+  - Pengaturan → Ingatan agent dan alat proyek → Ingatan agent untuk proyek: lihat, ubah, hapus satu per satu atau semuanya. Yang dihapus benar-benar hilang.
+  - Pemakaian → Chat ini → Yang diingat agent: persis apa yang dibawa chat ini saat dimulai.
+  - Ingatan tersimpan di HP atau server tempat agent berjalan, dan tidak ikut pindah bila mode berganti.
 
 ---
 
