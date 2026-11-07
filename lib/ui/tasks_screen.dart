@@ -135,7 +135,7 @@ class _TasksScreenState extends State<TasksScreen> with BusyActions {
 
   Future<void> _openJob(JobState job) async {
     try {
-      if (job.sessionFile != agent.sessionFile && (!await agent.openSession(job.sessionFile) || !mounted)) return;
+      if (!await agent.openSession(job.sessionFile) || !mounted) return;
       await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ChatScreen(agent: agent)));
     } catch (e) {
       _error(e);

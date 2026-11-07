@@ -7,7 +7,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/drafts.dart';
+import '../agent/companion.dart';
 import '../agent/models.dart';
+import '../agent/panel.dart';
+import '../agent/pricing.dart';
 import '../agent/features.dart';
 import 'i18n.dart';
 import 'chat_extras.dart';
@@ -21,6 +24,10 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
+import 'panel_screen.dart' show PanelHandoff;
+import 'read_only_chat.dart';
+import 'verify_view.dart';
+import 'smart_router_screen.dart' show SmartRouterMark;
 import 'live_clock.dart';
 import 'illustration.dart';
 import 'mesh.dart';
@@ -46,8 +53,13 @@ class ChatScreen extends StatefulWidget {
     this.initialPrompt,
     this.initialAttachments = const [],
     this.listenOnOpen = false,
+    this.panel = false,
   });
   final AgentController agent;
+
+  /// Shown in the floating panel (Fitur 4): the panel draws its own header; there are no project tools, and anything
+  /// that needs approval or a coding chat is handed to the app with one tap instead of being done here.
+  final bool panel;
 
   /// Pre-filled into the composer (quick starts, shares), for the user to finish.
   final String? initialPrompt;
@@ -115,7 +127,9 @@ class _ChatScreenState extends State<ChatScreen> {
       if (focus.hasFocus) _checkClipboard();
     });
     agent.addListener(_onAgentChanged);
-    draftChat = agent.sessionId;
+    agent.addVisionConfirmer(_confirmVisionReading);
+    _finished = agent.viewFinished.stream.listen(_onViewFinished);
+    draftChat = _chatKey;
     final prompt = widget.initialPrompt ?? Drafts.instance.get(draftChat);
     if (prompt.isNotEmpty) {
       input.text = prompt;
@@ -126,6 +140,9 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!scroll.hasClients || dragging) return;
       if (_atBottom != followBottom) setState(() => followBottom = _atBottom);
     });
+    // A prompt the screen was opened with (a share, a selection) is a draft from the start: it was set before this
+    // listener, and a chat that waits read-only for the agent must still have it when it opens for real.
+    if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) Drafts.instance.set(draftChat, input.text);
     input.addListener(() {
       Drafts.instance.set(draftChat, input.text);
       if (_slashQuery != null && slash == null) _loadSlash();
@@ -147,6 +164,8 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     agent.removeListener(_onAgentChanged);
+    agent.removeVisionConfirmer(_confirmVisionReading);
+    _finished?.cancel();
     _mentionTimer?.cancel();
     _lifecycle.dispose();
     Drafts.instance.flush();
@@ -171,10 +190,24 @@ class _ChatScreenState extends State<ChatScreen> {
     return false;
   }
 
+  /// The chat on screen, for its draft: the one shown read-only while another works, else the open one.
+  String? get _chatKey => agent.viewing?.key ?? agent.sessionId;
+
+  StreamSubscription<String>? _finished;
+
+  /// The chat at work ended while another was on screen: said once, quietly, and that chat's composer opens.
+  void _onViewFinished(String chat) {
+    if (!mounted) return;
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(tr('The agent is done in {chat}').replaceAll('{chat}', chat)), duration: const Duration(seconds: 3)),
+    );
+  }
+
   void _onAgentChanged() {
-    // Another chat opened under this screen (new chat, fork, the open one deleted): bring its draft along.
-    if (agent.sessionId != draftChat) {
-      draftChat = agent.sessionId;
+    // Another chat on screen (opened, new, the open one deleted, or one shown read-only): bring its draft along.
+    if (_chatKey != draftChat) {
+      draftChat = _chatKey;
       final draft = Drafts.instance.get(draftChat);
       input.value = TextEditingValue(
         text: draft,
@@ -303,6 +336,30 @@ class _ChatScreenState extends State<ChatScreen> {
   /// never sent twice.
   bool _sending = false;
 
+  /// "Ask first" (Settings → Vision translator): may a vision model read the picture for this chat's model?
+  Future<bool> _confirmVisionReading(VisionAsk ask) async {
+    if (!mounted) return false;
+    final cost = ask.estimate == null ? '' : tr('about {n}').replaceAll('{n}', '${localNumber(formatCredits(ask.estimate!))} ${tr('credits')}');
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(tr('Read the picture with a vision model?')),
+        content: Text(
+          [
+            tr('This model cannot see pictures. {model} will read it into text for it to answer from.').replaceAll('{model}', ask.modelName),
+            if (cost.isNotEmpty) tr('Each reading is a paid request: {cost}.').replaceAll('{cost}', cost),
+            tr('Asked once per chat.'),
+          ].join(' '),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(tr('Read the picture'))),
+        ],
+      ),
+    );
+    return yes ?? false;
+  }
+
   Future<void> _send() async {
     if (_sending) return;
     final text = input.text;
@@ -320,6 +377,16 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _sendNow(String text) async {
+    // In the panel with the screen companion on, a message is the next step: the screen goes with it (Fitur 5).
+    if (widget.panel && ScreenCompanion.instance.active && attachments.isEmpty) {
+      try {
+        await ScreenCompanion.instance.step(agent, text);
+        input.clear();
+      } catch (e) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+      return;
+    }
     final files = List<Attachment>.of(attachments);
     // Clear only on success: a refused message (budget, host error) never
     // reaches the transcript, so clearing first would lose it.
@@ -475,10 +542,52 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _attach() async {
-    final picked = await pickAttachments(context, client: agent.client);
+    final picked = await pickAttachments(context, client: agent.client, onScan: _scan);
     if (picked.isNotEmpty) {
       setState(() => attachments.addAll(picked));
       _saveFiles();
+    }
+  }
+
+  /// A photographed document or receipt, read into text by a vision model through the router (agent/src/host.ts
+  /// scan_document); the text goes into the composer as context. The photo is deleted once read.
+  Future<void> _scan(String path) async {
+    final file = File(path);
+    try {
+      final result = await runWithProgress(context, tr('Reading the document…'), () async {
+        try {
+          return (await agent.scanDocument(file), null);
+        } on ScanNeedsConsent catch (e) {
+          return (null, e.ask);
+        }
+      }).then((r) async {
+        if (r == null) return null;
+        final (read, ask) = r;
+        if (ask == null || !mounted) return read;
+        // "Ask first": the paid reading waits for a yes, outside the progress dialog.
+        if (!await _confirmVisionReading(ask) || !mounted) return null;
+        return runWithProgress(context, tr('Reading the document…'), () => agent.scanDocument(file, consent: true));
+      });
+      if (!mounted || result == null) return;
+      final before = input.text.trim();
+      final block = '${tr('Text of the scanned document:')}\n---\n${result.text.trim()}\n---\n\n';
+      _prefill(before.isEmpty ? block : '$before\n\n$block');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            [
+              tr('Picture read by {model}').replaceAll('{model}', result.name),
+              if (result.credits != null) '~${localNumber(formatCredits(result.credits!))} ${tr('credits')}',
+            ].join(' · '),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+    } finally {
+      try {
+        if (file.existsSync()) file.deleteSync();
+      } catch (_) {}
     }
   }
 
@@ -579,11 +688,11 @@ class _ChatScreenState extends State<ChatScreen> {
     return ListenableBuilder(
       listenable: Listenable.merge([agent, agent.remote]),
       // Back closes the "/" or "@" suggestions over the input first (the text stays), then leaves the chat.
-      builder: (context, _) => BackLayer(
+      builder: (context, _) => agent.viewing != null ? _readOnly(context, agent.viewing!) : BackLayer(
         open: _suggesting,
         onClose: _closeSuggestions,
         child: Scaffold(
-        appBar: AppBar(
+        appBar: widget.panel ? null : AppBar(
           leading: Navigator.of(context).canPop()
               ? IconButton(
                   tooltip: tr('Back'),
@@ -655,7 +764,22 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Stack(
                 children: [
                   // A first message still waiting for the server is the chat's start: show it, not the welcome.
-                  agent.entries.isEmpty && agent.offlineForCurrent.isEmpty
+                  // The panel is small: one quiet line instead of the welcome and its quick starts.
+                  // With a selection, the actions above are the way in; without one, the field below says it all.
+                  agent.entries.isEmpty && agent.offlineForCurrent.isEmpty && widget.panel
+                      ? (PanelState.instance.selection?.trim().isNotEmpty == true
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Text(
+                                    tr('Ask anything, or pick an action above.'),
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: context.palette.muted),
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.expand())
+                      : agent.entries.isEmpty && agent.offlineForCurrent.isEmpty
                       ? _EmptyState(
                           agent: agent,
                           onConnect: _connectProvider,
@@ -701,8 +825,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
-            if (!agent.isChat) DevServerBanner(agent: agent),
-            ApprovalCards(features: agent.features, agent: agent),
+            if (!agent.isChat && !widget.panel) DevServerBanner(agent: agent),
+            // The panel decides nothing privileged: approvals and coding chats go to the app (one tap).
+            if (widget.panel)
+              PanelHandoff(agent: agent)
+            else
+              ApprovalCards(features: agent.features, agent: agent),
             // A plain conversation has nothing to bypass, review or plan: no bars for them.
             if (!agent.isChat) BypassBar(agent: agent),
             if (!agent.isChat && _changedFiles > 0 && !_reviewClosed && !agent.busy)
@@ -760,6 +888,39 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Another chat on screen while the open one works (Fitur 8): its messages, still; the pill back to the chat at work;
+  /// a composer that keeps the draft and sends nothing. Back returns to the chat at work.
+  Widget _readOnly(BuildContext context, ChatView view) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) agent.leaveView();
+      },
+      child: Scaffold(
+        appBar: widget.panel ? null : AppBar(
+          leading: IconButton(
+            tooltip: tr('Back'),
+            icon: const Icon(LucideIcons.chevronLeft, size: 24),
+            onPressed: agent.leaveView,
+          ),
+          title: Text(tr(view.title), maxLines: 1, overflow: TextOverflow.ellipsis),
+          actions: [ConnectionChip(agent: agent), const SizedBox(width: 4)],
+        ),
+        body: ContentWidth(
+          max: 760,
+          child: Column(
+            children: [
+              ConnectionBanner(agent: agent),
+              if (agent.busy) WorkingPill(agent: agent),
+              Expanded(child: ReadOnlyTranscript(agent: agent, view: view)),
+              LockedComposer(agent: agent, draft: input.text),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// The "/" commands or "@" files are showing over the input.
   bool get _suggesting =>
       (_slashQuery != null && slash != null && slash!.any((c) => c.name.toLowerCase().contains(_slashQuery!.toLowerCase()))) ||
@@ -796,14 +957,39 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
       }
     }
+    // The app runs the project's check before the agent may close (agent/src/verify.ts).
+    if (agent.verifying != null) return tr('Checking: {command}').replaceAll('{command}', agent.verifying!);
     // Between steps: a tool finished, the model hasn't answered yet.
     return tr('Thinking…');
+  }
+
+  /// Whether the turn that entry [i] closes ran on the model the smart router picked for it: the turn is the user's
+  /// n-th message (n = the user messages up to [i], from 0), and the footer's model must be the one picked.
+  static bool _routedTurn(List<ChatEntry> entries, int i, Map<int, String> routed, String? model) {
+    var users = 0;
+    for (var k = 0; k <= i; k++) {
+      if (entries[k] is UserEntry) users++;
+    }
+    return users > 0 && model != null && routed[users - 1] == model;
+  }
+
+  /// The user message that started the turn entry [i] belongs to.
+  static UserEntry? _turnUser(List<ChatEntry> entries, int i) {
+    for (var k = i; k >= 0; k--) {
+      if (entries[k] is UserEntry) return entries[k] as UserEntry;
+    }
+    return null;
   }
 
   Widget _transcript() {
     final entries = agent.entries;
     final placed = placeSubagents(agent);
     final footers = turnFooters(entries, busy: agent.busy);
+    // Turns whose model the smart router picked, by the user turn they answer, with the model it picked.
+    final routed = {
+      for (final d in agent.routingLog)
+        if (d.kind == 'route' && d.model != null) d.turn: d.model!,
+    };
     final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
@@ -840,12 +1026,16 @@ class _ChatScreenState extends State<ChatScreen> {
                 null => null,
               },
               footer: footers[i],
+              autoRouted: footers[i] != null && routed.isNotEmpty && _routedTurn(entries, i, routed, footers[i]!.model),
+              visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
+              verified: footers[i] == null ? null : lastVerifyOfTurn(entries, i),
             ),
             NoticeEntry() => NoticeView(
               e,
               onRaiseBudget: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => UsageScreen(agent: agent))),
             ),
             JobEntry() => JobNoticeView(e),
+            VerifyEntry() => VerifyEvidenceView(e, agent: agent),
             CompactionEntry() => CompactionView(
               e,
               onShowEarlier: () =>
@@ -1320,6 +1510,7 @@ class _Composer extends StatelessWidget {
                             child: _Chip(
                               leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, model: agent.model!.id, size: 20),
                               label: agent.model?.name ?? tr('Choose model'),
+                              auto: agent.smartRouter.auto && agent.model != null,
                               icon: LucideIcons.chevronsUpDown,
                               onTap: onPickModel,
                             ),
@@ -1441,11 +1632,14 @@ class _ThinkingChip extends StatelessWidget {
 }
 
 class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.onTap, this.icon, this.leading});
+  const _Chip({required this.label, required this.onTap, this.icon, this.leading, this.auto = false});
   final String label;
   final VoidCallback onTap;
   final IconData? icon;
   final Widget? leading;
+
+  /// The smart router picks this chat's model: a small sparkle after the name says so (the name is the real model).
+  final bool auto;
 
   @override
   Widget build(BuildContext context) {
@@ -1477,6 +1671,10 @@ class _Chip extends StatelessWidget {
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.text),
                     ),
                   ),
+                  if (auto) ...[
+                    const SizedBox(width: 4),
+                    SmartRouterMark(size: 14, semanticLabel: tr('chosen automatically')),
+                  ],
                   if (icon != null) ...[const SizedBox(width: 4), Icon(icon, size: 13, color: p.faint)],
                 ],
               ),

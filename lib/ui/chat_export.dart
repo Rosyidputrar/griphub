@@ -10,6 +10,7 @@ import '../agent/models.dart';
 import 'errors.dart';
 import 'folder_picker.dart' show sessionFolder;
 import 'i18n.dart';
+import 'verify_view.dart' show verifyStatusLabel;
 import 'kit.dart';
 
 /// The open chat as Markdown, to share or keep: what was asked, what the agent answered, one line per tool it used
@@ -85,6 +86,9 @@ String chatMarkdown({
       case JobEntry():
         final code = e.exitCode == null ? '' : ', exit ${e.exitCode}';
         out.write('\n> ${tr('Background job')} ${_code(_oneLine(e.label))}: ${e.status}$code, ${formatDurationShort(e.took)}\n');
+      case VerifyEntry():
+        final what = e.command == null ? '' : ' ${_code(e.command!)}';
+        out.write('\n> ${tr('Verification evidence')}$what: ${verifyStatusLabel(e.status)}\n');
     }
   }
   return out.toString();

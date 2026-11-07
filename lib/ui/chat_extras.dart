@@ -25,6 +25,7 @@ import 'files_screen.dart';
 import 'git_screen.dart';
 import 'image_tool_card.dart';
 import 'kit.dart';
+import 'memory_screen.dart';
 import 'predictive_back.dart';
 import 'preview_open.dart';
 import 'review_screen.dart';
@@ -194,7 +195,10 @@ int _fileSize(File file) {
 }
 
 /// Asks where to attach from. With [client], a picture on the clipboard is offered too ("Paste image").
-Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client}) async {
+///
+/// With [onScan], "Scan a document" is offered: a photo taken now goes to [onScan] (read into text) instead of being
+/// attached.
+Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? client, Future<void> Function(String path)? onScan}) async {
   final clipboardImage = await client?.clipboardHasImage() ?? false;
   if (!context.mounted) return const [];
   final choice = await showAppSheet<String>(
@@ -218,6 +222,14 @@ Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? cli
               subtitle: tr('Take a picture now'),
               onTap: () => Navigator.pop(context, 'camera'),
             ),
+            if (onScan != null)
+              SettingsRow(
+                icon: LucideIcons.scanText,
+                color: const Color(0xFF0EA5E9),
+                title: tr('Scan a document'),
+                subtitle: tr('A photo of a page or receipt, read into text'),
+                onTap: () => Navigator.pop(context, 'scan'),
+              ),
             SettingsRow(
               icon: LucideIcons.paperclip,
               color: const Color(0xFFF76B15),
@@ -246,6 +258,10 @@ Future<List<Attachment>> pickAttachments(BuildContext context, {AgentClient? cli
     case 'camera':
       final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 85, maxWidth: 2048);
       return x == null ? [] : [Attachment(x.path, x.name, mime: x.mimeType)];
+    case 'scan':
+      final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 90, maxWidth: 2400);
+      if (x != null) await onScan?.call(x.path);
+      return const [];
     case 'clipboard':
       final image = await client?.clipboardImage();
       return image == null ? const [] : [Attachment(image['path']!, image['name']!, mime: image['mime'])];
@@ -473,6 +489,9 @@ Future<bool> confirmStopToSwitch(BuildContext context) async {
 
 /// The app-wide messenger, for what is said outside any one screen (a chat switch that could not go ahead).
 final rootMessenger = GlobalKey<ScaffoldMessengerState>();
+
+/// The app window's navigator (MaterialApp's).
+final rootNavigator = GlobalKey<NavigatorState>();
 
 /// Covers every screen while Stop and switch waits for the agent to stop, so the wait is visible and nothing else can
 /// be tapped meanwhile; and says it when the agent did not stop in time (the switch then does not happen).
@@ -1241,6 +1260,68 @@ class MentionMenu extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // Project tools menu
 
+/// Sets the command self-verification runs for the open project; an empty one goes back to the one found by itself.
+Future<void> editProjectCheck(BuildContext context, AgentController agent) async {
+  final it = agent.integrations;
+  final saved = await showDialog<String>(
+    context: context,
+    builder: (_) => _CheckCommandDialog(initial: it.settings?.projectVerify[agent.cwd] ?? ''),
+  );
+  if (saved == null) return;
+  // Cleared: the project's command is found by itself again (no empty entry left behind).
+  final map = {...?it.settings?.projectVerify, agent.cwd: saved.trim()}..removeWhere((_, v) => v.isEmpty);
+  try {
+    await it.updateSettings({'projectVerify': map});
+  } catch (e) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+  }
+}
+
+/// The dialog owns its field, so the field outlives the closing animation.
+class _CheckCommandDialog extends StatefulWidget {
+  const _CheckCommandDialog({required this.initial});
+  final String initial;
+
+  @override
+  State<_CheckCommandDialog> createState() => _CheckCommandDialogState();
+}
+
+class _CheckCommandDialogState extends State<_CheckCommandDialog> {
+  late final field = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    field.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(tr('Check command')),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('Run after the agent changes files, before it may say it is done. Leave empty to use the one found in the project.'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: field,
+          autofocus: true,
+          style: const TextStyle(fontFamily: mono),
+          decoration: const InputDecoration(hintText: 'npm test'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+      FilledButton(onPressed: () => Navigator.pop(context, field.text), child: Text(tr('Save'))),
+    ],
+  );
+}
+
 Future<void> showProjectTools(
   BuildContext context,
   AgentController agent, {
@@ -1360,6 +1441,8 @@ Future<void> showProjectTools(
                     await it.updateSettings({'projectSearch': map});
                   }
 
+                  final check = it.settings?.projectVerify[agent.cwd];
+
                   return SettingsGroup(
                     children: [
                       SettingsRow(
@@ -1369,6 +1452,22 @@ Future<void> showProjectTools(
                         subtitle: tr('Allow the agent to search the web in this project'),
                         onTap: () => set(!on),
                         trailing: LabeledSwitch(label: tr('Web search'), value: on, onChanged: set),
+                      ),
+                      // What the agent remembers about this project (agent/src/memory.ts), apart from AGENTS.md above.
+                      SettingsRow(
+                        icon: LucideIcons.brain,
+                        color: const Color(0xFFEC4899),
+                        title: tr('Project memory (agent)'),
+                        subtitle: tr('Facts the agent keeps for this project'),
+                        onTap: () => go(MemoryScreen(agent: agent, project: agent.cwd)),
+                      ),
+                      // Self-verification's command for this project (agent/src/verify.ts); empty = found by itself.
+                      SettingsRow(
+                        icon: LucideIcons.listChecks,
+                        color: const Color(0xFF22C55E),
+                        title: tr('Check command'),
+                        subtitle: check == null || check.trim().isEmpty ? tr('Found by itself (npm test, flutter test, ...)') : check,
+                        onTap: () => editProjectCheck(sheet, agent),
                       ),
                     ],
                   );

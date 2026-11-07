@@ -9,6 +9,7 @@ import 'i18n.dart';
 import '../agent/pricing.dart';
 import 'kit.dart';
 import 'sheet.dart';
+import 'smart_router_screen.dart' show SmartRouterMark;
 import 'theme.dart';
 
 Future<void> showModelSheet(BuildContext context, AgentController agent) {
@@ -41,7 +42,8 @@ class _ModelSheetState extends State<_ModelSheet> {
 
   Future<void> _pick(ModelInfo model) async {
     if (_saving != null) return;
-    if (widget.agent.model?.key == model.key) return Navigator.of(context).pop();
+    // The same model again closes the sheet; in an automatic chat it is a pick of the user's own, which ends that.
+    if (widget.agent.model?.key == model.key && !widget.agent.smartRouter.auto) return Navigator.of(context).pop();
     setState(() {
       _saving = model.key;
       _error = null;
@@ -55,6 +57,26 @@ class _ModelSheetState extends State<_ModelSheet> {
       if (mounted) setState(() => _saving = null);
     }
   }
+
+  /// "Automatic (Smart)": the chat picks its model per message (agent/src/smartrouter.ts).
+  Future<void> _pickAuto() async {
+    if (_saving != null) return;
+    if (widget.agent.smartRouter.auto) return Navigator.of(context).pop();
+    setState(() {
+      _saving = _autoKey;
+      _error = null;
+    });
+    try {
+      await widget.agent.setSmartRouter(true);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _error = friendlyError(e));
+    } finally {
+      if (mounted) setState(() => _saving = null);
+    }
+  }
+
+  static const _autoKey = '\u0000auto';
 
   @override
   Widget build(BuildContext context) {
@@ -133,6 +155,9 @@ builder: (context, scroll) => Column(
                         controller: scroll,
                         padding: const EdgeInsets.only(bottom: 24),
                         children: [
+                          // Offered while Settings allow it and GripHub serves the models it picks from.
+                          if (q.isEmpty && agent.smartRouter.enabled && agent.models.any((m) => m.provider == 'griphub'))
+                            _AutoTile(selected: agent.smartRouter.auto, saving: _saving, onPick: _pickAuto),
                           if (q.isEmpty && favorites.isNotEmpty) ...[
                             Padding(
                               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
@@ -171,7 +196,8 @@ class _ModelTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final selected = agent.model?.key == model.key;
+    // In an automatic chat the check is on "Automatic (Smart)", not on the model it picked last.
+    final selected = agent.model?.key == model.key && !agent.smartRouter.auto;
     final isFav = Appearance.instance.isFavorite(model.key);
     final details = [
       if (model.contextWindow != null && model.contextWindow! > 0)
@@ -249,6 +275,38 @@ class _ModelTile extends StatelessWidget {
                 : null,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The smart router's row, above the models: one sparkle by the title, the explanation quiet under it.
+class _AutoTile extends StatelessWidget {
+  const _AutoTile({required this.selected, required this.saving, required this.onPick});
+  final bool selected;
+  final String? saving;
+  final Future<void> Function() onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return ListTile(
+      onTap: saving != null ? null : onPick,
+      // The explanation can wrap: the sparkle and the check stay on the title's line, not in the middle of the block.
+      titleAlignment: ListTileTitleAlignment.titleHeight,
+      leading: SizedBox.square(
+        dimension: 32,
+        child: const Center(child: SmartRouterMark(size: 26)),
+      ),
+      title: Text(tr('Automatic (Smart)')),
+      subtitle: Text(tr('The cheapest model that can do each message')),
+      trailing: SizedBox(
+        width: 22,
+        child: saving == _ModelSheetState._autoKey
+            ? const Center(child: BusySpinner())
+            : selected
+            ? Icon(LucideIcons.check, size: 18, color: p.text)
+            : null,
       ),
     );
   }

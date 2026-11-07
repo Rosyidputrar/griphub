@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- The floating panel's bubble over other apps (Fitur 4); asked for only when the user first turns the panel on. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <!-- Screen companion (Fitur 5): capture with the user's consent each session, in a mediaProjection service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <!-- Lets sessions work in folders on shared storage (Download, Documents...). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
@@ -48,17 +52,58 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- Share text, links, images and files from other apps into a chat. -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <data android:mimeType="*/*"/>
-            </intent-filter>
+            <!-- Several files shared from other apps go into a chat in the app; a single share goes to ShareActivity. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="*/*"/>
             </intent-filter>
+        </activity>
+        <!-- One shared text, link, picture or file: the floating panel when it may show, else the app as before. -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:label="GripHub AI Agent"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
+        </activity>
+        <!-- "Tanya GripHub" in any app's text selection menu: to the panel (with the result forwarded), or the app. -->
+        <activity
+            android:name=".ProcessTextActivity"
+            android:exported="true"
+            android:label="@string/ask_griphub"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+        </activity>
+        <!-- The floating panel (Fitur 4): a sheet over the app in use, the same app and chat as the main window. Not
+             exported: only the app's own ways in open it. Standard launch mode: opened for a selection it sits in that
+             app's task, so its answer can go back into the selection. -->
+        <activity
+            android:name=".PanelActivity"
+            android:exported="false"
+            android:label="@string/ask_griphub"
+            android:taskAffinity="id.griphub.agent.panel"
+            android:excludeFromRecents="true"
+            android:theme="@style/PanelTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/PanelTheme"
+              />
         </activity>
         <receiver android:name=".QuickWidget" android:exported="false" android:label="GripHub AI Agent">
             <intent-filter>
@@ -67,6 +112,27 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quick_info"/>
         </receiver>
         <!-- "Stop" on the agent's ongoing notification. -->
+        <!-- The home-screen widgets of Fitur 7 (Widgets.kt): Tanya Cepat and Status Agent. -->
+        <receiver android:name=".AskWidget" android:exported="false" android:label="@string/widget_ask_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_ask_info"/>
+        </receiver>
+        <receiver android:name=".StatusWidget" android:exported="false" android:label="@string/widget_status_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_status_info"/>
+        </receiver>
+        <!-- Where Tanya Cepat's taps go first: the panel when it may show, else the app. No window of its own. -->
+        <activity
+            android:name=".WidgetActionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="id.griphub.agent.widget"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
         <receiver android:name=".StopReceiver" android:exported="false"/>
         <!-- Exported so the system download service can reach it; it only re-reads the download's status. -->
         <receiver android:name=".UpdateReceiver" android:exported="true">
@@ -83,6 +149,30 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE"/>
             </intent-filter>
+        </service>
+        <service
+            android:name=".CompanionService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"/>
+        <!-- Optional, turned on only by the user in Android's settings after the app explains it: reads the screen's
+             elements to point precisely. Read-only (no gestures, no actions); password fields are never read. -->
+        <service
+            android:name=".CompanionAccessibilityService"
+            android:exported="false"
+            android:label="@string/companion_a11y_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService"/>
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/companion_accessibility"/>
+        </service>
+        <service
+            android:name=".BubbleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Shows the user's floating assistant bubble over other apps while the user keeps it on screen"/>
         </service>
         <service
             android:name=".AgentService"

@@ -116,7 +116,8 @@ async function host(t, mock = {}) {
 }
 
 const sorted = (a) => [...a].sort();
-const CHAT_SET = ["generate_image", "read", "web_fetch", "web_search"];
+// remember (memory.ts): the agent may propose a fact to keep; the user decides on its card. Not a way to act on anything.
+const CHAT_SET = ["generate_image", "read", "remember", "web_fetch", "web_search"];
 
 test("a chat started as a chat: its folder, a conversation's tools and prompt, kept through a rebuild, listed as a chat", async (t) => {
 	const h = await host(t);

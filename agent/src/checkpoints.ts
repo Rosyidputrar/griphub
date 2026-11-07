@@ -89,6 +89,28 @@ export class Checkpoints {
 		if (files.length) await git(["add", "-f", "--", ...files], env, cwd);
 	}
 
+	/**
+	 * The folder as it is now, as a git tree id in the shadow repository, without a checkpoint: two of them tell
+	 * whether files changed in between (self-verification, verify.ts) and leave the user's undo list alone.
+	 */
+	async tree(cwd: string): Promise<string | null> {
+		if (!existsSync(cwd)) return null;
+		const env = await this.ensure(cwd);
+		await git(["add", "-A"], env, cwd);
+		await this.addEnv(env, cwd);
+		const r = await git(["write-tree"], env, cwd);
+		return r.code === 0 ? r.out.trim() || null : null;
+	}
+
+	/** Paths that differ between two trees from [tree]. */
+	async changedBetween(cwd: string, from: string, to: string): Promise<string[]> {
+		if (from === to) return [];
+		const env = await this.ensure(cwd);
+		const r = await git(["diff", "-z", "--name-only", from, to], env, cwd);
+		if (r.code !== 0) throw new Error(r.err.trim() || "diff failed");
+		return r.out.split("\0").filter(Boolean);
+	}
+
 	/** Records the folder as it is now. Skips when nothing changed since the last one. */
 	async snapshot(cwd: string, label: string): Promise<Checkpoint | null> {
 		if (!existsSync(cwd)) return null;

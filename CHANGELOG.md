@@ -13,7 +13,54 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 
 ## Belum dirilis
 
-_Belum ada perubahan._
+### Baru
+- **Router Pintar: "Otomatis (Pintar)" di pilihan model.** Chat yang memakainya memilih sendiri model termurah yang sanggup untuk tiap pesan, berdasarkan data GripHub Router tentang kemampuan dan harga terkini tiap model.
+  - Gambar terlampir hanya dikirim ke model yang bisa membaca gambar; chat Coding hanya ke model yang bisa memakai tools.
+  - Bila balasan gagal, terpotong, atau kamu bilang jawabannya salah, pesan berikutnya naik ke model yang lebih kuat.
+  - Nama model yang benar-benar dipakai tetap tampil, dengan tanda kecil ✦ bahwa ia dipilih otomatis.
+  - Setiap keputusan tercatat beserta alasan dan perkiraan biayanya: Pemakaian → Chat ini → Keputusan Router Pintar.
+  - Memilih model sendiri menghentikan pilihan otomatis untuk chat itu. Bisa dimatikan, dan model tertentu bisa dikecualikan, di Pengaturan → Router Pintar.
+- **Penerjemah vision: kirim gambar ke model yang tidak bisa melihat.** Model vision membaca gambar menjadi teks (isinya, semua tulisan persis apa adanya, tata letaknya), lalu model chat menjawab dari situ, tanpa perlu ganti model.
+  - Di bawah jawaban tertulis "Gambar dibaca oleh …" beserta biayanya; biaya itu juga terhitung di Pemakaian dan anggaran harian.
+  - Pertanyaan lanjutan tentang detail gambar dijawab dengan pembacaan terarah, bukan membaca ulang seluruh gambar.
+  - Gambar aslinya tetap tersimpan di chat. Model chat tidak pernah dikirimi gambarnya.
+  - Pengaturan → Penerjemah vision: Otomatis, Tanya dulu (sekali per chat), atau Mati; pilih penerjemah sendiri dan daftar model yang disetujui.
+  - Bila pembacaan gagal, pesan tidak dikirim dan kamu diberi tahu apa adanya, dengan tawaran ganti model.
+- **Baca chat lain selagi agent bekerja.** Membuka chat lain tidak lagi menanyakan "Hentikan & pindah": pekerjaan agent berjalan terus, dan chat yang dibuka tampil hanya-baca.
+  - Pil di atas menunjukkan chat tempat agent bekerja (dengan jumlah persetujuan yang menunggu); ketuk untuk kembali ke sana, dengan balasan yang masih mengalir.
+  - Kolom ketik di chat lain terkunci dengan penjelasan; draf tiap chat tetap tersimpan.
+  - Begitu agent selesai, chat yang sedang kamu baca langsung bisa dipakai, dan daftar chat menandai chat yang selesai.
+  - Edit atau fork pesan di chat yang sedang bekerja tetap menanyakan dulu, karena keduanya memang harus menghentikan agent.
+- **Verifikasi mandiri: tugas coding selesai dengan bukti, bukan klaim.** Setelah agent mengubah file, aplikasi sendiri yang menjalankan tes proyek (npm test, flutter test, gradle, cargo, go, pytest, make, atau perintahmu sendiri) sebelum agent boleh menutup tugas.
+  - Hasilnya tampil di chat sebagai blok bukti: perintah, lulus atau gagal, akhir keluarannya, durasi, dan keluaran lengkap bila diketuk.
+  - Bila gagal, agent memperbaikinya (maks 3 putaran, bisa diubah) dan tiap putaran diperiksa lagi. Mengubah atau melewati tes agar lulus tidak diterima. Bila tetap gagal, agent melaporkannya apa adanya.
+  - Proyek tanpa tes dinyatakan terus terang: "tidak ada tes yang bisa dijalankan".
+  - Perintah pemeriksaan meminta persetujuan seperti perintah lain. Atur di Pengaturan → Verifikasi mandiri, dan perintah per proyek di alat proyek.
+- **Ingatan agent: tidak perlu mengulang konteks di chat baru.** Agent membawa fakta singkat tentang kamu (ingatan global) dan tentang proyek (ingatan proyek) ke setiap chat baru.
+  - Agent hanya bisa mengusulkan: kartu "Ingat ini?" dengan Simpan, Ubah, atau Tolak. Tidak ada yang tersimpan tanpa persetujuanmu, kecuali kamu sendiri menulis "ingat ini: …".
+  - Fakta baru yang bertentangan menggantikan yang lama (jejaknya tetap tercatat), jadi tidak ada dua fakta yang saling bertentangan.
+  - Kata sandi, kunci API, dan token selalu ditolak beserta alasannya; begitu pula isi file atau salinan chat.
+  - Pengaturan → Ingatan agent dan alat proyek → Ingatan agent untuk proyek: lihat, ubah, hapus satu per satu atau semuanya. Yang dihapus benar-benar hilang.
+  - Pemakaian → Chat ini → Yang diingat agent: persis apa yang dibawa chat ini saat dimulai.
+  - Ingatan tersimpan di HP atau server tempat agent berjalan, dan tidak ikut pindah bila mode berganti.
+- **Tanya GripHub dari aplikasi mana pun: panel mengambang.**
+  - Pilih teks di aplikasi apa saja → "Tanya GripHub": panel setengah layar terbuka dengan teks itu, plus aksi satu ketuk Jelaskan, Ringkas, Terjemahkan, dan Balas. Bila aplikasinya mengizinkan, hasil terjemahan atau balasan bisa langsung menggantikan teks aslinya.
+  - Bagikan teks, tautan, atau satu gambar ke GripHub: terbuka di panel di atas aplikasi yang sedang dipakai. Beberapa file sekaligus tetap masuk ke aplikasi seperti biasa.
+  - Panel adalah chat yang sama dengan di aplikasi: "Buka di aplikasi" melanjutkannya di sana. Panel hanya untuk chat biasa; persetujuan dan alat proyek diarahkan ke aplikasi dengan satu ketuk.
+  - Kecilkan panel jadi gelembung di tepi layar (seret ke bawah untuk menyingkirkannya); selama gelembung ada, notifikasinya juga ada.
+  - Izin "Tampilkan di atas aplikasi lain" diminta hanya saat kamu menyalakan panel (Pengaturan → Panel mengambang), dengan penjelasan. Tanpa izin itu, semua pintu masuk tadi membuka aplikasi.
+  - Pindai dokumen dari menu + (di aplikasi dan panel): foto halaman atau struk dibaca jadi teks oleh model vision lewat GripHub Router, lalu masuk ke kolom ketik. Fotonya langsung dihapus setelah dibaca.
+- **Dua widget layar utama baru.**
+  - **Tanya Cepat** (4×1, bisa dikecilkan ke 2×1): baris mirip kolom ketik dengan nama model aktif. Ketuk untuk membuka panel mengambang (atau chat baru di aplikasi bila panel belum diizinkan), mikrofon untuk langsung bicara, logo model untuk membuka pilihan model. Widget tidak bisa diketik langsung, dan memang tidak berpura-pura bisa.
+  - **Status Agent** (4×2, bisa diperbesar ke 4×4): sisa kredit dan model aktif, lalu apa yang sedang berjalan: chat yang dikerjakan agent, job latar, subagent, dan tugas terjadwal berikutnya. Ketuk barisnya untuk langsung ke tempatnya. Lencana merah hanya muncul bila ada persetujuan yang menunggu. Bila tidak ada apa-apa: "Tidak ada yang berjalan" beserta tugas terjadwal berikutnya.
+  - Isinya mengikuti keadaan aplikasi saat berubah, tanpa polling; mengikuti tema terang atau gelap aplikasi. Ketukan widget hanya membuka, tidak pernah menjalankan apa pun.
+  - Widget lama (Chat baru dan Suara) tetap ada.
+- **Pendamping layar: GripHub melihat layarmu dan memandu langkah demi langkah di aplikasi lain.**
+  - Mulai dari panel mengambang atau Pengaturan → Pendamping layar. Android meminta izinmu setiap kali dimulai dan menampilkan indikatornya sendiri; tombol Berhenti selalu ada di panel dan di notifikasi.
+  - Layar diambil hanya saat sebuah langkah membutuhkannya (satu gambar, bukan rekaman), dikirim ke GripHub Router untuk langkah itu saja, dan tidak disimpan di chat, ingatan, atau file mana pun.
+  - Agent menjelaskan satu langkah dan menyorot elemen yang dimaksud; ketuk "Sudah" untuk langkah berikutnya. Agent tidak pernah mengetuk, menggeser, atau mengetik untukmu.
+  - Opsional: nyalakan "GripHub Pendamping Layar" di pengaturan aksesibilitas Android agar sorotan lebih tepat (hanya membaca, tanpa kolom kata sandi; dijelaskan dulu di aplikasi).
+  - Layar aplikasi bank dan kolom kata sandi tidak bisa dilihat; agent mengatakannya, bukan menebak.
 
 ---
 

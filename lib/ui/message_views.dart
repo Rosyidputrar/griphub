@@ -22,6 +22,10 @@ import 'image_tool_card.dart';
 import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
+import 'smart_router_screen.dart' show SmartRouterMark;
+import 'memory_screen.dart' show MemoryProposalCard;
+import 'companion_screen.dart' show hideCompanionPointer;
+import 'verify_view.dart';
 import 'links.dart';
 import 'live_clock.dart';
 import 'i18n.dart';
@@ -441,9 +445,16 @@ class AssistantMessageView extends StatelessWidget {
     this.subagentCard,
     this.subagentCost,
     this.footer,
+    this.autoRouted = false,
+    this.visionReads = const [],
+    this.verified,
+    this.readOnly = false,
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
+
+  /// Shown in a chat that is read-only (Fitur 8): its cards answer nothing.
+  final bool readOnly;
 
   /// Where relative tool paths resolve, for previews.
   final String? cwd;
@@ -470,6 +481,15 @@ class AssistantMessageView extends StatelessWidget {
   /// and the turn is over (see [turnFooters]); null draws none.
   final TurnFooter? footer;
 
+  /// The smart router picked this turn's model: the footer marks the model's name (agent/src/smartrouter.ts).
+  final bool autoRouted;
+
+  /// The vision translator read this turn's pictures: one quiet line above the footer names the reader.
+  final List<VisionRead> visionReads;
+
+  /// The last verification evidence of this turn (agent/src/verify.ts): the closing message names its status.
+  final VerifyEntry? verified;
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -479,7 +499,7 @@ class AssistantMessageView extends StatelessWidget {
       switch (b.kind) {
         case BlockKind.text:
           if (b.text.trim().isNotEmpty) {
-            children.add(TypewriterMarkdown(text: b.text, live: entry.streaming && identical(b, blocks.last)));
+            children.add(TypewriterMarkdown(text: hideCompanionPointer(b.text), live: entry.streaming && identical(b, blocks.last)));
           }
         case BlockKind.thinking:
           if (b.text.trim().isNotEmpty) {
@@ -492,6 +512,8 @@ class AssistantMessageView extends StatelessWidget {
             card ??
                 (b.toolName == 'todo_write'
                     ? TodoCard(block: b, run: tools[b.toolCallId])
+                    : b.toolName == 'remember' && agent != null
+                    ? MemoryProposalCard(agent: agent!, run: tools[b.toolCallId], readOnly: readOnly)
                     : b.toolName == 'generate_image' && tools[b.toolCallId]?.imageJob != null
                     ? _imageCard(context, tools[b.toolCallId]!, agent: agent)
                     : ToolCallView(
@@ -510,6 +532,8 @@ class AssistantMessageView extends StatelessWidget {
     if (entry.aborted) {
       children.add(Text(tr('Stopped'), style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint)));
     }
+    if (footer != null && visionReads.isNotEmpty) children.add(VisionReadNote(reads: visionReads));
+    if (footer != null && verified != null) children.add(VerifyStatusNote(entry: verified!));
     if (footer case final f?) {
       final model = f.model;
       final subagents = [for (final id in f.cost?.subagentCalls ?? const <String>[]) ?subagentCost?.call(id)];
@@ -517,6 +541,7 @@ class AssistantMessageView extends StatelessWidget {
         _MessageFooter(
           text: f.text,
           model: model == null ? null : (modelLabel?.call(model) ?? model),
+          auto: autoRouted,
           cost: f.cost,
           took: f.took,
           outcome: f.outcome,
@@ -530,6 +555,34 @@ class AssistantMessageView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var i = 0; i < children.length; i++) ...[if (i > 0) const SizedBox(height: 10), children[i]],
+      ],
+    );
+  }
+}
+
+/// "Pictures read by `model`": the vision translator read this turn's pictures for a model that cannot see them. One
+/// line, in the footer's quiet colour; the reading's estimate follows when known.
+class VisionReadNote extends StatelessWidget {
+  const VisionReadNote({super.key, required this.reads});
+  final List<VisionRead> reads;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    final names = {for (final r in reads) r.name}.join(', ');
+    final known = reads.every((r) => r.credits != null);
+    final credits = reads.fold<double>(0, (a, r) => a + (r.credits ?? 0));
+    final text = [
+      tr('Picture read by {model}').replaceAll('{model}', names),
+      if (known) '~${localNumber(formatCredits(credits))} ${tr('credits')}',
+    ].join(' · ');
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // On the first line, however many lines the note takes.
+        Padding(padding: const EdgeInsets.only(top: 2), child: Icon(LucideIcons.scanEye, size: 13, color: p.faint)),
+        const SizedBox(width: 6),
+        Expanded(child: Text(text, style: TextStyle(fontSize: 11.5, color: p.faint))),
       ],
     );
   }
@@ -660,9 +713,12 @@ typedef SubagentsCost = ({int count, double? credits});
 String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
 
 class _MessageFooter extends StatelessWidget {
-  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done});
+  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done, this.auto = false});
   final String text;
   final String? model;
+
+  /// The model was picked by the smart router: a small sparkle before its name, in the footer's one quiet colour.
+  final bool auto;
   final TurnCost? cost;
   final SubagentsCost? subagents;
 
@@ -697,6 +753,11 @@ class _MessageFooter extends StatelessWidget {
               TurnOutcome.stopped => LiveClock(label: tr('Stopped'), took: took, state: ClockState.stopped),
               TurnOutcome.failed => LiveClock(label: tr('Failed'), took: took, state: ClockState.failed),
             },
+          ),
+        if (model != null && auto)
+          Padding(
+            padding: const EdgeInsets.only(right: 3),
+            child: SmartRouterMark(size: 12, semanticLabel: tr('chosen automatically')),
           ),
         if (model != null)
           Text(
