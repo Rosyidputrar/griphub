@@ -78,11 +78,12 @@ object ScreenCompanion {
         density = metrics.densityDpi
         thread = HandlerThread("companion").also { it.start() }
         handler = Handler(thread!!.looper)
+        // On the main thread: end() touches windows and tells Flutter, both of which must happen there.
         p.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
                 end(context)
             }
-        }, handler)
+        }, Handler(android.os.Looper.getMainLooper()))
         val r = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         // Created once (Android 14: one virtual display per consent), rendering into nothing until a frame is asked for.
         display = p.createVirtualDisplay("griphub-companion", width, height, density, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, null, null, handler)
@@ -161,8 +162,12 @@ object ScreenCompanion {
         return mean to sqrt(maxOf(0.0, sq / n - mean * mean))
     }
 
-    /** Stops capture at once: projection, display and service go together. */
+    /** Stops capture at once: projection, display and service go together. Always on the main thread. */
     fun end(context: Context) {
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            Handler(android.os.Looper.getMainLooper()).post { end(context) }
+            return
+        }
         try { display?.release() } catch (e: Exception) {}
         try { reader?.close() } catch (e: Exception) {}
         try { projection?.stop() } catch (e: Exception) {}
@@ -265,22 +270,38 @@ object Highlight {
             }
 
             override fun onDraw(canvas: Canvas) {
-                val pad = 6 * density
-                val r = RectF(rect.left - pad, rect.top - pad, rect.right + pad, rect.bottom + pad)
+                val inset = paint.strokeWidth / 2
+                val r = RectF(inset, inset, width - inset, height - inset)
                 canvas.drawRoundRect(r, 12 * density, 12 * density, glow)
                 canvas.drawRoundRect(r, 12 * density, 12 * density, paint)
             }
         }
+        val pad = (8 * density).toInt()
         val type = if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        // Only as big as the element (plus a margin), not the whole screen, and no more opaque than Android allows a
+        // window that touches pass through (Android 12+ blocks touches under a more opaque overlay of another app):
+        // the user taps the element right through the highlight.
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, type,
+            rect.width() + 2 * pad, rect.height() + 2 * pad, type,
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
-        )
+        ).apply {
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+            x = rect.left - pad
+            y = rect.top - pad
+            alpha = maxObscuringOpacity(context)
+        }
         wm.addView(v, params)
         view = v
+    }
+
+    /** The most opaque a pass-through overlay may be (0.8 unless the system says otherwise). */
+    private fun maxObscuringOpacity(context: Context): Float {
+        if (Build.VERSION.SDK_INT < 31) return 0.8f
+        val im = context.getSystemService(Context.INPUT_SERVICE) as android.hardware.input.InputManager
+        return minOf(0.8f, im.maximumObscuringOpacityForTouch)
     }
 
     fun clear(context: Context) {
@@ -324,10 +345,23 @@ class CompanionAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    /**
+     * The window of the app the user is in: the top application window that is not GripHub's own (the panel has the
+     * focus while the user asks, so the active window would be ours).
+     */
+    private fun appRoot(): AccessibilityNodeInfo? {
+        for (w in windows) {
+            if (w.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue
+            val r = w.root ?: continue
+            if (r.packageName?.toString() != packageName) return r
+        }
+        return rootInActiveWindow?.takeIf { it.packageName?.toString() != packageName }
+    }
+
     /** The visible elements with text, and their boxes in screen pixels; password fields carry no text. */
     fun tree(): List<Map<String, Any?>> {
         val out = mutableListOf<Map<String, Any?>>()
-        val root = rootInActiveWindow ?: return out
+        val root = appRoot() ?: return out
         var next = 0
         fun walk(n: AccessibilityNodeInfo?, depth: Int) {
             if (n == null || depth > 40 || out.size >= 150) return

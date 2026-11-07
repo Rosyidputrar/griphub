@@ -595,6 +595,47 @@ void main() {
       expect(host.sent('prompt'), hasLength(1));
     });
 
+    testWidgets('"ask first": a chat screen that closes leaves the question to the one still open', (tester) async {
+      final host = FakeHost();
+      host.answers['prompt'] = (cmd) => cmd['visionConsent'] == true
+          ? null
+          : {
+              'visionConsent': {'model': 'gemini-3.8-flash', 'modelName': 'Gemini 3.8 Flash', 'estimate': 0.0042},
+            };
+      final agent = newAgent()
+        ..sessionId = 's1'
+        ..isChat = true
+        ..model = ModelInfo(Map.of(kimi));
+      final asked = <String>[];
+      Future<bool> app(VisionAsk _) async => (asked..add('app')).isNotEmpty;
+      Future<bool> panel(VisionAsk _) async => (asked..add('panel')).isNotEmpty;
+      agent.addVisionConfirmer(app);
+      agent.addVisionConfirmer(panel);
+      // The panel's chat goes; the app's stays (it was there first).
+      agent.removeVisionConfirmer(panel);
+      await tester.pump();
+      expect(await agent.sendWith('Apa ini?', images: const [{'type': 'image', 'data': 'iVBORw0KGgo=', 'mimeType': 'image/png'}]), isTrue);
+      expect(asked, ['app']);
+      expect(host.sent('prompt').last['visionConsent'], true);
+    });
+
+    testWidgets('"ask first" with no chat on screen: nothing is sent, and the chat says why', (tester) async {
+      final host = FakeHost();
+      host.answers['prompt'] = (cmd) => {
+        'visionConsent': {'model': 'gemini-3.8-flash', 'modelName': 'Gemini 3.8 Flash', 'estimate': 0.0042},
+      };
+      final agent = newAgent()
+        ..sessionId = 's1'
+        ..isChat = true
+        ..model = ModelInfo(Map.of(kimi));
+      await tester.pump();
+      expect(await agent.sendWith('Apa ini?', images: const [{'type': 'image', 'data': 'iVBORw0KGgo=', 'mimeType': 'image/png'}]), isFalse);
+      expect(host.sent('prompt'), hasLength(1));
+      final notice = agent.entries.whereType<NoticeEntry>().single;
+      expect(notice.text, contains('The picture was not sent'));
+      expect(notice.error, isTrue);
+    });
+
     for (final look in const [Look(), Look(dark: true, language: 'id')]) {
       testWidgets('golden: ask-first dialog ${look.name}', (tester) async {
         await askChat(tester, look: look);
@@ -740,6 +781,23 @@ void main() {
       // The composer is back, with B's draft.
       expect(tester.widget<TextField>(composerField().last).controller!.text, 'lanjutkan resepnya');
       expect(agent.finishedUnseen, contains('a.jsonl'));
+    });
+
+    testWidgets('a new chat given text while the agent works keeps it when it opens for real', (tester) async {
+      final (host, agent) = await working(tester);
+      host.answers['new_session'] = (_) => {'sessionFile': 'c.jsonl', 'sessionId': 'c', 'chatMode': 'chat', 'isStreaming': false};
+      await agent.newSession(chat: true);
+      // A share opens the waiting chat with its text, as HomeShell does.
+      await pumpLook(tester, const Look(), ChatScreen(key: const ValueKey('shared'), agent: agent, initialPrompt: 'Ringkas artikel ini'));
+      await frames(tester);
+      expect(Drafts.instance.get(agent.viewing!.key), 'Ringkas artikel ini', reason: 'kept even before anything is typed');
+      host.emit({'type': 'state', 'state': {'isStreaming': false, 'sessionFile': 'a.jsonl', 'sessionId': 'a'}});
+      await frames(tester, 14);
+      expect(host.sent('new_session'), hasLength(1));
+      expect(agent.viewing, isNull);
+      expect(agent.sessionId, 'c');
+      expect(Drafts.instance.get('c'), 'Ringkas artikel ini');
+      expect(tester.widget<TextField>(composerField().last).controller!.text, 'Ringkas artikel ini');
     });
 
     for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {

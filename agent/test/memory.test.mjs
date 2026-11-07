@@ -95,3 +95,22 @@ test("a chat starts with the newest confirmed facts that fit the budget, the pro
 	assert.match(prompt, /remember tool/);
 	assert.equal(m.snapshotPrompt(m.snapshot([], [], null)), "", "nothing remembered, nothing said");
 });
+
+test("a chat keeps ids only; looking them up again drops deleted facts, uses edits, and reads the first form too", (t) => {
+	const store = new m.MemoryStore(tempDir(t));
+	const a = store.add("global", "Fakta A", { source: "x" });
+	const b = store.add("global", "Fakta B", { source: "x" });
+	const p = store.add("project", "Fakta proyek", { source: "x", project: "/w/app" });
+	const stored = m.storeSnapshot(m.snapshot(store.list("global"), store.list("project", "/w/app"), "/w/app"));
+	assert.equal(JSON.stringify(stored).includes("Fakta"), false, "no text kept");
+	assert.deepEqual(stored.global.sort(), [a.id, b.id].sort());
+	store.remove("global", a.id);
+	store.update("global", b.id, "Fakta B diubah");
+	const now = m.resolveSnapshot(stored, store);
+	assert.deepEqual(now.global, [{ id: b.id, text: "Fakta B diubah" }]);
+	assert.deepEqual(now.project, [{ id: p.id, text: "Fakta proyek" }]);
+	// The first form ({id, text} objects): only the ids count, so the old text cannot come back.
+	const old = { global: [{ id: a.id, text: "Fakta A" }, { id: b.id, text: "Fakta B" }], project: [], projectPath: null, left: 0, at: 1 };
+	assert.deepEqual(m.resolveSnapshot(old, store).global, [{ id: b.id, text: "Fakta B diubah" }]);
+	assert.equal(m.resolveSnapshot(null, store), null);
+});

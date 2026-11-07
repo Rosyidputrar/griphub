@@ -285,6 +285,46 @@ export function snapshot(globalEntries: MemoryEntry[], projectEntries: MemoryEnt
 	return { global, project, projectPath, left, at: now };
 }
 
+/**
+ * What a chat keeps of its snapshot: the ids only, never the texts. Chat files sync (sync.ts) and are backed up; the
+ * facts themselves stay in the memory files. Each run looks the ids up again, so a fact the user deleted is gone from
+ * the very next request, and an edit is used as edited.
+ */
+export interface StoredSnapshot {
+	version: 2;
+	global: string[];
+	project: string[];
+	projectPath: string | null;
+	left: number;
+	at: number;
+}
+
+export function storeSnapshot(s: MemorySnapshot): StoredSnapshot {
+	return { version: 2, global: s.global.map((e) => e.id), project: s.project.map((e) => e.id), projectPath: s.projectPath, left: s.left, at: s.at };
+}
+
+/**
+ * A kept snapshot with the facts as they are now: ids that no longer exist are left out. Reads the first form too
+ * (version 1 kept {id, text}; only its ids are used, so an old chat file does not bring a deleted fact back).
+ */
+export function resolveSnapshot(stored: any, store: MemoryStore): MemorySnapshot | null {
+	if (!stored || typeof stored !== "object") return null;
+	const ids = (v: unknown): string[] =>
+		Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : typeof x?.id === "string" ? x.id : "")).filter(Boolean) : [];
+	const projectPath = typeof stored.projectPath === "string" ? stored.projectPath : null;
+	const look = (layer: Layer, wanted: string[]) => {
+		const now = new Map(store.list(layer, layer === "project" ? (projectPath ?? undefined) : undefined).map((e) => [e.id, e.text]));
+		return wanted.filter((id) => now.has(id)).map((id) => ({ id, text: now.get(id)! }));
+	};
+	return {
+		global: look("global", ids(stored.global)),
+		project: projectPath ? look("project", ids(stored.project)) : [],
+		projectPath,
+		left: typeof stored.left === "number" ? stored.left : 0,
+		at: typeof stored.at === "number" ? stored.at : 0,
+	};
+}
+
 /** The system prompt's part for a snapshot; empty when there is nothing to remember. */
 export function snapshotPrompt(s: MemorySnapshot): string {
 	if (!s.global.length && !s.project.length) return "";

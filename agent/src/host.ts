@@ -84,7 +84,7 @@ import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter
 import { PromptQueue } from "./promptqueue.js";
 import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
-import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt } from "./memory.js";
+import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, resolveSnapshot, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt, storeSnapshot } from "./memory.js";
 import { COMPANION_MARK, companionInstruction, type Frame, pointerOf, treeText, type TreeNode, withFrame } from "./companion.js";
 import { detectVerifyCommand, type Evidence, evidenceText, isTestPath, outputSummary, runVerify, VERIFY_MESSAGE, VERIFY_NOTE, VerifyOutputs } from "./verify.js";
 import { asksAboutPicture, defaultAllowed, SCAN_INSTRUCTION, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
@@ -984,7 +984,12 @@ const ROUTE_RESERVE = { chat: 4_096, coding: 16_384 };
  * Picks the open chat's model for the turn about to start, when the chat is automatic. Throws, with the reason, when no
  * model fits: the turn is not sent on a guess.
  */
-async function routeTurn(s: AgentSession, text: string, images: number) {
+/**
+ * [step]: a screen companion step (companion.ts). It is routed like any turn (it needs vision), but it is not the
+ * user's request: "Sudah, lanjut" again is not the same request sent again, and it does not replace the request a
+ * later failure is measured against.
+ */
+async function routeTurn(s: AgentSession, text: string, images: number, opts: { step?: boolean } = {}) {
 	if (!smartRouterOn()) return;
 	const state0 = routing.get(s.sessionId);
 	if (!state0.auto) return;
@@ -995,7 +1000,7 @@ async function routeTurn(s: AgentSession, text: string, images: number) {
 
 	// A failure of the last routed turn raises the chat's floor one band above what it used.
 	const lastAssistant = [...(s.messages as any[])].reverse().find((m) => m?.role === "assistant") ?? null;
-	const failure = state0.last ? failureOf(lastAssistant, state0.last.text, text) : null;
+	const failure = state0.last && !opts.step ? failureOf(lastAssistant, state0.last.text, text) : null;
 	let floor = state0.floor;
 	if (failure) {
 		const raised = nextFloor(floor, state0.last?.band ?? null);
@@ -1039,7 +1044,7 @@ async function routeTurn(s: AgentSession, text: string, images: number) {
 		s,
 		{ kind: "route", model: choice.model.id, modelName: choice.model.name, band: choice.band, difficulty, why, reason, estimate: choice.estimate },
 		(r) => {
-			r.last = { model: choice.model.id, band: choice.band, text };
+			if (!opts.step) r.last = { model: choice.model.id, band: choice.band, text };
 		},
 	);
 	if (s.model?.provider !== GRIPHUB_ID || s.model.id !== model.id) {
@@ -1064,6 +1069,20 @@ const VISION_OFF =
 const VISION_NONE =
 	"No approved vision model is available to read the picture. Switch to a model that reads pictures, or change the approved list in Settings → Vision translator.";
 const VISION_FAILED = "The vision model could not read the picture, so nothing was sent. Try again, or switch to a model that reads pictures.";
+
+/** What Try again says when the failed request is already in the chat. */
+const RETRY_TEXT = "Continue where you left off (the previous request failed).";
+
+/**
+ * The pictures of the chat's last user message (the turn a retry continues). None when that turn already carries a
+ * reading of them (visiontranslate.ts): reading them again would be paid twice for the same text.
+ */
+function lastUserPictures(s: AgentSession): any[] {
+	const last = [...(s.messages as any[])].reverse().find((m) => m?.role === "user");
+	if (!Array.isArray(last?.content)) return [];
+	if (messageText(last).includes("<griphub-vision")) return [];
+	return last.content.filter((c: any) => c?.type === "image");
+}
 
 /** How many of the latest user messages a follow-up question may reach back over to find the picture it is about. */
 const VISION_LOOKBACK = 6;
@@ -1278,9 +1297,13 @@ function projectOf(cwd: string, chat: boolean): string | null {
 }
 
 /** What the chat in [sm] started with: the snapshot it keeps, or null when it has none yet. */
+/**
+ * What the chat in [sm] started with, as the facts are now (the chat keeps ids only: a deleted fact is gone, an edited
+ * one is used as edited); null when it has no snapshot yet.
+ */
 function chatSnapshot(sm: SessionManager): MemorySnapshot | null {
 	const e = (sm.getEntries() as any[]).find((x) => x.type === "custom" && x.customType === MEMORY_SNAPSHOT);
-	return e?.data ?? null;
+	return e ? resolveSnapshot(e.data, memoryStore) : null;
 }
 
 /**
@@ -1301,7 +1324,8 @@ function memoryExtension(sm: SessionManager, chat: boolean) {
 					project,
 					integrations.settings.memoryBudget ?? DEFAULT_BUDGET,
 				);
-				sm.appendCustomEntry(MEMORY_SNAPSHOT, snap);
+				// Ids only in the chat's file (it syncs and is backed up); the texts stay in the memory files.
+				sm.appendCustomEntry(MEMORY_SNAPSHOT, storeSnapshot(snap));
 			}
 			const add = snapshotPrompt(snap);
 			return add ? { systemPrompt: `${event.systemPrompt}${add}` } : undefined;
@@ -1905,8 +1929,12 @@ async function handle(cmd: Command): Promise<unknown> {
 			// The last prompt from this chat that never made it into the history (refused, or failed to start).
 			const unsent = lastPrompt && lastPrompt.sessionId === s.sessionId ? lastPrompt : null;
 			fallbackTried = false;
+			// The pictures of the turn being continued (already in the chat): the retry needs to see them too.
+			const pictures = !unsent && failedTurn ? lastUserPictures(s) : [];
 			// Try again after a failure: an automatic chat climbs a class for it (smartrouter.ts failureOf).
-			if (!cmd.visionConsent) await routeTurn(s, unsent?.text ?? routing.get(s.sessionId).last?.text ?? "", unsent?.images?.length ?? 0);
+			if (!cmd.visionConsent) {
+				await routeTurn(s, unsent?.text ?? routing.get(s.sessionId).last?.text ?? "", unsent?.images?.length ?? pictures.length);
+			}
 			if (unsent) {
 				// The same preparation as a new message: the model may have been changed to one that reads pictures since.
 				const prepared = await prepareTurn(s, unsent.text, unsent.images, !!cmd.visionConsent);
@@ -1915,7 +1943,13 @@ async function handle(cmd: Command): Promise<unknown> {
 					send({ type: "error", message: String(e?.message ?? e) }),
 				);
 			} else if (failedTurn) {
-				s.prompt("Continue where you left off (the previous request failed).").catch((e) =>
+				// A model that cannot see them gets them read into text first (pi would only leave a placeholder); they are
+				// not sent again, the chat has them.
+				const prepared = pictures.length
+					? await prepareTurn(s, RETRY_TEXT, pictures, !!cmd.visionConsent)
+					: { text: RETRY_TEXT };
+				if ("visionConsent" in prepared) return prepared;
+				s.prompt(prepared.text).catch((e) =>
 					send({ type: "error", message: String(e?.message ?? e) }),
 				);
 			} else {
@@ -2060,7 +2094,7 @@ async function handle(cmd: Command): Promise<unknown> {
 			const secure = cmd.secure === true;
 			const frame = cmd.frame;
 			if (!secure && (!frame || typeof frame.data !== "string" || typeof frame.mimeType !== "string")) throw new Error("No screen to look at");
-			await routeTurn(s, goal, secure ? 0 : 1);
+			await routeTurn(s, goal, secure ? 0 : 1, { step: true });
 			const meta = s.model?.provider === GRIPHUB_ID ? routerCatalog().find((m) => m.id === s.model!.id) : undefined;
 			if (!secure && !readsImages(meta)) throw new Error(COMPANION_NEEDS_VISION);
 			const nodes: TreeNode[] = Array.isArray(cmd.tree) ? cmd.tree : [];

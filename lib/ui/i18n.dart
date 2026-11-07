@@ -289,6 +289,7 @@ const _id = <String, String>{
   'This chat starts once the agent is free.': 'Chat ini dimulai begitu agent selesai bekerja.',
   'No messages yet.': 'Belum ada pesan.',
   'The agent is done in {chat}': 'Agent selesai di {chat}',
+  'The picture was not sent: open the chat to allow a vision model to read it.': 'Gambar tidak dikirim: buka chat-nya untuk mengizinkan model vision membacanya.',
   // Self-verification (verify_view.dart, verify_settings_screen.dart, chat_extras.dart).
   'Tests passed': 'Tes lulus',
   'Tests failed': 'Tes gagal',

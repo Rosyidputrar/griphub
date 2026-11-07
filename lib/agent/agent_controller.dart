@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'agent_client.dart';
 import 'agent_fs.dart';
 import 'clock.dart';
+import 'drafts.dart';
 import 'features.dart';
 import 'host_messages.dart';
 import 'integrations.dart';
@@ -65,14 +66,27 @@ class AgentController extends ChangeNotifier {
   /// Set when the current model is billed differently than the user may expect.
   String? billingNotice;
 
-  /// Asks whether a vision model may read a picture for this chat ("ask first" in Settings → Vision translator); set by
-  /// the chat screen. Without it nothing is read: the message is not sent.
-  Future<bool> Function(VisionAsk ask)? confirmVisionReading;
+  /// Who asks whether a vision model may read a picture for this chat ("ask first" in Settings → Vision translator):
+  /// every chat screen on screen adds itself and removes itself when it goes, and the newest one asks. A stack, not
+  /// one slot: the panel's chat and the app's (kept underneath) are both alive, and the one that closes must not take
+  /// the other's question away.
+  final _visionConfirmers = <Future<bool> Function(VisionAsk ask)>[];
+
+  void addVisionConfirmer(Future<bool> Function(VisionAsk ask) ask) => _visionConfirmers.add(ask);
+
+  void removeVisionConfirmer(Future<bool> Function(VisionAsk ask) ask) => _visionConfirmers.remove(ask);
 
   static VisionAsk? _visionAsk(Object? r) =>
       r is Map && r['visionConsent'] is Map ? VisionAsk((r['visionConsent'] as Map).cast<String, dynamic>()) : null;
 
-  Future<bool> _confirmVision(VisionAsk ask) async => await confirmVisionReading?.call(ask) ?? false;
+  /// Nobody to ask (no chat on screen): the message is not sent, and the chat says why instead of nothing happening.
+  Future<bool> _confirmVision(VisionAsk ask) async {
+    if (_visionConfirmers.isEmpty) {
+      _addNotice(translate('The picture was not sent: open the chat to allow a vision model to read it.'), error: true);
+      return false;
+    }
+    return _visionConfirmers.last(ask);
+  }
 
   /// A photographed document read into text by a vision model through the router (Fitur 4); null when nothing was read.
   Future<({String text, String name, double? credits})?> scanDocument(File photo) async {
@@ -657,7 +671,8 @@ class AgentController extends ChangeNotifier {
       viewFinished.add(title);
       try {
         if (v.isNew) {
-          await newSession(dir: v.newDir, chat: v.newChatMode);
+          // What the waiting chat was given (a share, a selection, a quick start) comes along into the real one.
+          await _newSession(dir: v.newDir, chat: v.newChatMode, draftFrom: v.key);
         } else {
           await openSession(v.path!);
         }
@@ -737,13 +752,17 @@ class AgentController extends ChangeNotifier {
     return _newSession(dir: dir, chat: chat);
   }
 
-  Future<bool> _newSession({String? dir, bool chat = false}) => _switch(newChatKey(dir, chat: chat), () async {
-    viewing = null;
-    _applyState(
-      await client.call<Map<String, dynamic>>('new_session', chat ? {'chatMode': 'chat'} : {'cwd': ?dir}),
-    );
-    _resetTranscript();
-  });
+  /// [draftFrom]: the key a read-only "new chat" kept its draft under; it moves to the new chat's id before anyone is
+  /// told, so the composer opens with it.
+  Future<bool> _newSession({String? dir, bool chat = false, String? draftFrom}) =>
+      _switch(newChatKey(dir, chat: chat), () async {
+        viewing = null;
+        _applyState(
+          await client.call<Map<String, dynamic>>('new_session', chat ? {'chatMode': 'chat'} : {'cwd': ?dir}),
+        );
+        if (draftFrom != null) Drafts.instance.move(draftFrom, sessionId);
+        _resetTranscript();
+      });
 
   /// Opens another chat. False when the user kept the running turn instead, or another switch is still under way.
   Future<bool> openSession(String path) async {

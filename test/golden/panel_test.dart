@@ -152,13 +152,22 @@ void main() {
 
   testWidgets('opened for a selection, the panel starts a plain chat', (tester) async {
     final host = FakeHost();
-    host.methods['takeLaunch'] = (_) => {'action': 'panel_selection', 'text': 'halo', 'writable': false};
+    final asked = <Object?>[];
+    host.methods['takeLaunch'] = (c) {
+      asked.add(c.arguments);
+      return {'action': 'panel_selection', 'text': 'halo', 'writable': false};
+    };
     host.answers['new_session'] = (_) => {'sessionFile': 'p.jsonl', 'sessionId': 'p', 'cwd': '/w/.chats', 'chatMode': 'chat'};
     final agent = newAgent()..status = BootStatus.ready;
     PanelState.instance.apply({'surface': 'panel', 'selection': 'halo'});
     await pumpLook(tester, const Look(), PanelGate(agent: agent, child: const SizedBox()), height: 520);
     await frames(tester, 12);
     expect(host.sent('new_session').single['chatMode'], 'chat');
+    // Only launches meant for the panel window are taken here; the app's own window asks for its own.
+    expect(asked, isNotEmpty);
+    expect(asked, everyElement('panel'));
+    await agent.client.takeLaunch();
+    expect(asked.last, 'app');
   });
 
   for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {

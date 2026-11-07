@@ -48,19 +48,41 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
         @Volatile
         private var pendingLaunch: Map<String, Any?>? = null
 
+        /** The window ("app" or "panel") [pendingLaunch] is for: only that one takes it. */
+        @Volatile
+        private var pendingSurface: String? = null
+
         /** The window the engine is attached to now. */
         @Volatile
         private var owner: java.lang.ref.WeakReference<BridgeActivity>? = null
 
-        /** Sends an event to Flutter (on the main thread). */
+        /** App lock's FLAG_SECURE (setSecure), kept for the engine: every window that shows it gets it too. */
+        @Volatile
+        private var secure = false
+
+        private val main by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+
+        /**
+         * Sends an event to Flutter. Flutter takes platform messages on the main thread only (from any other it throws,
+         * which ends the process): callers on other threads (the screen companion's capture thread, MediaProjection's
+         * stop callback) are moved there.
+         */
         fun emit(event: Map<String, Any?>) {
-            events?.success(event)
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                events?.success(event)
+            } else {
+                main.post { events?.success(event) }
+            }
         }
 
-        /** A launch for Flutter to pick up (takeLaunch), from any window. */
-        fun launch(map: Map<String, Any?>) {
+        /**
+         * A launch for Flutter to pick up (takeLaunch), meant for the window [surface]. It is announced when that window
+         * shows (onResume), after it told Flutter it is the one on screen: announced earlier, the window that was on
+         * screen before would take it (a share opening the panel landed in the hidden app, and the other way round).
+         */
+        fun queueLaunch(map: Map<String, Any?>, surface: String) {
             pendingLaunch = map
-            emit(mapOf("kind" to "launch"))
+            pendingSurface = surface
         }
     }
 
@@ -80,6 +102,8 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // App lock is on for the engine, so for this window too (Flutter sent it once, to another window perhaps).
+        if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (savedInstanceState == null) {
             sweepOldCopies()
             handleIntent(intent)
@@ -100,7 +124,11 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
             return
         }
         emit(mapOf("kind" to "surface", "surface" to surface) + surfaceInfo())
+        if (pendingLaunch != null && pendingSurface == surface) emit(mapOf("kind" to "launch"))
     }
+
+    /** A launch for this window (announced when it shows, see queueLaunch). */
+    protected fun launch(map: Map<String, Any?>) = queueLaunch(map, surface)
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -265,7 +293,8 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                     // FLAG_SECURE while app lock is on: the system must not
                     // snapshot chats into Recents thumbnails or screenshots.
                     "setSecure" -> {
-                        if (call.arguments as? Boolean == true) {
+                        secure = call.arguments as? Boolean == true
+                        if (secure) {
                             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                         } else {
                             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -304,9 +333,16 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                     // for the composer's "Paste image", and a copy of it in the cache to attach.
                     "clipboardHasImage" -> result.success(clipboardImageUri() != null)
                     "clipboardImage" -> result.success(clipboardImageUri()?.let { copyClipboardImage(it) })
+                    // Only the window a launch is for takes it (an older app that names none takes any).
                     "takeLaunch" -> {
-                        result.success(pendingLaunch)
-                        pendingLaunch = null
+                        val wanted = call.arguments as? String
+                        if (pendingLaunch != null && (wanted == null || wanted == pendingSurface)) {
+                            result.success(pendingLaunch)
+                            pendingLaunch = null
+                            pendingSurface = null
+                        } else {
+                            result.success(null)
+                        }
                     }
                     "notify" -> {
                         @Suppress("UNCHECKED_CAST")
@@ -354,10 +390,20 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                         startActivityForResult(ScreenCompanion.consentIntent(this), COMPANION_REQUEST)
                     }
                     "companionActive" -> result.success(ScreenCompanion.active)
-                    "companionCapture" -> Thread {
-                        val frame = try { ScreenCompanion.capture(applicationContext) } catch (e: Exception) { null }
-                        runOnUiThread { result.success(frame) }
-                    }.start()
+                    // The panel steps out of the picture while the frame is taken (else the model mostly sees GripHub):
+                    // fully transparent for a moment, then back.
+                    "companionCapture" -> {
+                        val hide = surface == "panel"
+                        if (hide) window.attributes = window.attributes.apply { alpha = 0f }
+                        Thread {
+                            if (hide) Thread.sleep(250)
+                            val frame = try { ScreenCompanion.capture(applicationContext) } catch (e: Exception) { null }
+                            runOnUiThread {
+                                if (hide) window.attributes = window.attributes.apply { alpha = 1f }
+                                result.success(frame)
+                            }
+                        }.start()
+                    }
                     "companionStop" -> {
                         ScreenCompanion.end(applicationContext)
                         result.success(null)

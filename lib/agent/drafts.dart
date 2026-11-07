@@ -54,6 +54,22 @@ class Drafts {
     ];
   }
 
+  /// Moves the draft (text and attachments) kept under [from] to [to], unless [to] already has one of its own: a chat
+  /// that waited read-only for the agent (a new chat, a share) keeps what it was given once it really starts.
+  void move(String? from, String? to) {
+    if (from == null || to == null || from == to) return;
+    final drafts = _all;
+    final entry = drafts[from];
+    if (entry == null) return;
+    drafts.remove(from);
+    final target = drafts[to];
+    final targetEmpty = target == null ||
+        ((target['text'] as String? ?? '').trim().isEmpty && (target['files'] as List? ?? const []).isEmpty);
+    if (targetEmpty) drafts[to] = entry;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 400), flush);
+  }
+
   /// Saves shortly after typing stops.
   void set(String? chat, String text) {
     if (chat == null) return;

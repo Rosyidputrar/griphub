@@ -126,7 +126,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (focus.hasFocus) _checkClipboard();
     });
     agent.addListener(_onAgentChanged);
-    agent.confirmVisionReading = _confirmVisionReading;
+    agent.addVisionConfirmer(_confirmVisionReading);
     _finished = agent.viewFinished.stream.listen(_onViewFinished);
     draftChat = _chatKey;
     final prompt = widget.initialPrompt ?? Drafts.instance.get(draftChat);
@@ -139,6 +139,9 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!scroll.hasClients || dragging) return;
       if (_atBottom != followBottom) setState(() => followBottom = _atBottom);
     });
+    // A prompt the screen was opened with (a share, a selection) is a draft from the start: it was set before this
+    // listener, and a chat that waits read-only for the agent must still have it when it opens for real.
+    if (widget.initialPrompt != null && widget.initialPrompt!.isNotEmpty) Drafts.instance.set(draftChat, input.text);
     input.addListener(() {
       Drafts.instance.set(draftChat, input.text);
       if (_slashQuery != null && slash == null) _loadSlash();
@@ -160,7 +163,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     agent.removeListener(_onAgentChanged);
-    if (agent.confirmVisionReading == _confirmVisionReading) agent.confirmVisionReading = null;
+    agent.removeVisionConfirmer(_confirmVisionReading);
     _finished?.cancel();
     _mentionTimer?.cancel();
     _lifecycle.dispose();

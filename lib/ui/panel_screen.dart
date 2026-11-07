@@ -105,7 +105,7 @@ class _PanelScreenState extends State<PanelScreen> {
 
   /// What the panel was opened for: a selection, a share, or just the panel (the bubble).
   Future<void> _takeLaunch() async {
-    final launch = await agent.client.takeLaunch();
+    final launch = await agent.client.takeLaunch(surface: 'panel');
     if (launch == null || !mounted) return;
     switch (launch['action']) {
       case 'panel_selection':

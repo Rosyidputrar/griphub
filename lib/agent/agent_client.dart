@@ -211,8 +211,10 @@ class AgentClient {
   Future<String?> listen({String? language}) => _method.invokeMethod<String>('listen', {'language': language});
 
   /// Why the app was opened (share from another app, widget, tile), once.
-  Future<Map<String, dynamic>?> takeLaunch() async =>
-      (await _method.invokeMethod<Map>('takeLaunch'))?.cast<String, dynamic>();
+  /// What the app was opened for, when it is meant for the window [surface] ("app" or the floating "panel"); null when
+  /// there is nothing, or it is for the other window.
+  Future<Map<String, dynamic>?> takeLaunch({String surface = 'app'}) async =>
+      (await _method.invokeMethod<Map>('takeLaunch', surface))?.cast<String, dynamic>();
 
   /// Posts a notification on [channel] (approvals, chats, tasks, sync). Tapping it opens the app with [launch]
   /// (see HomeShell._takeLaunch); each of [actions] is a button with its own label and launch.
