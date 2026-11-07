@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/agent/changelog.dart';
 import 'package:griphub_agent/ui/changelog_screen.dart';
 
 import 'harness.dart';
@@ -86,7 +87,9 @@ void main() {
     await pumpLook(tester, const Look(), screen('9.9.9'));
     await frames(tester);
     expect(find.textContaining('Belum dirilis'), findsNothing);
-    expect(find.text('v1.0.131'), findsNWidgets(2), reason: 'a newer build opens on the newest release');
+    // The newest release in the file, whichever it is today: every release adds one above the last.
+    final newest = parseChangelog(_real).firstWhere((x) => !x.early).version;
+    expect(find.text('v$newest'), findsNWidgets(2), reason: 'a newer build opens on the newest release');
   });
 
   testWidgets('entries waiting under "Belum dirilis" are not shown until they have a version', (tester) async {
