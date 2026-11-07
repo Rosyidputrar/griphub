@@ -254,4 +254,46 @@ void main() {
     expect(field.controller!.text, '> Apa arti kata ini?\n\n');
     expect(find.text('To ask from any app without opening this one, turn on the floating panel.'), findsOneWidget);
   });
+
+  group('the home-screen widgets\' taps', () {
+    Future<FakeHost> shell(WidgetTester tester, Map<String, dynamic> launch) async {
+      final host = FakeHost();
+      host.methods['takeLaunch'] = (_) => launch;
+      host.answers['new_session'] = (_) => {'sessionFile': 'n.jsonl', 'sessionId': 'n', 'cwd': '/w/.chats', 'chatMode': 'chat'};
+      host.answers['providers'] = (_) => const [];
+      host.answers['models'] = (_) => [_kimi];
+      final agent = newAgent()..info = {'workspace': '/w'};
+      await pumpLook(tester, const Look(), HomeShell(agent: agent), height: 900);
+      await frames(tester, 20);
+      return host;
+    }
+
+    testWidgets('Tanya Cepat without the panel: a plain chat in the app', (tester) async {
+      final host = await shell(tester, {'action': 'new_plain_chat'});
+      expect(host.sent('new_session').single['chatMode'], 'chat');
+      expect(find.byType(ChatScreen), findsOneWidget);
+    });
+
+    testWidgets('the model mark: the app at the model picker', (tester) async {
+      await shell(tester, {'action': 'pick_model'});
+      expect(find.text('Search models'), findsOneWidget);
+    });
+
+    testWidgets('the microphone: the panel, listening', (tester) async {
+      final host = FakeHost();
+      var listened = 0;
+      host.methods['takeLaunch'] = (_) => {'action': 'panel_voice'};
+      host.methods['listen'] = (_) {
+        listened++;
+        return null;
+      };
+      final agent = newAgent()
+        ..status = BootStatus.ready
+        ..isChat = true;
+      PanelState.instance.apply({'surface': 'panel'});
+      await pumpLook(tester, const Look(), PanelGate(agent: agent, child: const SizedBox()), height: 520);
+      await frames(tester, 12);
+      expect(listened, 1);
+    });
+  });
 }

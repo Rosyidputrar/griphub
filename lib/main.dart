@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'agent/agent_client.dart';
 import 'agent/agent_controller.dart';
+import 'agent/widget_sync.dart';
 import 'ui/panel_screen.dart';
 import 'ui/app_lock.dart';
 import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger;
@@ -28,6 +29,16 @@ void main() {
   unawaited(client.isLowRamDevice().then((low) {
     if (low) Appearance.instance.setLowRamDevice();
   }));
+  // The home-screen widgets follow the app's real state, pushed when it changes (Fitur 7).
+  WidgetSync(
+    agent,
+    translate: tr,
+    dark: () => switch (Appearance.instance.value) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system => WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark,
+    },
+  ).start(also: [Appearance.instance]);
   runApp(GripHubApp(agent: agent));
 }
 

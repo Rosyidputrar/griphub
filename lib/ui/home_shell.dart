@@ -23,6 +23,8 @@ import 'image_gen_screen.dart';
 import 'kit.dart';
 import 'illustration.dart';
 import 'mesh.dart';
+import 'usage_screen.dart';
+import 'model_sheet.dart';
 import 'panel_settings_screen.dart';
 import 'new_chat_sheet.dart';
 import 'plus_menu.dart';
@@ -325,6 +327,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       case 'voice':
         if (!await agent.newSession()) return;
         if (mounted) await openChat(context, agent, listen: true);
+      // From the widgets (Fitur 7): a plain chat, the model picker, the usage screen.
+      case 'new_plain_chat':
+        if (!await agent.newSession(chat: true)) return;
+        if (mounted) await openChat(context, agent);
+      case 'pick_model':
+        if (!mounted) return;
+        unawaited(openChat(context, agent));
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (mounted) await showModelSheet(context, agent);
+      case 'open_usage':
+        if (mounted) await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => UsageScreen(agent: agent)));
       // "Tanya GripHub" while the panel may not show over other apps: the selection in a new chat, and the way to the
       // panel offered once, quietly.
       case 'selection':

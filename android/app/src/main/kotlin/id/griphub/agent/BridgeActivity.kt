@@ -343,6 +343,11 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                     "panelOpen" -> {
                         result.success(Overlay.openPanel(this, null))
                     }
+                    // The home-screen widgets' snapshot (Widgets.kt), pushed whenever what they show changes.
+                    "widgetState" -> {
+                        WidgetState.save(applicationContext, call.arguments as String)
+                        result.success(null)
+                    }
                     else -> if (!handlePanelCall(call.method, call.arguments, result)) result.notImplemented()
                 }
             } catch (e: Exception) {

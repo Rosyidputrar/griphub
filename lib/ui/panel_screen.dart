@@ -109,6 +109,10 @@ class _PanelScreenState extends State<PanelScreen> {
       case 'panel_selection':
         await agent.newSession(chat: true);
         _restart();
+      // The widget's microphone: the panel, listening.
+      case 'panel_voice':
+        if (!agent.isChat) await agent.newSession(chat: true);
+        _restart(listen: true);
       case 'share':
         await agent.newSession(chat: true);
         _restart(
@@ -127,14 +131,17 @@ class _PanelScreenState extends State<PanelScreen> {
     }
   }
 
-  void _restart({String? prompt, List<Attachment> files = const []}) {
+  void _restart({String? prompt, List<Attachment> files = const [], bool listen = false}) {
     if (!mounted) return;
     setState(() {
       _chatKey = UniqueKey();
       _prompt = prompt;
       _files = files;
+      _listen = listen;
     });
   }
+
+  bool _listen = false;
 
   Future<void> _act(PanelAction a) async {
     final text = PanelState.instance.selection;
@@ -231,6 +238,7 @@ class _PanelScreenState extends State<PanelScreen> {
                   panel: true,
                   initialPrompt: _prompt,
                   initialAttachments: _files,
+                  listenOnOpen: _listen,
                 ),
               ),
             ],

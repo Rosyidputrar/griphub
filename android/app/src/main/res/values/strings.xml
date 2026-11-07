@@ -4,4 +4,8 @@
     <string name="tile_label">New GripHub chat</string>
     <!-- In every app's text selection menu (Fitur 4). -->
     <string name="ask_griphub">Tanya GripHub</string>
+    <string name="widget_ask_label">Tanya Cepat</string>
+    <string name="widget_ask_description">Bertanya ke GripHub dalam satu ketuk</string>
+    <string name="widget_status_label">Status Agent</string>
+    <string name="widget_status_description">Apa yang sedang dikerjakan agent, kredit, dan persetujuan yang menunggu</string>
 </resources>

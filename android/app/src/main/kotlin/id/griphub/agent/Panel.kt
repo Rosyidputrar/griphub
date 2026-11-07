@@ -97,6 +97,8 @@ object Overlay {
 class PanelActivity : BridgeActivity() {
     companion object {
         const val ACTION_SHOW = "id.griphub.agent.PANEL"
+        /** The panel, listening right away (the widget's microphone). */
+        const val ACTION_VOICE = "id.griphub.agent.PANEL_VOICE"
         /** The sheet's share of the screen height. */
         private const val HEIGHT = 0.6f
     }
@@ -133,6 +135,11 @@ class PanelActivity : BridgeActivity() {
             }
             // A single share routed here by ShareActivity: the same shape the app reads (text, files).
             Intent.ACTION_SEND -> super.handleIntent(intent)
+            ACTION_VOICE -> {
+                selection = null
+                writable = false
+                launch(mapOf("action" to "panel_voice"))
+            }
             else -> {
                 selection = null
                 writable = false

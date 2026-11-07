@@ -110,6 +110,27 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_quick_info"/>
         </receiver>
         <!-- "Stop" on the agent's ongoing notification. -->
+        <!-- The home-screen widgets of Fitur 7 (Widgets.kt): Tanya Cepat and Status Agent. -->
+        <receiver android:name=".AskWidget" android:exported="false" android:label="@string/widget_ask_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_ask_info"/>
+        </receiver>
+        <receiver android:name=".StatusWidget" android:exported="false" android:label="@string/widget_status_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_status_info"/>
+        </receiver>
+        <!-- Where Tanya Cepat's taps go first: the panel when it may show, else the app. No window of its own. -->
+        <activity
+            android:name=".WidgetActionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="id.griphub.agent.widget"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
         <receiver android:name=".StopReceiver" android:exported="false"/>
         <!-- Exported so the system download service can reach it; it only re-reads the download's status. -->
         <receiver android:name=".UpdateReceiver" android:exported="true">

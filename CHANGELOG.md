@@ -50,6 +50,11 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Kecilkan panel jadi gelembung di tepi layar (seret ke bawah untuk menyingkirkannya); selama gelembung ada, notifikasinya juga ada.
   - Izin "Tampilkan di atas aplikasi lain" diminta hanya saat kamu menyalakan panel (Pengaturan → Panel mengambang), dengan penjelasan. Tanpa izin itu, semua pintu masuk tadi membuka aplikasi.
   - Pindai dokumen dari menu + (di aplikasi dan panel): foto halaman atau struk dibaca jadi teks oleh model vision lewat GripHub Router, lalu masuk ke kolom ketik. Fotonya langsung dihapus setelah dibaca.
+- **Dua widget layar utama baru.**
+  - **Tanya Cepat** (4×1, bisa dikecilkan ke 2×1): baris mirip kolom ketik dengan nama model aktif. Ketuk untuk membuka panel mengambang (atau chat baru di aplikasi bila panel belum diizinkan), mikrofon untuk langsung bicara, logo model untuk membuka pilihan model. Widget tidak bisa diketik langsung, dan memang tidak berpura-pura bisa.
+  - **Status Agent** (4×2, bisa diperbesar ke 4×4): sisa kredit dan model aktif, lalu apa yang sedang berjalan: chat yang dikerjakan agent, job latar, subagent, dan tugas terjadwal berikutnya. Ketuk barisnya untuk langsung ke tempatnya. Lencana merah hanya muncul bila ada persetujuan yang menunggu. Bila tidak ada apa-apa: "Tidak ada yang berjalan" beserta tugas terjadwal berikutnya.
+  - Isinya mengikuti keadaan aplikasi saat berubah, tanpa polling; mengikuti tema terang atau gelap aplikasi. Ketukan widget hanya membuka, tidak pernah menjalankan apa pun.
+  - Widget lama (Chat baru dan Suara) tetap ada.
 
 ---
 
