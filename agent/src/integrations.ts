@@ -182,6 +182,12 @@ export interface AppSettings {
 	notify?: { enabled?: boolean; url?: string; topic?: string };
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
+	/**
+	 * Smart router (smartrouter.ts): whether chats may be set to "Otomatis (Pintar)"; unset = on. Off stops it in every
+	 * chat (each keeps the model it had last). [smartRouterBlocked] lists model ids it must never pick.
+	 */
+	smartRouter?: boolean;
+	smartRouterBlocked?: string[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
 	/**
@@ -372,6 +378,8 @@ export class Integrations {
 			tavilySearch: this.settings.tavilySearch ?? true,
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
+			smartRouter: this.settings.smartRouter ?? true,
+			smartRouterBlocked: (this.settings.smartRouterBlocked ?? []).filter((id) => typeof id === "string" && id),
 			dailyBudget: dailyBudget ?? 0,
 			...imageSettings(this.settings),
 			// Null while the user set nothing: the limit then follows the open chat's model (compactLimit). An app too old
@@ -430,6 +438,13 @@ export class Integrations {
 			throw new Error("The subagent time limit must be 0 (no limit) or a whole number of minutes");
 		}
 		checkImageSettings(next);
+		if (next.smartRouter !== undefined && typeof next.smartRouter !== "boolean") throw new Error("Smart router is on or off");
+		if (next.smartRouterBlocked !== undefined) {
+			if (!Array.isArray(next.smartRouterBlocked) || next.smartRouterBlocked.some((id) => typeof id !== "string" || !id.trim())) {
+				throw new Error("The smart router's blocked list holds model ids");
+			}
+			next.smartRouterBlocked = [...new Set(next.smartRouterBlocked.map((id) => id.trim()))];
+		}
 		// 0 turns the host's summaries off (pi's own stay); anything else must be a sane token count.
 		if (next.compactAt !== undefined && !(typeof next.compactAt === "number" && Number.isInteger(next.compactAt) && next.compactAt >= 0)) {
 			throw new Error("The context limit must be 0 (the model's own limit) or a whole number of tokens");

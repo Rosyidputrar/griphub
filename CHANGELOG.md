@@ -13,7 +13,13 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 
 ## Belum dirilis
 
-_Belum ada perubahan._
+### Baru
+- **Router Pintar: "Otomatis (Pintar)" di pilihan model.** Chat yang memakainya memilih sendiri model termurah yang sanggup untuk tiap pesan, berdasarkan data GripHub Router tentang kemampuan dan harga terkini tiap model.
+  - Gambar terlampir hanya dikirim ke model yang bisa membaca gambar; chat Coding hanya ke model yang bisa memakai tools.
+  - Bila balasan gagal, terpotong, atau kamu bilang jawabannya salah, pesan berikutnya naik ke model yang lebih kuat.
+  - Nama model yang benar-benar dipakai tetap tampil, dengan tanda kecil ✦ bahwa ia dipilih otomatis.
+  - Setiap keputusan tercatat beserta alasan dan perkiraan biayanya: Pemakaian → Chat ini → Keputusan Router Pintar.
+  - Memilih model sendiri menghentikan pilihan otomatis untuk chat itu. Bisa dimatikan, dan model tertentu bisa dikecualikan, di Pengaturan → Router Pintar.
 
 ---
 

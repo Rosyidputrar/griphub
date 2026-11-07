@@ -63,6 +63,18 @@ class AgentController extends ChangeNotifier {
   /// Set when the current model is billed differently than the user may expect.
   String? billingNotice;
 
+  /// Smart router ("Otomatis (Pintar)") for the open chat.
+  SmartRouterState smartRouter = const SmartRouterState();
+
+  /// The open chat's routing decisions, oldest first (loaded with the chat, then added to as they happen).
+  List<RoutingDecision> routingLog = const [];
+
+  /// User turns (0-based) whose model the smart router picked: their footers say so.
+  Set<int> get autoRoutedTurns => {
+    for (final d in routingLog)
+      if (d.kind == 'route') d.turn,
+  };
+
   /// Plan mode: the agent plans first and changes nothing until approved.
   bool planMode = false;
   String approvalMode = 'ask_risky';
@@ -673,6 +685,29 @@ class AgentController extends ChangeNotifier {
       final q = await client.call<Object?>('prompt_queue');
       if (q is List) _applyQueue({'items': q});
     } catch (_) {}
+    await _loadRoutingLog();
+    notifyListeners();
+  }
+
+  /// The open chat's routing log; an older host without the smart router has none.
+  Future<void> _loadRoutingLog() async {
+    try {
+      final r = (await client.call<Map>('routing_log')).cast<String, dynamic>();
+      routingLog = [for (final d in (r['log'] as List? ?? const [])) RoutingDecision((d as Map).cast<String, dynamic>())];
+    } catch (_) {
+      routingLog = const [];
+    }
+  }
+
+  /// A chat's routing log by session id (the open chat's when null), for its details screen.
+  Future<List<RoutingDecision>> routingLogOf([String? id]) async {
+    final r = (await client.call<Map>('routing_log', {'sessionId': ?id})).cast<String, dynamic>();
+    return [for (final d in (r['log'] as List? ?? const [])) RoutingDecision((d as Map).cast<String, dynamic>())];
+  }
+
+  /// Turns "Otomatis (Pintar)" on or off for the open chat. Picking a model by hand ([setModel]) also turns it off.
+  Future<void> setSmartRouter(bool on) async {
+    _applyState(await client.call<Map<String, dynamic>>('smart_router_set', {'on': on}));
     notifyListeners();
   }
 
@@ -970,6 +1005,12 @@ class AgentController extends ChangeNotifier {
       case 'state':
         _applyState((record['state'] as Map).cast<String, dynamic>());
         notifyListeners();
+      // A routing decision of the open chat, as it happened (agent/src/smartrouter.ts).
+      case 'routing' when record['sessionId'] == sessionId:
+        routingLog = [...routingLog, RoutingDecision((record['decision'] as Map).cast<String, dynamic>())];
+        final sr = record['smartRouter'];
+        if (sr is Map) smartRouter = SmartRouterState.fromJson(sr.cast<String, dynamic>());
+        notifyListeners();
       case 'error':
         _addNotice(readableError(record['message'] as String? ?? 'Error'), error: true);
       // A server link that could not replay what it missed: reload instead.
@@ -1240,6 +1281,7 @@ class AgentController extends ChangeNotifier {
     // Said with every chat's state; an answer without it (an older host) is a coding chat's.
     isChat = s['chatMode'] == 'chat';
     billingNotice = s['billingNotice'] as String?;
+    smartRouter = SmartRouterState.fromJson((s['smartRouter'] as Map?)?.cast<String, dynamic>());
     planMode = s['planMode'] == true;
     approvalMode = s['approvalMode'] as String? ?? approvalMode;
     if (s['isStreaming'] is bool) _setBusy(s['isStreaming'] as bool);

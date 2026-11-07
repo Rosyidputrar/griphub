@@ -29,6 +29,7 @@ import 'network_screen.dart';
 import 'settings_screen.dart';
 import 'sheet.dart';
 import 'skills_screen.dart';
+import 'smart_router_screen.dart';
 import 'subagent_settings_screen.dart';
 import 'sync_screen.dart';
 import 'tasks_screen.dart';
@@ -376,6 +377,12 @@ builder: (context, scroll) => Column(
                         ? tr('Used when the current model hits a limit or errors')
                         : it.settings!.fallbackModels.map((m) => m['model']).join(' → '),
                     onTap: _pickFallbacks,
+                  ),
+                  SettingsRow(
+                    leading: const SmartRouterTile(),
+                    title: tr('Smart router'),
+                    subtitle: smartRouterSummary(it.settings),
+                    onTap: () => _open(SmartRouterSettingsScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.chartColumn,

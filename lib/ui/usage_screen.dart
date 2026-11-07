@@ -10,6 +10,7 @@ import '../agent/pricing.dart';
 import '../agent/router_account.dart';
 import 'errors.dart';
 import 'kit.dart';
+import 'smart_router_screen.dart';
 import 'subagent_card.dart' show thinkingLabel;
 import 'i18n.dart';
 import 'theme.dart';
@@ -324,6 +325,20 @@ class _UsageScreenState extends State<UsageScreen> {
               ..._summary(context, rows),
             SectionLabel(tr('This chat')),
             _sessionCard(context),
+            // What the smart router decided for this chat, when it was used here (agent/src/smartrouter.ts).
+            if (agent.routingLog.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              SettingsGroup(
+                children: [
+                  SettingsRow(
+                    leading: const SmartRouterTile(),
+                    title: tr('Smart router decisions'),
+                    subtitle: tr('{n} decisions in this chat').replaceAll('{n}', '${agent.routingLog.length}'),
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => RoutingLogScreen(agent: agent))),
+                  ),
+                ],
+              ),
+            ],
             SectionLabel(tr('Limits')),
             SettingsGroup(
               children: [

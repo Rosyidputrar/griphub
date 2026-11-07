@@ -82,7 +82,9 @@ import {
 } from "./workbench.js";
 import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { PromptQueue } from "./promptqueue.js";
-import { Router } from "./router.js";
+import { lookup, Router } from "./router.js";
+import { catalog, type ModelMeta } from "./modelcaps.js";
+import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
@@ -112,6 +114,8 @@ let jobs: Jobs;
 /** Pictures: the generate_image tool, its limits and the day's picture log (image.ts). */
 let images: Images;
 let router: Router;
+/** Smart router state and decision log per chat (smartrouter.ts). */
+let routing: RoutingStore;
 let modelBoard: ModelBoard;
 let fsService: Fs;
 let preview: Preview;
@@ -380,6 +384,7 @@ function state() {
 		// hello already says with that whether this host is a phone's or a server's, and spreads this state after it.
 		chatMode: modeOf(s.sessionManager.getCwd(), workspace),
 		billingNotice: billingNotice(),
+		smartRouter: smartRouterState(s),
 		planMode: guard.planMode,
 		approvalMode: guard.mode,
 		// How long the running turn has taken so far, by this host's clock (the app counts on from there).
@@ -873,10 +878,136 @@ async function tryFallback(error: string) {
 		await failed.setModel(model, { persist: false });
 		if (session !== failed) return;
 		send({ type: "notice", message: `Switched to ${model.name ?? model.id} after an error: ${error.slice(0, 120)}` });
+		if (routing.get(failed.sessionId).auto) {
+			logDecision(failed, { kind: "fallback", model: model.id, modelName: model.name ?? model.id, reason: `fallback model after an error: ${error.slice(0, 120)}` });
+		}
 		send({ type: "state", state: state() });
 		failed.prompt("Continue where you left off (the previous model failed).").catch(() => {});
 	} finally {
 		fallbackPending = false;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Smart router (smartrouter.ts): "Otomatis (Pintar)" per chat
+
+function smartRouterOn(): boolean {
+	return integrations?.settings.smartRouter !== false;
+}
+
+/** What the app shows: whether the switch allows it, whether this chat is automatic, and its current floor. */
+function smartRouterState(s: AgentSession) {
+	const r = routing?.get(s.sessionId);
+	return { enabled: smartRouterOn(), auto: !!r?.auto && smartRouterOn(), floor: r?.floor ?? 0 };
+}
+
+function userTurns(s: AgentSession): number {
+	return (s.messages as any[]).filter((m) => m?.role === "user").length;
+}
+
+/** GripHub's chat models as the router describes them, limited to the ones this host can actually run. */
+function routerCatalog(): ModelMeta[] {
+	const saved = customProviders.list().find((p) => p.id === GRIPHUB_ID)?.models ?? [];
+	return catalog({
+		models: saved.filter((m) => !!modelRuntime.getModel(GRIPHUB_ID, m.id)),
+		liveRates: router.liveRates(),
+		floor: (id) => router.floor(id),
+		available: (id) => router.modelAvailable(id),
+		lookup,
+	}).filter((m) => isChatModel({ provider: GRIPHUB_ID, id: m.id }));
+}
+
+function logDecision(s: AgentSession, d: Omit<Decision, "at" | "turn">, change?: (r: ReturnType<RoutingStore["get"]>) => void) {
+	const decision: Decision = { at: Date.now(), turn: userTurns(s), ...d };
+	routing.update(s.sessionId, (r) => {
+		change?.(r);
+		r.log.push(decision);
+	});
+	send({ type: "routing", sessionId: s.sessionId, decision, smartRouter: smartRouterState(s) });
+	return decision;
+}
+
+/** Turns "Otomatis (Pintar)" on or off for the open chat. */
+function setSmartRouter(s: AgentSession, on: boolean) {
+	if (on && !smartRouterOn()) throw new Error("The smart router is turned off in Settings");
+	const r = routing.get(s.sessionId);
+	if (r.auto === on) return;
+	logDecision(s, { kind: on ? "on" : "off", reason: on ? "chosen in the model picker" : "turned off" }, (x) => {
+		x.auto = on;
+		if (!on) x.floor = 0;
+	});
+}
+
+/** Tokens the routed model must hold besides the conversation: this message and room for the answer. */
+const ROUTE_RESERVE = { chat: 4_096, coding: 16_384 };
+
+/**
+ * Picks the open chat's model for the turn about to start, when the chat is automatic. Throws, with the reason, when no
+ * model fits: the turn is not sent on a guess.
+ */
+async function routeTurn(s: AgentSession, text: string, images: number) {
+	if (!smartRouterOn()) return;
+	const state0 = routing.get(s.sessionId);
+	if (!state0.auto) return;
+	const coding = !isChatCwd(s.sessionManager.getCwd(), workspace);
+	const contextTokens =
+		s.getContextUsage()?.tokens ?? Math.ceil((s.messages as any[]).reduce((n, m) => n + messageText(m).length, 0) / 4);
+	const promptTokens = Math.ceil(text.length / 4) + images * 1_500;
+
+	// A failure of the last routed turn raises the chat's floor one band above what it used.
+	const lastAssistant = [...(s.messages as any[])].reverse().find((m) => m?.role === "assistant") ?? null;
+	const failure = state0.last ? failureOf(lastAssistant, state0.last.text, text) : null;
+	let floor = state0.floor;
+	if (failure) {
+		const raised = nextFloor(floor, state0.last?.band ?? null);
+		if (raised !== floor) {
+			logDecision(s, { kind: "escalate", band: raised, why: [failure], reason: `${failure}: class raised to ${DIFFICULTY_NAMES[raised]}` }, (r) => {
+				r.floor = raised;
+			});
+			floor = raised;
+		}
+	}
+
+	const { difficulty, reasons } = classify({ text, images, coding, contextTokens });
+	const wanted = Math.max(difficulty, floor) as Difficulty;
+	const need = { vision: images > 0, tools: coding, minContext: contextTokens + promptTokens + (coding ? ROUTE_RESERVE.coding : ROUTE_RESERVE.chat) };
+	const blocked = new Set(integrations.settings.smartRouterBlocked ?? []);
+	let models = routerCatalog();
+	// A list saved before the router's tool flags were kept (an app update) states none: read /v1/models again once
+	// (a free listing, not a model call) rather than refuse every coding turn until the daily refresh.
+	if (models.length && models.every((m) => m.tools === undefined)) {
+		await refreshGripHubModels().catch(() => {});
+		models = routerCatalog();
+	}
+	const picked = select(models, need, wanted, { blocked, inputTokens: contextTokens + promptTokens, coding });
+	if (!picked.ok) {
+		logDecision(s, { kind: "none", difficulty, why: picked.missing, reason: picked.reason });
+		// One fixed sentence, which the app translates; the details are in the chat's routing log.
+		throw new Error("The smart router found no model that can do this message. Pick a model yourself for it.");
+	}
+	const { choice } = picked;
+	const model = modelRuntime.getModel(GRIPHUB_ID, choice.model.id);
+	if (!model) throw new Error("The smart router found no model that can do this message. Pick a model yourself for it.");
+	const why = [...reasons, ...(floor > difficulty ? ["floor"] : []), ...(need.vision ? ["vision"] : []), ...(choice.belowWanted ? ["below"] : []), "cheapest"];
+	const reason = [
+		`${DIFFICULTY_NAMES[difficulty]} (${reasons.join(", ")})`,
+		...(floor > difficulty ? [`class floor ${DIFFICULTY_NAMES[floor]} after an earlier failure`] : []),
+		...(need.vision ? ["needs vision"] : []),
+		...(choice.belowWanted ? [`no ${DIFFICULTY_NAMES[wanted]} model fits; strongest that does`] : []),
+		"cheapest that fits",
+	].join("; ");
+	logDecision(
+		s,
+		{ kind: "route", model: choice.model.id, modelName: choice.model.name, band: choice.band, difficulty, why, reason, estimate: choice.estimate },
+		(r) => {
+			r.last = { model: choice.model.id, band: choice.band, text };
+		},
+	);
+	if (s.model?.provider !== GRIPHUB_ID || s.model.id !== model.id) {
+		// The same call a manual pick makes (thinking effort is kept the way pi keeps it then), without making this
+		// model the default for new chats.
+		await s.setModel(model, { persist: false });
+		send({ type: "state", state: state() });
 	}
 }
 
@@ -1419,6 +1550,8 @@ async function handle(cmd: Command): Promise<unknown> {
 				const id = await promptQueue.add(s, text, cmd.text, cmd.images);
 				return id ? { queued: id } : null;
 			}
+			// An automatic chat picks this turn's model first; a follow-up that steers a running turn keeps its model.
+			if (!s.isStreaming) await routeTurn(s, String(cmd.text ?? ""), Array.isArray(cmd.images) ? cmd.images.length : 0);
 			// Don't await the run; progress arrives as events.
 			s.prompt(text, { images: cmd.images, streamingBehavior: behavior }).catch((e) =>
 				send({ type: "error", message: String(e?.message ?? e) }),
@@ -1435,6 +1568,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			// The last prompt from this chat that never made it into the history (refused, or failed to start).
 			const unsent = lastPrompt && lastPrompt.sessionId === s.sessionId ? lastPrompt : null;
 			fallbackTried = false;
+			// Try again after a failure: an automatic chat climbs a class for it (smartrouter.ts failureOf).
+			await routeTurn(s, unsent?.text ?? routing.get(s.sessionId).last?.text ?? "", unsent?.images?.length ?? 0);
 			if (unsent) {
 				s.prompt(unsent.text, { images: unsent.images }).catch((e) =>
 					send({ type: "error", message: String(e?.message ?? e) }),
@@ -1535,7 +1670,23 @@ async function handle(cmd: Command): Promise<unknown> {
 			const model = modelRuntime.getModel(cmd.provider, cmd.model);
 			if (!model) throw new Error(`Unknown model ${cmd.provider}/${cmd.model}`);
 			await s.setModel(model, { persist: true });
+			// A pick of the user's own always wins: an automatic chat stops being automatic, without argument.
+			if (routing.get(s.sessionId).auto) {
+				logDecision(s, { kind: "manual", model: model.id, modelName: model.name ?? model.id, reason: "model chosen by hand; automatic choice stopped for this chat" }, (r) => {
+					r.auto = false;
+					r.floor = 0;
+				});
+			}
 			return state();
+		}
+		case "smart_router_set":
+			setSmartRouter(s, !!cmd.on);
+			return state();
+		// The open chat's routing decisions (or another chat's, by session id), oldest first.
+		case "routing_log": {
+			const id = typeof cmd.sessionId === "string" && cmd.sessionId ? cmd.sessionId : s.sessionId;
+			const r = routing.get(id);
+			return { sessionId: id, auto: r.auto && smartRouterOn(), floor: r.floor, log: r.log };
 		}
 		case "set_thinking":
 			s.setThinkingLevel(cmd.level, { persist: true });
@@ -2295,6 +2446,7 @@ async function main() {
 		fallbackRates: FALLBACK_RATES,
 	});
 	usePricingRouter(router);
+	routing = new RoutingStore(join(stateDir, "routing"));
 	modelBoard = new ModelBoard({
 		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
 		cacheFile: join(stateDir, "model-board-cache.json"),

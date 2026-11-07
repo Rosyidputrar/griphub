@@ -21,6 +21,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
+import 'smart_router_screen.dart' show SmartRouterMark;
 import 'live_clock.dart';
 import 'illustration.dart';
 import 'mesh.dart';
@@ -800,10 +801,25 @@ class _ChatScreenState extends State<ChatScreen> {
     return tr('Thinking…');
   }
 
+  /// Whether the turn that entry [i] closes ran on the model the smart router picked for it: the turn is the user's
+  /// n-th message (n = the user messages up to [i], from 0), and the footer's model must be the one picked.
+  static bool _routedTurn(List<ChatEntry> entries, int i, Map<int, String> routed, String? model) {
+    var users = 0;
+    for (var k = 0; k <= i; k++) {
+      if (entries[k] is UserEntry) users++;
+    }
+    return users > 0 && model != null && routed[users - 1] == model;
+  }
+
   Widget _transcript() {
     final entries = agent.entries;
     final placed = placeSubagents(agent);
     final footers = turnFooters(entries, busy: agent.busy);
+    // Turns whose model the smart router picked, by the user turn they answer, with the model it picked.
+    final routed = {
+      for (final d in agent.routingLog)
+        if (d.kind == 'route' && d.model != null) d.turn: d.model!,
+    };
     final subs = placed.trailing;
     final retry = agent.endsInError;
     final activity = _activity();
@@ -840,6 +856,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 null => null,
               },
               footer: footers[i],
+              autoRouted: footers[i] != null && routed.isNotEmpty && _routedTurn(entries, i, routed, footers[i]!.model),
             ),
             NoticeEntry() => NoticeView(
               e,
@@ -1320,6 +1337,7 @@ class _Composer extends StatelessWidget {
                             child: _Chip(
                               leading: agent.model == null ? null : BrandTile(id: agent.model!.provider, model: agent.model!.id, size: 20),
                               label: agent.model?.name ?? tr('Choose model'),
+                              auto: agent.smartRouter.auto && agent.model != null,
                               icon: LucideIcons.chevronsUpDown,
                               onTap: onPickModel,
                             ),
@@ -1441,11 +1459,14 @@ class _ThinkingChip extends StatelessWidget {
 }
 
 class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.onTap, this.icon, this.leading});
+  const _Chip({required this.label, required this.onTap, this.icon, this.leading, this.auto = false});
   final String label;
   final VoidCallback onTap;
   final IconData? icon;
   final Widget? leading;
+
+  /// The smart router picks this chat's model: a small sparkle after the name says so (the name is the real model).
+  final bool auto;
 
   @override
   Widget build(BuildContext context) {
@@ -1477,6 +1498,10 @@ class _Chip extends StatelessWidget {
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.text),
                     ),
                   ),
+                  if (auto) ...[
+                    const SizedBox(width: 4),
+                    SmartRouterMark(size: 14, semanticLabel: tr('chosen automatically')),
+                  ],
                   if (icon != null) ...[const SizedBox(width: 4), Icon(icon, size: 13, color: p.faint)],
                 ],
               ),

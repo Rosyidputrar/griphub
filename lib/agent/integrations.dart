@@ -249,6 +249,12 @@ class AppSettings {
   bool get githubClientIdBuiltIn => json['githubClientIdBuiltIn'] == true;
   List<Map<String, dynamic>> get fallbackModels =>
       (json['fallbackModels'] as List? ?? const []).map((e) => (e as Map).cast<String, dynamic>()).toList();
+
+  /// Smart router (agent/src/smartrouter.ts): whether chats may pick their model automatically (on unless turned off).
+  bool get smartRouter => json['smartRouter'] != false;
+
+  /// Model ids the smart router must never pick.
+  List<String> get smartRouterBlocked => (json['smartRouterBlocked'] as List? ?? const []).whereType<String>().toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;
 
   /// Pictures (agent/src/image.ts), with limits of their own inside the daily budget. Defaults as the host's

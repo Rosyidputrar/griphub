@@ -22,6 +22,7 @@ import 'image_tool_card.dart';
 import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
+import 'smart_router_screen.dart' show SmartRouterMark;
 import 'links.dart';
 import 'live_clock.dart';
 import 'i18n.dart';
@@ -441,6 +442,7 @@ class AssistantMessageView extends StatelessWidget {
     this.subagentCard,
     this.subagentCost,
     this.footer,
+    this.autoRouted = false,
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
@@ -469,6 +471,9 @@ class AssistantMessageView extends StatelessWidget {
   /// The turn's copy-and-model footer, when this is the turn's last message
   /// and the turn is over (see [turnFooters]); null draws none.
   final TurnFooter? footer;
+
+  /// The smart router picked this turn's model: the footer marks the model's name (agent/src/smartrouter.ts).
+  final bool autoRouted;
 
   @override
   Widget build(BuildContext context) {
@@ -517,6 +522,7 @@ class AssistantMessageView extends StatelessWidget {
         _MessageFooter(
           text: f.text,
           model: model == null ? null : (modelLabel?.call(model) ?? model),
+          auto: autoRouted,
           cost: f.cost,
           took: f.took,
           outcome: f.outcome,
@@ -660,9 +666,12 @@ typedef SubagentsCost = ({int count, double? credits});
 String _creditsText(double c) => '~${localNumber(formatCredits(c))} ${tr('credits')}';
 
 class _MessageFooter extends StatelessWidget {
-  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done});
+  const _MessageFooter({required this.text, this.model, this.cost, this.subagents, this.took, this.outcome = TurnOutcome.done, this.auto = false});
   final String text;
   final String? model;
+
+  /// The model was picked by the smart router: a small sparkle before its name, in the footer's one quiet colour.
+  final bool auto;
   final TurnCost? cost;
   final SubagentsCost? subagents;
 
@@ -697,6 +706,11 @@ class _MessageFooter extends StatelessWidget {
               TurnOutcome.stopped => LiveClock(label: tr('Stopped'), took: took, state: ClockState.stopped),
               TurnOutcome.failed => LiveClock(label: tr('Failed'), took: took, state: ClockState.failed),
             },
+          ),
+        if (model != null && auto)
+          Padding(
+            padding: const EdgeInsets.only(right: 3),
+            child: SmartRouterMark(size: 12, semanticLabel: tr('chosen automatically')),
           ),
         if (model != null)
           Text(

@@ -733,3 +733,50 @@ class QueuedPrompt {
   final String text;
   final int images;
 }
+
+/// The smart router's state for the open chat (agent/src/smartrouter.ts): whether Settings allow it, whether this chat
+/// picks its model automatically, and the class floor earlier failures raised it to.
+class SmartRouterState {
+  const SmartRouterState({this.enabled = false, this.auto = false, this.floor = 0});
+  factory SmartRouterState.fromJson(Map<String, dynamic>? j) => j == null
+      ? const SmartRouterState()
+      : SmartRouterState(
+          enabled: j['enabled'] == true,
+          auto: j['auto'] == true,
+          floor: (j['floor'] as num?)?.toInt() ?? 0,
+        );
+  final bool enabled;
+  final bool auto;
+  final int floor;
+}
+
+/// One entry of a chat's routing log: a model picked for a turn, a class climbed, nothing fitting, a hand pick.
+class RoutingDecision {
+  RoutingDecision(Map<String, dynamic> j)
+    : at = DateTime.fromMillisecondsSinceEpoch((j['at'] as num?)?.toInt() ?? 0),
+      turn = (j['turn'] as num?)?.toInt() ?? 0,
+      kind = j['kind'] as String? ?? 'route',
+      model = j['model'] as String?,
+      modelName = j['modelName'] as String?,
+      band = (j['band'] as num?)?.toInt(),
+      difficulty = (j['difficulty'] as num?)?.toInt(),
+      reason = j['reason'] as String? ?? '',
+      why = (j['why'] as List? ?? const []).whereType<String>().toList(),
+      estimate = (j['estimate'] as num?)?.toDouble();
+  final DateTime at;
+
+  /// User turns before the one this decision was for: the first message of a chat is turn 0.
+  final int turn;
+
+  /// route, none, escalate, manual, on, off or fallback.
+  final String kind;
+  final String? model;
+  final String? modelName;
+  final int? band;
+  final int? difficulty;
+  final String reason;
+
+  /// The reason as codes (agent/src/smartrouter.ts Decision.why), worded by the app.
+  final List<String> why;
+  final double? estimate;
+}

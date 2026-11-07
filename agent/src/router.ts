@@ -403,6 +403,14 @@ export class Router {
 		return lookup(this.rates(), model);
 	}
 
+	/**
+	 * The rates the router itself served, or undefined while none ever loaded. Never the built-in table: features that
+	 * choose a model by price (modelcaps.ts) only trust what the router said.
+	 */
+	liveRates(): Record<string, Rate> | undefined {
+		return this.cache.rates && Object.keys(this.cache.rates).length ? this.cache.rates : undefined;
+	}
+
 	floor(model: string): number | undefined {
 		return lookup(this.cache.floors, model) ?? lookup(SEED_FLOORS, model);
 	}

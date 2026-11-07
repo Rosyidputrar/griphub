@@ -17,6 +17,7 @@ const ROUTER = "https://griphubrouter.web.id/v1";
 // A 1x1 PNG, for MOCK_IMAGES.
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 let imageCount = 0;
+let chatCount = 0;
 const realFetch = globalThis.fetch;
 
 function chunk(delta, finish = null, extra = {}) {
@@ -68,7 +69,13 @@ globalThis.fetch = async (input, init) => {
 		const system = request.messages?.find((m) => m.role === "system" || m.role === "developer");
 		const text = typeof system?.content === "string" ? system.content : JSON.stringify(system?.content ?? "");
 		const tools = (request.tools ?? []).map((t) => t.function?.name ?? t.name);
-		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary })}\n`);
+		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary, model: request.model })}\n`);
+	}
+	// MOCK_FAIL_CHAT: comma-separated numbers of the chat requests (not summaries) the router answers with a 500, as
+	// an upstream outage would; for tests of what the host does after a failed turn.
+	if (!summary) chatCount++;
+	if (!summary && (process.env.MOCK_FAIL_CHAT ?? "").split(",").includes(String(chatCount))) {
+		return new Response('{"error":{"message":"Upstream failed in the mock router"}}', { status: 500, headers: { "content-type": "application/json" } });
 	}
 	if (process.env.MOCK_TOOL) {
 		const said = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");

@@ -1,9 +1,17 @@
 // Chat features: thinking preview, tappable links with the leave-the-app
 // confirmation and trusted domains, and follow-ups waiting for their turn.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/agent/agent_controller.dart';
+import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/models.dart';
+import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/model_sheet.dart';
+import 'package:griphub_agent/ui/smart_router_screen.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:griphub_agent/agent/sent_attachments.dart';
 import 'package:griphub_agent/ui/links.dart';
 import 'package:griphub_agent/ui/message_views.dart';
@@ -279,5 +287,180 @@ void main() {
         expect(cancelled, 1);
       });
     }
+  });
+
+  group('smart router', () {
+    const glm = {'provider': 'griphub', 'id': 'glm-5.3-flash', 'name': 'GLM 5.3 Flash', 'input': ['text']};
+    const kimi = {'provider': 'griphub', 'id': 'kimi-k3', 'name': 'Kimi K3', 'input': ['text']};
+    Map<String, dynamic> routed(int turn, String model, String name) => {
+      'at': 0,
+      'turn': turn,
+      'kind': 'route',
+      'model': model,
+      'modelName': name,
+      'band': 0,
+      'difficulty': 0,
+      'reason': 'light (plain chat); cheapest that fits',
+      'why': ['plain-chat', 'cheapest'],
+      'estimate': 0.01,
+    };
+
+    /// A plain chat set to automatic: the router picked GLM for the first message, the user picked Kimi for the second.
+    AgentController automaticChat({bool auto = true}) {
+      final agent = newAgent()
+        ..sessionId = 's1'
+        ..isChat = true
+        ..model = ModelInfo(Map.of(glm))
+        ..models = [ModelInfo(Map.of(glm)), ModelInfo(Map.of(kimi))]
+        ..smartRouter = SmartRouterState(enabled: true, auto: auto)
+        ..routingLog = [RoutingDecision(routed(0, 'glm-5.3-flash', 'GLM 5.3 Flash'))];
+      agent.addHistoryMessage({'role': 'user', 'content': 'Ibu kota Jepang apa?'});
+      agent.addHistoryMessage({
+        'role': 'assistant',
+        'model': 'glm-5.3-flash',
+        'stopReason': 'stop',
+        'content': [
+          {'type': 'text', 'text': 'Tokyo.'},
+        ],
+        'usage': {'input': 900, 'output': 12, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 912},
+        'griphubCost': {'credits': 0.01, 'floored': true},
+      });
+      agent.addHistoryMessage({'role': 'user', 'content': 'Dan Prancis?'});
+      agent.addHistoryMessage({
+        'role': 'assistant',
+        'model': 'kimi-k3',
+        'stopReason': 'stop',
+        'content': [
+          {'type': 'text', 'text': 'Paris.'},
+        ],
+        'usage': {'input': 950, 'output': 10, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 960},
+        'griphubCost': {'credits': 0.01, 'floored': true},
+      });
+      return agent;
+    }
+
+    Finder sparkles() => find.byType(SmartRouterMark);
+
+    testWidgets('an automatic chat names the real model, with one small mark in the composer and under the routed turn', (tester) async {
+      FakeHost();
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      final agent = automaticChat();
+      await pumpLook(tester, const Look(), ChatScreen(agent: agent));
+      await frames(tester);
+      // The composer shows the model really in use, never "Automatic".
+      expect(find.text('GLM 5.3 Flash'), findsWidgets);
+      expect(find.text('Automatic (Smart)'), findsNothing);
+      // One mark in the composer, one under the first turn; the hand-picked second turn has none.
+      expect(sparkles(), findsNWidgets(2));
+      // Said to a screen reader too, inside the chip's and the footer's own labels.
+      final semantics = tester.ensureSemantics();
+      await tester.pump();
+      expect(find.bySemanticsLabel(RegExp('chosen automatically')), findsNWidgets(2));
+      semantics.dispose();
+    });
+
+    testWidgets('a chat that is not automatic shows no mark at all', (tester) async {
+      FakeHost();
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      final agent = automaticChat(auto: false)..routingLog = const [];
+      await pumpLook(tester, const Look(), ChatScreen(agent: agent));
+      await frames(tester);
+      expect(sparkles(), findsNothing);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {
+      testWidgets('golden: automatic chat ${look.name}', (tester) async {
+        FakeHost();
+        Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+        await pumpLook(tester, look, ChatScreen(agent: automaticChat()));
+        await frames(tester);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('smart_router_chat_${look.name}')));
+      });
+    }
+
+    /// The fake host first, then the agent: a client made before the host never hears its replies.
+    FakeHost sheetHost() {
+      final host = FakeHost();
+      host.answers['providers'] = (_) => [
+        {'id': 'griphub', 'name': 'GripHub Router', 'configured': true},
+      ];
+      host.answers['models'] = (_) => [glm, kimi];
+      host.answers['smart_router_set'] = (cmd) => {'model': glm, 'sessionId': 's1', 'smartRouter': {'enabled': true, 'auto': cmd['on'] == true, 'floor': 0}};
+      host.answers['set_model'] = (cmd) => {'model': cmd['model'] == 'kimi-k3' ? kimi : glm, 'sessionId': 's1', 'smartRouter': {'enabled': true, 'auto': false, 'floor': 0}};
+      return host;
+    }
+
+    Future<void> pumpSheet(WidgetTester tester, AgentController agent, {Look look = const Look()}) async {
+      await pumpLook(
+        tester,
+        look,
+        Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: TextButton(onPressed: () => showModelSheet(context, agent), child: const Text('open')),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await frames(tester, 12);
+    }
+
+    testWidgets('the picker offers "Automatic (Smart)" first; choosing it turns the chat automatic', (tester) async {
+      final host = sheetHost();
+      final agent = automaticChat(auto: false);
+      await pumpSheet(tester, agent);
+      expect(find.text('Automatic (Smart)'), findsOneWidget);
+      expect(find.text('The cheapest model that can do each message'), findsOneWidget);
+      await tester.tap(find.text('Automatic (Smart)'));
+      await frames(tester, 12);
+      expect(host.sent('smart_router_set').single['on'], true);
+      expect(agent.smartRouter.auto, isTrue);
+    });
+
+    testWidgets('picking a model by hand in an automatic chat ends the automatic choice', (tester) async {
+      final host = sheetHost();
+      final agent = automaticChat();
+      await pumpSheet(tester, agent);
+      // The check sits on Automatic, not on the model it picked last.
+      final autoRow = find.ancestor(of: find.text('Automatic (Smart)'), matching: find.byType(ListTile));
+      expect(find.descendant(of: autoRow, matching: find.byIcon(LucideIcons.check)), findsOneWidget);
+      await tester.tap(find.text('Kimi K3'));
+      await frames(tester, 12);
+      expect(host.sent('set_model').single['model'], 'kimi-k3');
+      expect(agent.smartRouter.auto, isFalse);
+    });
+
+    testWidgets('with the smart router off in Settings, the picker has no automatic entry', (tester) async {
+      sheetHost();
+      final agent = automaticChat(auto: false)..smartRouter = const SmartRouterState(enabled: false);
+      await pumpSheet(tester, agent);
+      expect(find.text('Automatic (Smart)'), findsNothing);
+      expect(find.text('Kimi K3'), findsOneWidget);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: picker with the automatic entry ${look.name}', (tester) async {
+        sheetHost();
+        await pumpSheet(tester, automaticChat(), look: look);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('smart_router_picker_${look.name}')));
+      });
+    }
+
+    testWidgets('routing decisions of another chat are not added to this one', (tester) async {
+      final host = FakeHost();
+      final agent = newAgent()..sessionId = 'mine';
+      await tester.pump();
+      host.emit({'type': 'routing', 'sessionId': 'other', 'decision': routed(0, 'glm-5.3-flash', 'GLM'), 'smartRouter': {'enabled': true, 'auto': true}});
+      await frames(tester);
+      expect(agent.routingLog, isEmpty);
+      host.emit({'type': 'routing', 'sessionId': 'mine', 'decision': routed(0, 'glm-5.3-flash', 'GLM'), 'smartRouter': {'enabled': true, 'auto': true}});
+      await frames(tester);
+      expect(agent.routingLog.single.model, 'glm-5.3-flash');
+      expect(agent.smartRouter.auto, isTrue);
+      expect(agent.autoRoutedTurns, {0});
+    });
   });
 }
