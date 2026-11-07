@@ -281,7 +281,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   /// Opens the chat a notification points at (the open one when [path] is null).
   Future<void> _openChatAt(String? path) async {
-    if (path != null && path != agent.sessionFile) {
+    if (path == agent.sessionFile) {
+      // The chat at work, from a notification: shown again even when another chat was on screen.
+      agent.leaveView();
+    } else if (path != null) {
       final known = (await agent.listSessions()).any((s) => s.path == path);
       if (known && !await agent.openSession(path)) return;
     }
@@ -308,7 +311,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         await _openChatAt(launch['path'] as String?);
       case 'retry':
         final path = launch['path'] as String?;
-        if (path != null && path != agent.sessionFile && !await agent.openSession(path)) return;
+        if (path != null && !await agent.openSession(path)) return;
         await agent.retry();
         if (mounted) await openChat(context, agent);
       case 'open_tasks':
@@ -1005,8 +1008,9 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                             session: s,
                             workspace: agent.info['workspace'] as String? ?? '',
                             busy: agent.switchingTo == s.path,
+                            finished: agent.finishedUnseen.contains(s.path),
                             onTap: () async {
-                              if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                              if (!await agent.openSession(s.path)) return;
                               if (context.mounted) await openChat(context, agent);
                               _refresh();
                             },
@@ -1242,8 +1246,12 @@ class _SessionRow extends StatelessWidget {
     this.onLongPress,
     this.selected,
     this.busy = false,
+    this.finished = false,
   });
   final SessionSummary session;
+
+  /// The agent finished in this chat while another chat was on screen, and it was not opened since (Fitur 8).
+  final bool finished;
   final String workspace;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -1314,7 +1322,22 @@ class _SessionRow extends StatelessWidget {
                 color: selected! ? p.danger : p.faint,
               )
             else
-              Text(formatAgo(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (finished) ...[
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(tr('Done'), style: TextStyle(fontSize: 11.5, color: p.accentText)),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(formatAgo(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
+                ],
+              ),
           ],
         ),
       ),
@@ -1553,10 +1576,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                         workspace: ws,
                         selected: selecting ? _selected.contains(s.path) : null,
                         busy: switchingTo == s.path,
+                        finished: widget.agent.finishedUnseen.contains(s.path),
                         onLongPress: () => selecting ? _toggle(s) : _menu(s),
                         onTap: () async {
                           if (selecting) return _toggle(s);
-                          if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                          if (!await agent.openSession(s.path)) return;
                           if (context.mounted) await openChat(context, agent);
                           _reload();
                         },
@@ -1624,7 +1648,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
       final sessions = await agent.listSessions();
       final latest = sessions.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
       if (latest != null) {
-        if (latest.id != agent.sessionId && !await agent.openSession(latest.path)) return;
+        if (!await agent.openSession(latest.path)) return;
       } else {
         if (!await agent.newSession(dir: project.path)) return;
       }

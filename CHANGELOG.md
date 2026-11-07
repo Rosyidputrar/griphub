@@ -26,6 +26,11 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Gambar aslinya tetap tersimpan di chat. Model chat tidak pernah dikirimi gambarnya.
   - Pengaturan → Penerjemah vision: Otomatis, Tanya dulu (sekali per chat), atau Mati; pilih penerjemah sendiri dan daftar model yang disetujui.
   - Bila pembacaan gagal, pesan tidak dikirim dan kamu diberi tahu apa adanya, dengan tawaran ganti model.
+- **Baca chat lain selagi agent bekerja.** Membuka chat lain tidak lagi menanyakan "Hentikan & pindah": pekerjaan agent berjalan terus, dan chat yang dibuka tampil hanya-baca.
+  - Pil di atas menunjukkan chat tempat agent bekerja (dengan jumlah persetujuan yang menunggu); ketuk untuk kembali ke sana, dengan balasan yang masih mengalir.
+  - Kolom ketik di chat lain terkunci dengan penjelasan; draf tiap chat tetap tersimpan.
+  - Begitu agent selesai, chat yang sedang kamu baca langsung bisa dipakai, dan daftar chat menandai chat yang selesai.
+  - Edit atau fork pesan di chat yang sedang bekerja tetap menanyakan dulu, karena keduanya memang harus menghentikan agent.
 
 ---
 

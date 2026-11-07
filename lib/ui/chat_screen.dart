@@ -22,6 +22,7 @@ import 'package:simple_icons/simple_icons.dart';
 
 import 'repos_screen.dart';
 import 'kit.dart';
+import 'read_only_chat.dart';
 import 'smart_router_screen.dart' show SmartRouterMark;
 import 'live_clock.dart';
 import 'illustration.dart';
@@ -118,7 +119,8 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     agent.addListener(_onAgentChanged);
     agent.confirmVisionReading = _confirmVisionReading;
-    draftChat = agent.sessionId;
+    _finished = agent.viewFinished.stream.listen(_onViewFinished);
+    draftChat = _chatKey;
     final prompt = widget.initialPrompt ?? Drafts.instance.get(draftChat);
     if (prompt.isNotEmpty) {
       input.text = prompt;
@@ -151,6 +153,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     agent.removeListener(_onAgentChanged);
     if (agent.confirmVisionReading == _confirmVisionReading) agent.confirmVisionReading = null;
+    _finished?.cancel();
     _mentionTimer?.cancel();
     _lifecycle.dispose();
     Drafts.instance.flush();
@@ -175,10 +178,24 @@ class _ChatScreenState extends State<ChatScreen> {
     return false;
   }
 
+  /// The chat on screen, for its draft: the one shown read-only while another works, else the open one.
+  String? get _chatKey => agent.viewing?.key ?? agent.sessionId;
+
+  StreamSubscription<String>? _finished;
+
+  /// The chat at work ended while another was on screen: said once, quietly, and that chat's composer opens.
+  void _onViewFinished(String chat) {
+    if (!mounted) return;
+    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(tr('The agent is done in {chat}').replaceAll('{chat}', chat)), duration: const Duration(seconds: 3)),
+    );
+  }
+
   void _onAgentChanged() {
-    // Another chat opened under this screen (new chat, fork, the open one deleted): bring its draft along.
-    if (agent.sessionId != draftChat) {
-      draftChat = agent.sessionId;
+    // Another chat on screen (opened, new, the open one deleted, or one shown read-only): bring its draft along.
+    if (_chatKey != draftChat) {
+      draftChat = _chatKey;
       final draft = Drafts.instance.get(draftChat);
       input.value = TextEditingValue(
         text: draft,
@@ -607,7 +624,7 @@ class _ChatScreenState extends State<ChatScreen> {
     return ListenableBuilder(
       listenable: Listenable.merge([agent, agent.remote]),
       // Back closes the "/" or "@" suggestions over the input first (the text stays), then leaves the chat.
-      builder: (context, _) => BackLayer(
+      builder: (context, _) => agent.viewing != null ? _readOnly(context, agent.viewing!) : BackLayer(
         open: _suggesting,
         onClose: _closeSuggestions,
         child: Scaffold(
@@ -784,6 +801,39 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         ),
       ),
+      ),
+    );
+  }
+
+  /// Another chat on screen while the open one works (Fitur 8): its messages, still; the pill back to the chat at work;
+  /// a composer that keeps the draft and sends nothing. Back returns to the chat at work.
+  Widget _readOnly(BuildContext context, ChatView view) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) agent.leaveView();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: tr('Back'),
+            icon: const Icon(LucideIcons.chevronLeft, size: 24),
+            onPressed: agent.leaveView,
+          ),
+          title: Text(tr(view.title), maxLines: 1, overflow: TextOverflow.ellipsis),
+          actions: [ConnectionChip(agent: agent), const SizedBox(width: 4)],
+        ),
+        body: ContentWidth(
+          max: 760,
+          child: Column(
+            children: [
+              ConnectionBanner(agent: agent),
+              if (agent.busy) WorkingPill(agent: agent),
+              Expanded(child: ReadOnlyTranscript(agent: agent, view: view)),
+              LockedComposer(agent: agent, draft: input.text),
+            ],
+          ),
+        ),
       ),
     );
   }

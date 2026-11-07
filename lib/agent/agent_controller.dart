@@ -444,6 +444,7 @@ class AgentController extends ChangeNotifier {
   Future<bool> send(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
+    if (sendLocked) return false;
     if (_mustWait) return _hold(trimmed);
     try {
       _noteQueued(await client.call<Object?>('prompt', {'text': trimmed}));
@@ -570,8 +571,85 @@ class AgentController extends ChangeNotifier {
   @visibleForTesting
   static Duration stopToSwitchTimeout = const Duration(seconds: 10);
 
+  // -------------------------------------------------------------------------
+  // Browsing while the agent works (Fitur 8): looking is never locked, only sending is.
+
+  /// Another chat shown read-only while the open chat (the one at work) works; null when the open chat is shown.
+  ChatView? viewing;
+
+  /// Chats whose turn ended while the user looked elsewhere: the chat list marks them until opened.
+  final finishedUnseen = <String>{};
+
+  /// Says "`chat` is done" when the chat at work ends while another is on screen (the chat screen shows it quietly).
+  final viewFinished = StreamController<String>.broadcast();
+
+  /// Sending is locked: another chat is on screen while this one works.
+  bool get sendLocked => viewing != null;
+
+  /// Shows [path] read-only, or the open chat again when it is the open one.
+  Future<void> _view(String path) async {
+    if (path == sessionFile) return leaveView();
+    final v = ChatView.chat(path);
+    viewing = v;
+    notifyListeners();
+    try {
+      final r = (await client.call<Map>('session_read', {'path': path})).cast<String, dynamic>();
+      v
+        ..sessionId = r['sessionId'] as String?
+        ..name = r['sessionName'] as String?
+        ..isChat = r['chatMode'] == 'chat';
+      final sid = v.sessionId;
+      var ordinal = 0;
+      for (final m in (r['messages'] as List? ?? const []).cast<Map>()) {
+        final msg = m.cast<String, dynamic>();
+        addSavedMessage(
+          msg,
+          v.entries,
+          v.tools,
+          attached: msg['role'] == 'user' ? SentAttachments.instance.forMessage(sid, ordinal++) : const [],
+        );
+      }
+    } catch (e) {
+      v.error = e;
+    }
+    v.loaded = true;
+    if (identical(viewing, v)) notifyListeners();
+  }
+
+  /// Back to the open chat (the one at work), as it is now.
+  void leaveView() {
+    if (viewing == null) return;
+    viewing = null;
+    notifyListeners();
+  }
+
+  /// The open chat's turn ended while another chat was on screen: that chat opens for real now (the agent is free),
+  /// and its composer works. Waits a moment first: a queued follow-up starts the next turn at once.
+  void _unlockViewSoon() {
+    final chat = sessionFile;
+    final title = chatTitle;
+    Timer(const Duration(milliseconds: 400), () async {
+      final v = viewing;
+      if (v == null || busy) return;
+      if (chat != null) finishedUnseen.add(chat);
+      viewFinished.add(title);
+      try {
+        if (v.isNew) {
+          await newSession(dir: v.newDir, chat: v.newChatMode);
+        } else {
+          await openSession(v.path!);
+        }
+      } catch (e) {
+        switchProblems.add('$e');
+      }
+      if (identical(viewing, v)) viewing = null;
+      notifyListeners();
+    });
+  }
+
   /// Whether a chat switch may go ahead: always when idle; while the agent
-  /// works only if the user agrees to stop it, then once it has stopped.
+  /// works only if the user agrees to stop it, then once it has stopped. Opening or starting another chat no longer
+  /// asks (it is shown read-only instead, see [viewing]); only rewinding the chat at work (edit, fork) still does.
   Future<bool> readyToSwitch() async {
     if (!busy) return true;
     final ask = confirmStopToSwitch;
@@ -627,7 +705,18 @@ class AgentController extends ChangeNotifier {
   /// Starts a session, in [dir] when given (a project folder), else the workspace. With [chat], a plain conversation
   /// instead (agent/src/chatmode.ts): the host gives it its own folder, so [dir] does not count then. False when the
   /// user kept the running turn instead, or another switch is still under way.
-  Future<bool> newSession({String? dir, bool chat = false}) => _switch(newChatKey(dir, chat: chat), () async {
+  Future<bool> newSession({String? dir, bool chat = false}) async {
+    // The agent works in the open chat: the new chat waits, read-only, and starts once it is free.
+    if (busy) {
+      viewing = ChatView.newChat(newDir: dir, newChatMode: chat);
+      notifyListeners();
+      return true;
+    }
+    return _newSession(dir: dir, chat: chat);
+  }
+
+  Future<bool> _newSession({String? dir, bool chat = false}) => _switch(newChatKey(dir, chat: chat), () async {
+    viewing = null;
     _applyState(
       await client.call<Map<String, dynamic>>('new_session', chat ? {'chatMode': 'chat'} : {'cwd': ?dir}),
     );
@@ -636,10 +725,20 @@ class AgentController extends ChangeNotifier {
 
   /// Opens another chat. False when the user kept the running turn instead, or another switch is still under way.
   Future<bool> openSession(String path) async {
-    if (path == sessionFile && switchingTo == null) return true;
+    finishedUnseen.remove(path);
+    if (path == sessionFile && switchingTo == null) {
+      leaveView();
+      return true;
+    }
+    // The agent works in the open chat: show this one read-only, without a question and without stopping anything.
+    if (busy) {
+      await _view(path);
+      return true;
+    }
     return _switch(path, () async {
       _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
       await loadHistory();
+      viewing = null;
     });
   }
 
@@ -770,6 +869,8 @@ class AgentController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && images.isEmpty) return false;
+    // Another chat is on screen while this one works: nothing is sent from it, whatever asked (Fitur 8).
+    if (sendLocked) return false;
     final body = trimmed.isEmpty ? 'See the attached image.' : trimmed;
     if (_mustWait) return _hold(body, images: images, attachments: attachments);
     queueSentAttachments(attachments);
@@ -842,6 +943,8 @@ class AgentController extends ChangeNotifier {
 
   /// Tries the last failed request again (on the current model, which may have been changed since).
   Future<void> retry() async {
+    // Another chat on screen while this one works: Try again (a notification's too) waits until it is free.
+    if (sendLocked) return;
     try {
       final r = await client.call<Object?>('retry');
       if (_visionAsk(r) case final ask?) {
@@ -1281,6 +1384,7 @@ class AgentController extends ChangeNotifier {
   void _setBusy(bool value) {
     if (busy == value) return;
     busy = value;
+    if (!value && viewing != null) _unlockViewSoon();
     // The foreground service keeps this phone's agent alive; a server agent needs nothing from the phone.
     if (!client.isRemote) client.setBusy(value);
     features.setChatBusy(value);
@@ -1341,6 +1445,7 @@ class AgentController extends ChangeNotifier {
     _notifyTimer?.cancel();
     authRecords.close();
     switchProblems.close();
+    viewFinished.close();
     super.dispose();
   }
 }

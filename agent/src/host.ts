@@ -1958,6 +1958,34 @@ async function handle(cmd: Command): Promise<unknown> {
 				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
 			});
 		}
+		// Another chat, read from its file without opening it (Fitur 8): the app shows it read-only while the open chat
+		// works. Only chat files of this host; nothing about the open chat changes, so the one chat at work stays the
+		// one chat at work.
+		case "session_read": {
+			const sessions = resolve(join(agentDir, "sessions"));
+			const path = resolve(String(cmd.path ?? ""));
+			if (!path.startsWith(sessions + sep) || !path.endsWith(".jsonl")) throw new Error("Not a chat of this agent");
+			if (!existsSync(path)) throw new Error("This chat no longer exists");
+			const sm = SessionManager.open(path);
+			const times = new Map<number, number>();
+			for (const e of sm.getBranch() as any[]) {
+				if (e.type === "custom" && e.customType === TURN_TIME && typeof e.data?.at === "number") times.set(e.data.at, e.data.ms);
+			}
+			const cwd = sm.getCwd();
+			return {
+				path,
+				sessionId: sm.getSessionId(),
+				sessionName: sm.getSessionName() ?? null,
+				cwd,
+				chatMode: modeOf(cwd, workspace),
+				// What the open chat would hold (session.messages): the built context also carries the system prompt.
+				messages: (sm.buildSessionContext().messages as any[]).filter((m) => m?.role !== "system").map((m) => {
+					const out = withCost(m);
+					const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
+					return ms === undefined ? out : { ...out, griphubTurnMs: ms };
+				}),
+			};
+		}
 		case "summarized_messages":
 			return summarizedMessages(s).map(withCost);
 

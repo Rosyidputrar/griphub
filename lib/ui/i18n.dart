@@ -281,6 +281,14 @@ const _id = <String, String>{
       'Pilihan otomatis hanya dari daftar ini. Bawaannya: model vision di luar sepertiga harga termurah.',
   'Back to the default list': 'Kembali ke daftar bawaan',
   'Picture read by {model}': 'Gambar dibaca oleh {model}',
+  // Browsing while the agent works (read_only_chat.dart, chat_screen.dart).
+  'The agent is working in {chat}': 'Agent sedang bekerja di {chat}',
+  'The agent is working in': 'Agent sedang bekerja di',
+  '{n} waiting for your approval': '{n} menunggu persetujuanmu',
+  'Read-only — the agent is working in {chat}.': 'Hanya-baca — agent sedang bekerja di {chat}.',
+  'This chat starts once the agent is free.': 'Chat ini dimulai begitu agent selesai bekerja.',
+  'No messages yet.': 'Belum ada pesan.',
+  'The agent is done in {chat}': 'Agent selesai di {chat}',
   'Read the picture with a vision model?': 'Baca gambar dengan model vision?',
   'This model cannot see pictures. {model} will read it into text for it to answer from.':
       'Model ini tidak bisa melihat gambar. {model} akan membacanya menjadi teks untuk dijawab.',

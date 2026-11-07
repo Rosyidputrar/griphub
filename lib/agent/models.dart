@@ -831,3 +831,34 @@ class VisionAsk {
   final String modelName;
   final double? estimate;
 }
+
+/// A chat shown read-only while the open chat works (Fitur 8): read from its file (host `session_read`), never opened
+/// on the host, so the chat at work stays the only one. A chat not started yet ([isNew]) waits the same way.
+class ChatView {
+  ChatView.chat(String this.path) : newDir = null, newChatMode = false;
+  ChatView.newChat({this.newDir, this.newChatMode = false}) : path = null, loaded = true;
+
+  /// The chat's file; null for a new chat that starts once the agent is free.
+  final String? path;
+  final String? newDir;
+  final bool newChatMode;
+  bool get isNew => path == null;
+
+  String? sessionId;
+  String? name;
+  bool isChat = false;
+  bool loaded = false;
+  Object? error;
+  final entries = <ChatEntry>[];
+  final tools = <String, ToolRun>{};
+
+  /// What its draft is kept under: the chat's id once known (as when it is open), else its file or new-chat key.
+  String get key => sessionId ?? path ?? 'new:${newChatMode ? 'chat' : newDir ?? ''}';
+
+  /// Its title, as the open chat's: a name, else the first message.
+  String get title {
+    if (name != null && name!.trim().isNotEmpty) return name!;
+    final first = entries.whereType<UserEntry>().firstOrNull?.text.trim();
+    return first == null || first.isEmpty ? 'New chat' : first.split('\n').first;
+  }
+}

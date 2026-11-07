@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/changes_screen.dart';
 import 'package:griphub_agent/ui/chat_extras.dart';
 import 'package:griphub_agent/ui/editor_screen.dart';
@@ -32,37 +33,75 @@ void main() {
   group('#3 switching chats while the agent works', () {
     // Everything here runs on the fake clock (FakeHost replies are microtasks
     // there); never tester.runAsync, which would wait on replies forever.
-    testWidgets('keeping the turn sends nothing; stopping aborts, then switches', (tester) async {
+    testWidgets('while the agent works, another chat opens read-only: no question, no stop, nothing sent', (tester) async {
+      // Fitur 8 replaced the stop-and-switch question for opening chats: looking is never locked, only sending is.
       host = FakeHost();
+      host.answers['session_read'] = (cmd) => {
+        'path': cmd['path'],
+        'sessionId': 'b',
+        'sessionName': 'Chat B',
+        'cwd': '/w',
+        'chatMode': 'chat',
+        'messages': [
+          {'role': 'user', 'content': 'pesan di B'},
+        ],
+      };
       final agent = newAgent();
       await pumpLook(tester, const Look(), const Scaffold(body: SizedBox()));
       agent.sessionFile = 'a.jsonl';
       agent.busy = true;
-      var answer = false;
       var asked = 0;
       agent.confirmStopToSwitch = () async {
         asked++;
-        return answer;
+        return true;
       };
-      bool? kept;
-      agent.openSession('b.jsonl').then((v) => kept = v);
+      bool? opened;
+      agent.openSession('b.jsonl').then((v) => opened = v);
       await frames(tester, 3);
-      expect(kept, isFalse);
-      expect(asked, 1);
-      expect(host.sent('abort'), isEmpty);
-      expect(host.sent('open_session'), isEmpty);
+      expect(opened, isTrue);
+      expect(asked, 0, reason: 'no question');
+      expect(host.sent('abort'), isEmpty, reason: 'the turn goes on');
+      expect(host.sent('open_session'), isEmpty, reason: 'the chat at work stays the open one');
+      expect(host.sent('session_read').single['path'], 'b.jsonl');
+      expect(agent.viewing?.title, 'Chat B');
+      expect(agent.viewing?.entries.whereType<UserEntry>().single.text, 'pesan di B');
+      expect(agent.sendLocked, isTrue);
+      // Nothing goes out while locked, whatever asks.
+      expect(await agent.send('kirim'), isFalse);
+      expect(await agent.sendWith('kirim juga'), isFalse);
+      await agent.retry();
+      expect(host.sent('prompt'), isEmpty);
+      expect(host.sent('retry'), isEmpty);
 
-      answer = true;
-      bool? switched;
-      agent.openSession('b.jsonl').then((v) => switched = v);
-      await frames(tester, 3);
-      expect(host.sent('abort'), hasLength(1));
-      // Still waiting for the turn to end: no switch yet.
-      expect(host.sent('open_session'), isEmpty);
-      agent.busy = false; // the host's agent_end
-      await frames(tester, 6);
-      expect(switched, isTrue);
+      // The turn ends: chat B opens for real, and can be written in.
+      final finished = <String>[];
+      agent.viewFinished.stream.listen(finished.add);
+      host.emit({'type': 'state', 'state': {'isStreaming': false, 'sessionFile': 'a.jsonl', 'sessionId': 'a'}});
+      await frames(tester, 12);
       expect(host.sent('open_session').single['path'], 'b.jsonl');
+      expect(agent.viewing, isNull);
+      expect(agent.sendLocked, isFalse);
+      expect(agent.finishedUnseen, contains('a.jsonl'));
+      expect(finished, hasLength(1));
+    });
+
+    testWidgets('the chat at work again, from the list or the pill: shown live, nothing reopened', (tester) async {
+      host = FakeHost();
+      host.answers['session_read'] = (cmd) => {'path': cmd['path'], 'sessionId': 'b', 'messages': const []};
+      final agent = newAgent();
+      await pumpLook(tester, const Look(), const Scaffold(body: SizedBox()));
+      agent.sessionFile = 'a.jsonl';
+      agent.busy = true;
+      await agent.openSession('b.jsonl');
+      expect(agent.viewing, isNotNull);
+      expect(await agent.openSession('a.jsonl'), isTrue);
+      expect(agent.viewing, isNull);
+      expect(host.sent('open_session'), isEmpty);
+      await agent.newSession();
+      expect(agent.viewing?.isNew, isTrue, reason: 'a new chat waits read-only too');
+      expect(host.sent('new_session'), isEmpty);
+      agent.leaveView();
+      expect(agent.viewing, isNull);
     });
 
     testWidgets('idle: no question, switches straight away; same chat: nothing to do', (tester) async {

@@ -9,7 +9,9 @@ import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
+import 'package:griphub_agent/ui/chat_extras.dart' show ApprovalCards;
 import 'package:griphub_agent/ui/model_sheet.dart';
+import 'package:griphub_agent/ui/read_only_chat.dart';
 import 'package:griphub_agent/ui/smart_router_screen.dart';
 import 'package:griphub_agent/ui/vision_translator_screen.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -616,6 +618,136 @@ void main() {
         expect(find.text(look.language == 'id' ? 'Penerjemah vision' : 'Vision translator'), findsOneWidget);
         await loadImages(tester);
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('vision_settings_${look.name}')));
+      });
+    }
+  });
+
+  group('browsing while the agent works', () {
+    /// Chat A works (with a draft and a reply streaming); chat B is a finished chat on disk.
+    Future<(FakeHost, AgentController)> working(WidgetTester tester, {Look look = const Look(), int approvals = 0}) async {
+      final host = FakeHost();
+      host.answers['session_read'] = (cmd) => {
+        'path': cmd['path'],
+        'sessionId': 'b',
+        'sessionName': 'Resep rendang',
+        'cwd': '/w',
+        'chatMode': 'chat',
+        'messages': [
+          {'role': 'user', 'content': 'Bagaimana cara membuat rendang?'},
+          {
+            'role': 'assistant',
+            'model': 'kimi-k3',
+            'stopReason': 'stop',
+            'content': [
+              {'type': 'text', 'text': 'Tumis bumbu halus sampai harum, masukkan daging dan santan, lalu masak dengan api kecil selama 3 jam.'},
+            ],
+            'usage': {'input': 300, 'output': 40, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 340},
+            'griphubCost': {'credits': 0.01, 'floored': true},
+          },
+        ],
+      };
+      host.answers['open_session'] = (cmd) => {'sessionFile': cmd['path'], 'sessionId': 'b', 'sessionName': 'Resep rendang', 'isStreaming': false};
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      final agent = newAgent()
+        ..sessionFile = 'a.jsonl'
+        ..sessionId = 'a'
+        ..sessionName = 'Refactor modul auth'
+        ..isChat = true
+        ..model = ModelInfo(const {'provider': 'griphub', 'id': 'kimi-k3', 'name': 'Kimi K3', 'input': ['text']});
+      agent.addHistoryMessage({'role': 'user', 'content': 'Refactor modul auth'});
+      await pumpLook(tester, look, ChatScreen(agent: agent));
+      await frames(tester);
+      host.emit({'type': 'state', 'state': {'isStreaming': true, 'sessionFile': 'a.jsonl', 'sessionId': 'a', 'sessionName': 'Refactor modul auth', 'chatMode': 'chat'}});
+      for (var i = 0; i < approvals; i++) {
+        host.emit({'type': 'approval', 'approvalId': 'ap$i', 'toolName': 'bash', 'summary': 'rm -rf build', 'reason': 'deletes files'});
+      }
+      await frames(tester);
+      return (host, agent);
+    }
+
+    Finder composerField() => find.byType(TextField);
+
+    testWidgets('another chat opens read-only: the pill names the chat at work, sending is locked', (tester) async {
+      final (host, agent) = await working(tester);
+      await tester.enterText(composerField().last, 'draf di A');
+      await agent.openSession('b.jsonl');
+      await frames(tester);
+      expect(find.text('The agent is working in'), findsOneWidget);
+      expect(find.descendant(of: find.byType(WorkingPill), matching: find.text('Refactor modul auth')), findsOneWidget);
+      expect(find.text('Read-only — the agent is working in Refactor modul auth.'), findsOneWidget);
+      expect(find.text('Bagaimana cara membuat rendang?'), findsOneWidget);
+      // No field, no Send: nothing here can send.
+      expect(composerField(), findsNothing);
+      expect(find.byTooltip('Send'), findsNothing);
+      expect(host.sent('abort'), isEmpty);
+      expect(host.sent('open_session'), isEmpty);
+      // The pill goes back to the chat at work, live, with its draft as typed.
+      await tester.tap(find.byType(WorkingPill));
+      await frames(tester);
+      expect(agent.viewing, isNull);
+      expect(tester.widget<TextField>(composerField().last).controller!.text, 'draf di A');
+    });
+
+    testWidgets('drafts of both chats stay as typed through the back and forth', (tester) async {
+      final (_, agent) = await working(tester);
+      Drafts.instance.set('b', 'draf lama di B');
+      await tester.enterText(composerField().last, 'draf di A');
+      await agent.openSession('b.jsonl');
+      await frames(tester);
+      expect(find.text('draf lama di B'), findsOneWidget, reason: 'the locked composer keeps B\'s draft on show');
+      agent.leaveView();
+      await frames(tester);
+      expect(tester.widget<TextField>(composerField().last).controller!.text, 'draf di A');
+      await agent.openSession('b.jsonl');
+      await frames(tester);
+      expect(Drafts.instance.get('b'), 'draf lama di B');
+      expect(Drafts.instance.get('a'), 'draf di A');
+    });
+
+    testWidgets('approvals waiting in the chat at work: a number on the pill, never their cards here', (tester) async {
+      final (_, agent) = await working(tester, approvals: 2);
+      await agent.openSession('b.jsonl');
+      await frames(tester);
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('rm -rf build'), findsNothing);
+      expect(find.byType(ApprovalCards), findsNothing);
+    });
+
+    testWidgets('system Back from the read-only chat returns to the chat at work', (tester) async {
+      final (_, agent) = await working(tester);
+      await agent.openSession('b.jsonl');
+      await frames(tester);
+      await tester.binding.handlePopRoute();
+      await frames(tester);
+      expect(agent.viewing, isNull);
+      expect(find.byType(WorkingPill), findsNothing);
+    });
+
+    testWidgets('when the chat at work ends, the chat on screen opens and can be written in, without a restart', (tester) async {
+      final (host, agent) = await working(tester);
+      Drafts.instance.set('b', 'lanjutkan resepnya');
+      await agent.openSession('b.jsonl');
+      await frames(tester);
+      host.emit({'type': 'state', 'state': {'isStreaming': false, 'sessionFile': 'a.jsonl', 'sessionId': 'a'}});
+      await frames(tester, 14);
+      expect(host.sent('open_session').single['path'], 'b.jsonl');
+      expect(agent.viewing, isNull);
+      expect(find.byType(WorkingPill), findsNothing);
+      expect(find.text('The agent is done in Refactor modul auth'), findsOneWidget);
+      // The composer is back, with B's draft.
+      expect(tester.widget<TextField>(composerField().last).controller!.text, 'lanjutkan resepnya');
+      expect(agent.finishedUnseen, contains('a.jsonl'));
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {
+      testWidgets('golden: read-only chat while the agent works ${look.name}', (tester) async {
+        final (_, agent) = await working(tester, look: look, approvals: 1);
+        Drafts.instance.set('b', 'Tambahkan juga takaran bumbunya');
+        await agent.openSession('b.jsonl');
+        await frames(tester);
+        expect(layoutErrors, isEmpty);
+        await loadImages(tester);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('read_only_chat_${look.name}')));
       });
     }
   });
