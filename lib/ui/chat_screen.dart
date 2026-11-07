@@ -23,6 +23,7 @@ import 'package:simple_icons/simple_icons.dart';
 import 'repos_screen.dart';
 import 'kit.dart';
 import 'read_only_chat.dart';
+import 'verify_view.dart';
 import 'smart_router_screen.dart' show SmartRouterMark;
 import 'live_clock.dart';
 import 'illustration.dart';
@@ -874,6 +875,8 @@ class _ChatScreenState extends State<ChatScreen> {
         break;
       }
     }
+    // The app runs the project's check before the agent may close (agent/src/verify.ts).
+    if (agent.verifying != null) return tr('Checking: {command}').replaceAll('{command}', agent.verifying!);
     // Between steps: a tool finished, the model hasn't answered yet.
     return tr('Thinking…');
   }
@@ -943,12 +946,14 @@ class _ChatScreenState extends State<ChatScreen> {
               footer: footers[i],
               autoRouted: footers[i] != null && routed.isNotEmpty && _routedTurn(entries, i, routed, footers[i]!.model),
               visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
+              verified: footers[i] == null ? null : lastVerifyOfTurn(entries, i),
             ),
             NoticeEntry() => NoticeView(
               e,
               onRaiseBudget: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => UsageScreen(agent: agent))),
             ),
             JobEntry() => JobNoticeView(e),
+            VerifyEntry() => VerifyEvidenceView(e, agent: agent),
             CompactionEntry() => CompactionView(
               e,
               onShowEarlier: () =>

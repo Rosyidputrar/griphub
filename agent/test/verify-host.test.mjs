@@ -1,0 +1,163 @@
+// Self-verification in the real host, on the mock router (Fitur 2 kriteria a-d): a coding task that changed files ends
+// with evidence from a test run of this session; a failing test sends the agent back to fix it, round by round, and
+// it then has to report the failure; a project without tests says so plainly; nothing is verified when nothing
+// changed or the switch is off; the test command goes through the same approvals as any command; and a "fix" made by
+// changing the tests is not taken as a pass.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { host } from "./router-host.mjs";
+
+/** A project whose test passes only when ok.txt says "ok". */
+function project(ws, { tests = true } = {}) {
+	const dir = join(ws, "proj");
+	mkdirSync(join(dir, "test"), { recursive: true });
+	writeFileSync(join(dir, "ok.txt"), "ok\n");
+	if (tests) {
+		writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "p", scripts: { test: "node test/check.test.js" } }));
+		writeFileSync(
+			join(dir, "test", "check.test.js"),
+			'const s = require("fs").readFileSync(__dirname + "/../ok.txt", "utf8").trim();\nconsole.log("ok.txt says " + s);\nif (s !== "ok") { console.error("FAIL: expected ok"); process.exit(1); }\nconsole.log("1 passing");\n',
+		);
+	} else {
+		writeFileSync(join(dir, "README.md"), "no tests here\n");
+	}
+	return dir;
+}
+
+const bash = (command) => JSON.stringify({ name: "bash", arguments: { command } });
+
+/** The evidence entries of the open chat, in order. */
+async function evidence(h) {
+	const messages = await h.call("messages");
+	return messages.filter((m) => m.role === "custom" && m.customType === "griphub_verify").map((m) => m.details);
+}
+
+async function lastAfterEvidence(h) {
+	const messages = await h.call("messages");
+	const at = messages.findLastIndex((m) => m.role === "custom" && m.customType === "griphub_verify");
+	return messages.slice(at + 1).find((m) => m.role === "assistant");
+}
+
+test("a change that keeps the tests green ends with passed evidence from this session, then the closing message", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo ok > ok.txt && echo extra > notes.txt") });
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Tambahkan notes.txt");
+	const ev = await evidence(h);
+	assert.equal(ev.length, 1);
+	assert.equal(ev[0].evidence.status, "passed");
+	assert.equal(ev[0].evidence.command, "npm test");
+	assert.equal(ev[0].evidence.source, "package.json");
+	assert.match(ev[0].evidence.summary, /1 passing/);
+	assert.ok(ev[0].evidence.durationMs > 0);
+	assert.ok(ev[0].evidence.at >= Date.now() - 60_000, "run in this session, not an old result");
+	assert.equal(ev[0].next, "close");
+	// The closing message comes after the evidence and states it.
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /Closing: verification PASSED/);
+	// The whole output can be opened.
+	const full = await h.call("verify_output", { outputId: ev[0].evidence.outputId });
+	assert.match(full.output, /ok\.txt says ok/);
+	// The app was told the check ran.
+	assert.ok(h.records.some((r) => r.type === "verify" && r.phase === "running" && r.command === "npm test"));
+});
+
+test("a failing test sends the agent back to fix it; fixed, the next check passes", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt"), MOCK_FIX: bash("echo ok > ok.txt") });
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Ubah ok.txt");
+	const ev = (await evidence(h)).map((e) => [e.evidence.status, e.next, e.evidence.round]);
+	assert.deepEqual(ev, [
+		["failed", "fix", 0],
+		["passed", "close", 1],
+	]);
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /PASSED/);
+});
+
+test("a failure that is not fixed: each round is checked again, then the failure is reported, never 'done'", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt") });
+	await h.call("settings_set", { settings: { verifyRounds: 2 } });
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Ubah ok.txt");
+	const ev = await evidence(h);
+	assert.deepEqual(ev.map((e) => [e.evidence.status, e.next]), [
+		["failed", "fix"],
+		["failed", "fix"],
+		["failed", "close"],
+	]);
+	const last = ev.at(-1).evidence;
+	assert.match(last.summary, /FAIL: expected ok/, "the last evidence, as it was");
+	// What the model was told for the last one: report the failure, do not say done.
+	const messages = await h.call("messages");
+	const lastEvidence = messages.findLast((m) => m.customType === "griphub_verify");
+	assert.match(lastEvidence.content, /Do NOT say the task is done/);
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /FAILED/);
+});
+
+test("fixing a failure by changing the tests is not taken as a pass", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt"), MOCK_FIX: bash("echo 'console.log(\"1 passing\")' > test/check.test.js") });
+	await h.call("settings_set", { settings: { verifyRounds: 1 } });
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Ubah ok.txt");
+	const ev = await evidence(h);
+	assert.equal(ev[0].evidence.status, "failed");
+	assert.equal(ev[1].evidence.status, "tests-changed");
+	assert.deepEqual(ev[1].evidence.testsTouched, ["test/check.test.js"]);
+	assert.equal(ev[1].evidence.exitCode, 0, "the edited test 'passed'");
+	assert.equal(ev[1].next, "close");
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /NOT ACCEPTED/);
+});
+
+test("a project without tests: the evidence says so, plainly", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo more >> README.md") });
+	await h.call("new_session", { cwd: project(h.ws, { tests: false }) });
+	await h.turn("Tambah baris di README");
+	const ev = await evidence(h);
+	assert.equal(ev.length, 1);
+	assert.equal(ev[0].evidence.status, "none");
+	assert.equal(ev[0].evidence.command, null);
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /NO TESTS/);
+});
+
+test("nothing changed: nothing to verify; switched off: no evidence and no note to the model", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("cat ok.txt") });
+	const dir = project(h.ws);
+	await h.call("new_session", { cwd: dir });
+	await h.turn("Baca ok.txt");
+	assert.equal((await evidence(h)).length, 0);
+	assert.match(h.requests().at(-1).system, /Verification in this app/, "the note is there while it is on");
+
+	await h.call("settings_set", { settings: { verify: false } });
+	writeFileSync(join(dir, "ok.txt"), "ok\n");
+	await h.call("new_session", { cwd: dir });
+	await h.turn("Baca ok.txt lagi");
+	assert.equal((await evidence(h)).length, 0);
+	assert.doesNotMatch(h.requests().at(-1).system, /Verification in this app/);
+});
+
+test("the project's own command from Settings wins, and it is asked about like any command", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo extra > notes.txt") });
+	const dir = project(h.ws);
+	await h.call("settings_set", { settings: { approvalMode: "ask_all", projectVerify: { [dir]: "node test/check.test.js && echo own-command" } } });
+	await h.call("new_session", { cwd: dir });
+	// Answer the approval cards as they come: the agent's own call yes, the verification command no.
+	const answered = new Set();
+	const timer = setInterval(() => {
+		for (const r of h.records) {
+			if (r.type !== "approval" || answered.has(r.approvalId)) continue;
+			answered.add(r.approvalId);
+			const allow = !r.summary.includes("own-command");
+			h.call("approval_reply", { approvalId: r.approvalId, allow }).catch(() => {});
+		}
+	}, 20);
+	t.after(() => clearInterval(timer));
+	await h.turn("Tambah notes.txt");
+	const asked = h.records.filter((r) => r.type === "approval").map((r) => r.summary);
+	assert.ok(asked.some((s) => s.includes("own-command")), JSON.stringify(asked));
+	const ev = await evidence(h);
+	assert.equal(ev[0].evidence.status, "declined");
+	assert.equal(ev[0].evidence.command, "node test/check.test.js && echo own-command");
+	assert.equal(ev[0].evidence.source, "project setting");
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /NOT RUN/);
+	assert.equal(readFileSync(join(dir, "notes.txt"), "utf8").trim(), "extra");
+});

@@ -560,6 +560,9 @@ void textScaleTests() {
     await frames(tester);
     expect(find.descendant(of: row, matching: find.text('On for this phone: it has little memory')), findsOneWidget);
     expect(tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value, isTrue);
+    // Settings grew (smart router, vision translator, self-verification): scroll the row into view before tapping it.
+    await tester.ensureVisible(row);
+    await frames(tester);
     await tester.tap(row);
     await frames(tester);
     expect(look.reduceMotion, isFalse, reason: 'turned back on by the user');

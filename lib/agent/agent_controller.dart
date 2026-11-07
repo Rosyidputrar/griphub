@@ -72,6 +72,14 @@ class AgentController extends ChangeNotifier {
 
   Future<bool> _confirmVision(VisionAsk ask) async => await confirmVisionReading?.call(ask) ?? false;
 
+  /// The verification command running now for the open chat (agent/src/verify.ts), for the activity line; null when
+  /// none runs.
+  String? verifying;
+
+  /// The whole output of a verification run.
+  Future<String> verifyOutput(String id) async =>
+      ((await client.call<Map>('verify_output', {'outputId': id}))['output'] as String?) ?? '';
+
   /// Smart router ("Otomatis (Pintar)") for the open chat.
   SmartRouterState smartRouter = const SmartRouterState();
 
@@ -1128,6 +1136,10 @@ class AgentController extends ChangeNotifier {
       case 'state':
         _applyState((record['state'] as Map).cast<String, dynamic>());
         notifyListeners();
+      // Self-verification's check started or ended (agent/src/verify.ts).
+      case 'verify' when record['sessionId'] == null || record['sessionId'] == sessionId:
+        verifying = record['phase'] == 'running' ? record['command'] as String? : null;
+        notifyListeners();
       // A routing decision of the open chat, as it happened (agent/src/smartrouter.ts).
       case 'routing' when record['sessionId'] == sessionId:
         routingLog = [...routingLog, RoutingDecision((record['decision'] as Map).cast<String, dynamic>())];
@@ -1305,6 +1317,9 @@ class AgentController extends ChangeNotifier {
       case 'custom' when m['customType'] == 'griphub_job':
         final job = (m['details'] as Map?)?['job'];
         if (job is Map) entries.add(JobEntry(job.cast<String, dynamic>()));
+      case 'custom' when m['customType'] == 'griphub_verify':
+        final details = m['details'];
+        if (details is Map) entries.add(VerifyEntry(details.cast<String, dynamic>()));
     }
   }
 
@@ -1384,6 +1399,7 @@ class AgentController extends ChangeNotifier {
   void _setBusy(bool value) {
     if (busy == value) return;
     busy = value;
+    if (!value) verifying = null;
     if (!value && viewing != null) _unlockViewSoon();
     // The foreground service keeps this phone's agent alive; a server agent needs nothing from the phone.
     if (!client.isRemote) client.setBusy(value);

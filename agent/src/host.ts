@@ -84,6 +84,7 @@ import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter
 import { PromptQueue } from "./promptqueue.js";
 import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
+import { detectVerifyCommand, type Evidence, evidenceText, isTestPath, outputSummary, runVerify, VERIFY_MESSAGE, VERIFY_NOTE, VerifyOutputs } from "./verify.js";
 import { asksAboutPicture, defaultAllowed, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
 import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
@@ -119,6 +120,10 @@ let router: Router;
 let routing: RoutingStore;
 /** "Ask first" consent of the vision translator, per chat (visiontranslate.ts). */
 let visionConsent: VisionConsent;
+/** Whole outputs of verification runs (verify.ts), for "show the full output". */
+let verifyOutputs: VerifyOutputs;
+/** The verification command running now, so Stop stops it too. */
+let verifyAbort: AbortController | null = null;
 let modelBoard: ModelBoard;
 let fsService: Fs;
 let preview: Preview;
@@ -428,6 +433,8 @@ async function buildSession(
 			...(chat ? [{ name: "griphub-chat", factory: chatModeExtension({ dir: cwd, stopped: opts.onLimit }), hidden: true }] : []),
 			{ name: "griphub-images", factory: (pi: any) => pi.on("agent_start", () => images.startRun(runKey)), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+			// Self-verification (verify.ts): a coding chat someone watches; after the guard, so its own command is asked about.
+			...(opts.interactive && !chat ? [{ name: "griphub-verify", factory: verifyExtension(cwd), hidden: true }] : []),
 			// A server's background runs go on while nobody is there: what would need approval is refused instead.
 			...(opts.unattended ? [{ name: "griphub-unattended", factory: opts.unattended.extension, hidden: true }] : []),
 		],
@@ -1106,6 +1113,124 @@ async function prepareTurn(s: AgentSession, text: string, images: any[] | undefi
 	return { text: `${text}\n\n${readingBlock(reading)}`, images };
 }
 
+// ---------------------------------------------------------------------------
+// Self-verification (verify.ts): a coding task that changed files ends on evidence, not on the agent's word
+
+/**
+ * The pi extension of a coding chat. At the start of a run it notes the folder's state (a tree id in the checkpoint
+ * repository; no checkpoint is made). Before the run settles, when files changed, it runs the project's check (asked
+ * about by the guard like any bash call), adds the result to the chat as evidence and lets the agent go on: to fix a
+ * failure, up to the rounds in Settings, each one checked again; or to write its closing message, which the evidence
+ * tells it to base on that result. Changes made after the evidence are checked again; a failure "fixed" by changing
+ * the tests is not taken as a pass.
+ */
+function verifyExtension(cwd: string) {
+	type Phase = "work" | "fix" | "closing";
+	let st: { base: string | null; phase: Phase; round: number; failTree: string | null; evidenceTree: string | null; checks: number } | null = null;
+	const on = () => integrations.settings.verify !== false;
+	return (pi: any) => {
+		// A run that starts from a message (the user's, or a job's result): what the folder is now is what the task
+		// changes are measured from. The agent going on after evidence is the same run (no new start here), so its rounds
+		// and the tests' state at the first failure carry over.
+		pi.on("before_agent_start", async (event: any) => {
+			st = null;
+			if (!on()) return undefined;
+			const base = await checkpoints.tree(cwd).catch(() => null);
+			st = { base, phase: "work", round: 0, failTree: null, evidenceTree: null, checks: 0 };
+			return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
+		});
+		pi.on("agent_before_settle", async (event: any) => {
+			const run = st;
+			if (!run || !on() || event.outcome !== "completed" || !run.base) {
+				st = null;
+				return undefined;
+			}
+			const now = await checkpoints.tree(cwd).catch(() => null);
+			if (!now) {
+				st = null;
+				return undefined;
+			}
+			if (run.phase === "closing") {
+				// The closing message changed nothing since the evidence: the run may end. Otherwise it is checked again.
+				const since = run.evidenceTree ? await checkpoints.changedBetween(cwd, run.evidenceTree, now).catch(() => []) : [];
+				if (!since.length) {
+					st = null;
+					return undefined;
+				}
+			}
+			const changed = await checkpoints.changedBetween(cwd, run.base, now).catch(() => [] as string[]);
+			if (run.phase === "work" && !changed.length && !integrations.settings.verifyAlways) {
+				st = null;
+				return undefined;
+			}
+			const maxRounds = integrations.settings.verifyRounds ?? 3;
+			// A model that keeps changing files in its closing message is not checked forever: the last evidence stands.
+			if (run.checks > maxRounds + 2) {
+				st = null;
+				return undefined;
+			}
+			run.checks++;
+			const found = detectVerifyCommand(cwd, integrations.settings.projectVerify?.[cwd]);
+			const evidence: Evidence = {
+				status: "none",
+				command: found?.command ?? null,
+				source: found?.source ?? null,
+				exitCode: null,
+				durationMs: 0,
+				summary: "",
+				outputId: null,
+				round: run.round,
+				maxRounds,
+				testsTouched: [],
+				at: Date.now(),
+			};
+			if (found) {
+				const refused = await guard.allowCommand(found.command);
+				if (refused) {
+					evidence.status = "declined";
+					evidence.reason = refused;
+				} else {
+					send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "running", command: found.command, round: run.round });
+					verifyAbort = new AbortController();
+					const result = await runVerify(found.command, cwd, settingsManager.getShellPath(), verifyAbort.signal).finally(() => {
+						verifyAbort = null;
+					});
+					if (result.aborted) {
+						st = null;
+						send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "stopped" });
+						return undefined;
+					}
+					evidence.exitCode = result.exitCode;
+					evidence.durationMs = result.durationMs;
+					evidence.timedOut = result.timedOut;
+					evidence.summary = outputSummary(result.output);
+					evidence.outputId = verifyOutputs.save(result.output);
+					evidence.status = result.exitCode === 0 && !result.timedOut ? "passed" : "failed";
+					// While fixing a failure, test files must stay as they were at that failure.
+					if (run.failTree) {
+						const touched = (await checkpoints.changedBetween(cwd, run.failTree, now).catch(() => [] as string[])).filter(isTestPath);
+						if (touched.length) {
+							evidence.testsTouched = touched;
+							evidence.status = "tests-changed";
+						}
+					}
+				}
+			}
+			const failed = evidence.status === "failed" || evidence.status === "tests-changed";
+			const next = failed && run.round < maxRounds ? "fix" : "close";
+			if (failed && !run.failTree) run.failTree = now;
+			run.phase = next === "fix" ? "fix" : "closing";
+			run.round += next === "fix" ? 1 : 0;
+			run.evidenceTree = now;
+			send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "done", status: evidence.status });
+			return {
+				entries: [{ type: "custom_message", customType: VERIFY_MESSAGE, content: evidenceText(evidence, next), display: true, details: { evidence, next } }],
+				continue: true,
+			};
+		});
+	};
+}
+
 /** Estimated GripHub credits of one pi usage record (rate + floor + cache, see router.ts). */
 function estimateUsage(model: string, u: any): number | null {
 	return requestEstimate(model, usageOf(u));
@@ -1696,6 +1821,7 @@ async function handle(cmd: Command): Promise<unknown> {
 			return null;
 		case "abort":
 			guard.cancelAll();
+			verifyAbort?.abort();
 			await s.abort();
 			return null;
 		case "session_stats":
@@ -1793,6 +1919,9 @@ async function handle(cmd: Command): Promise<unknown> {
 				current: pick.ok ? { id: pick.model.id, name: pick.model.name, manual: pick.manual } : null,
 			};
 		}
+		// The whole output of a verification run, for the evidence block's "show all".
+		case "verify_output":
+			return { output: verifyOutputs.read(String(cmd.outputId ?? "")) };
 		case "smart_router_set":
 			setSmartRouter(s, !!cmd.on);
 			return state();
@@ -2591,6 +2720,7 @@ async function main() {
 	usePricingRouter(router);
 	routing = new RoutingStore(join(stateDir, "routing"));
 	visionConsent = new VisionConsent(join(stateDir, "vision"));
+	verifyOutputs = new VerifyOutputs(join(stateDir, "verify-output"));
 	modelBoard = new ModelBoard({
 		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
 		cacheFile: join(stateDir, "model-board-cache.json"),

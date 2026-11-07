@@ -266,6 +266,14 @@ class AppSettings {
   /// The approved translators the user set; null = the default from the router's metadata.
   List<String>? get visionTranslatorAllowed => (json['visionTranslatorAllowed'] as List?)?.whereType<String>().toList();
 
+  /// Self-verification (agent/src/verify.ts): on unless turned off; fix rounds (default 3); also tasks that changed
+  /// nothing (off by default); the check command the user set per project folder.
+  bool get verify => json['verify'] != false;
+  int get verifyRounds => (json['verifyRounds'] as num?)?.toInt() ?? 3;
+  bool get verifyAlways => json['verifyAlways'] == true;
+  Map<String, String> get projectVerify =>
+      (json['projectVerify'] as Map? ?? const {}).map((k, v) => MapEntry('$k', '$v'));
+
   /// Model ids the smart router must never pick.
   List<String> get smartRouterBlocked => (json['smartRouterBlocked'] as List? ?? const []).whereType<String>().toList();
   double get dailyBudget => (json['dailyBudget'] as num?)?.toDouble() ?? 0;

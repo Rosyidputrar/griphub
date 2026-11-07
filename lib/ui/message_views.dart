@@ -23,6 +23,7 @@ import 'preview_open.dart';
 import 'preview_screen.dart';
 import 'kit.dart';
 import 'smart_router_screen.dart' show SmartRouterMark;
+import 'verify_view.dart';
 import 'links.dart';
 import 'live_clock.dart';
 import 'i18n.dart';
@@ -444,6 +445,7 @@ class AssistantMessageView extends StatelessWidget {
     this.footer,
     this.autoRouted = false,
     this.visionReads = const [],
+    this.verified,
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
@@ -478,6 +480,9 @@ class AssistantMessageView extends StatelessWidget {
 
   /// The vision translator read this turn's pictures: one quiet line above the footer names the reader.
   final List<VisionRead> visionReads;
+
+  /// The last verification evidence of this turn (agent/src/verify.ts): the closing message names its status.
+  final VerifyEntry? verified;
 
   @override
   Widget build(BuildContext context) {
@@ -520,6 +525,7 @@ class AssistantMessageView extends StatelessWidget {
       children.add(Text(tr('Stopped'), style: Theme.of(context).textTheme.labelMedium?.copyWith(color: p.faint)));
     }
     if (footer != null && visionReads.isNotEmpty) children.add(VisionReadNote(reads: visionReads));
+    if (footer != null && verified != null) children.add(VerifyStatusNote(entry: verified!));
     if (footer case final f?) {
       final model = f.model;
       final subagents = [for (final id in f.cost?.subagentCalls ?? const <String>[]) ?subagentCost?.call(id)];

@@ -7,6 +7,7 @@ import 'i18n.dart';
 import 'kit.dart';
 import 'message_views.dart';
 import 'theme.dart';
+import 'verify_view.dart';
 
 /// Browsing while the agent works (Fitur 8): another chat on screen, read-only, while the open chat works. Looking is
 /// never locked; only sending is. The pill above is the one thing that moves; the chat itself stays still.
@@ -250,9 +251,11 @@ class ReadOnlyTranscript extends StatelessWidget {
             modelLabel: agent.modelLabel,
             footer: footers[i],
             visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
+            verified: footers[i] == null ? null : lastVerifyOfTurn(entries, i),
           ),
           NoticeEntry() => NoticeView(e),
           JobEntry() => JobNoticeView(e),
+          VerifyEntry() => VerifyEvidenceView(e, agent: agent),
           CompactionEntry() => CompactionView(e),
         };
         return Padding(padding: EdgeInsets.only(top: i == 0 ? 0 : (e is UserEntry ? 28 : 14)), child: child);

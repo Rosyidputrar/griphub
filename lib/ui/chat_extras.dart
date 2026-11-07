@@ -1241,6 +1241,67 @@ class MentionMenu extends StatelessWidget {
 // ---------------------------------------------------------------------------
 // Project tools menu
 
+/// Sets the command self-verification runs for the open project; an empty one goes back to the one found by itself.
+Future<void> editProjectCheck(BuildContext context, AgentController agent) async {
+  final it = agent.integrations;
+  final saved = await showDialog<String>(
+    context: context,
+    builder: (_) => _CheckCommandDialog(initial: it.settings?.projectVerify[agent.cwd] ?? ''),
+  );
+  if (saved == null) return;
+  final map = {...?it.settings?.projectVerify, agent.cwd: saved.trim()};
+  try {
+    await it.updateSettings({'projectVerify': map});
+  } catch (e) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
+  }
+}
+
+/// The dialog owns its field, so the field outlives the closing animation.
+class _CheckCommandDialog extends StatefulWidget {
+  const _CheckCommandDialog({required this.initial});
+  final String initial;
+
+  @override
+  State<_CheckCommandDialog> createState() => _CheckCommandDialogState();
+}
+
+class _CheckCommandDialogState extends State<_CheckCommandDialog> {
+  late final field = TextEditingController(text: widget.initial);
+
+  @override
+  void dispose() {
+    field.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(tr('Check command')),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('Run after the agent changes files, before it may say it is done. Leave empty to use the one found in the project.'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: field,
+          autofocus: true,
+          style: const TextStyle(fontFamily: mono),
+          decoration: const InputDecoration(hintText: 'npm test'),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancel'))),
+      FilledButton(onPressed: () => Navigator.pop(context, field.text), child: Text(tr('Save'))),
+    ],
+  );
+}
+
 Future<void> showProjectTools(
   BuildContext context,
   AgentController agent, {
@@ -1360,6 +1421,8 @@ Future<void> showProjectTools(
                     await it.updateSettings({'projectSearch': map});
                   }
 
+                  final check = it.settings?.projectVerify[agent.cwd];
+
                   return SettingsGroup(
                     children: [
                       SettingsRow(
@@ -1369,6 +1432,14 @@ Future<void> showProjectTools(
                         subtitle: tr('Allow the agent to search the web in this project'),
                         onTap: () => set(!on),
                         trailing: LabeledSwitch(label: tr('Web search'), value: on, onChanged: set),
+                      ),
+                      // Self-verification's command for this project (agent/src/verify.ts); empty = found by itself.
+                      SettingsRow(
+                        icon: LucideIcons.listChecks,
+                        color: const Color(0xFF22C55E),
+                        title: tr('Check command'),
+                        subtitle: check ?? tr('Found by itself (npm test, flutter test, ...)'),
+                        onTap: () => editProjectCheck(sheet, agent),
                       ),
                     ],
                   );

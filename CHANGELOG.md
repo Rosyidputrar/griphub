@@ -31,6 +31,11 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Kolom ketik di chat lain terkunci dengan penjelasan; draf tiap chat tetap tersimpan.
   - Begitu agent selesai, chat yang sedang kamu baca langsung bisa dipakai, dan daftar chat menandai chat yang selesai.
   - Edit atau fork pesan di chat yang sedang bekerja tetap menanyakan dulu, karena keduanya memang harus menghentikan agent.
+- **Verifikasi mandiri: tugas coding selesai dengan bukti, bukan klaim.** Setelah agent mengubah file, aplikasi sendiri yang menjalankan tes proyek (npm test, flutter test, gradle, cargo, go, pytest, make, atau perintahmu sendiri) sebelum agent boleh menutup tugas.
+  - Hasilnya tampil di chat sebagai blok bukti: perintah, lulus atau gagal, akhir keluarannya, durasi, dan keluaran lengkap bila diketuk.
+  - Bila gagal, agent memperbaikinya (maks 3 putaran, bisa diubah) dan tiap putaran diperiksa lagi. Mengubah atau melewati tes agar lulus tidak diterima. Bila tetap gagal, agent melaporkannya apa adanya.
+  - Proyek tanpa tes dinyatakan terus terang: "tidak ada tes yang bisa dijalankan".
+  - Perintah pemeriksaan meminta persetujuan seperti perintah lain. Atur di Pengaturan → Verifikasi mandiri, dan perintah per proyek di alat proyek.
 
 ---
 

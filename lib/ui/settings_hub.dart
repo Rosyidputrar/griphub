@@ -37,6 +37,7 @@ import 'templates_screen.dart';
 import 'theme.dart';
 import 'update_sheet.dart';
 import 'usage_screen.dart';
+import 'verify_settings_screen.dart';
 import 'vision_translator_screen.dart';
 
 /// The settings home: everything the agent can use, grouped.
@@ -391,6 +392,13 @@ builder: (context, scroll) => Column(
                     title: tr('Vision translator'),
                     subtitle: visionTranslatorSummary(it.settings),
                     onTap: () => _open(VisionTranslatorScreen(agent: agent)),
+                  ),
+                  SettingsRow(
+                    icon: LucideIcons.listChecks,
+                    color: const Color(0xFF22C55E),
+                    title: tr('Self-verification'),
+                    subtitle: verifySummary(it.settings),
+                    onTap: () => _open(VerifySettingsScreen(agent: agent)),
                   ),
                   SettingsRow(
                     icon: LucideIcons.chartColumn,

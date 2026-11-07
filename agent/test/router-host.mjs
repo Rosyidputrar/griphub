@@ -131,6 +131,6 @@ export async function host(t, mock = {}, opts = {}) {
 	const log = () => (existsSync(files.MOCK_LOG) ? readFileSync(files.MOCK_LOG, "utf8").split("\n").filter(Boolean) : []);
 	/** The last message of each request, as the router got it. */
 	const bodies = () => (existsSync(files.MOCK_BODIES) ? readFileSync(files.MOCK_BODIES, "utf8").split("\n").filter(Boolean).map((l) => JSON.stringify(JSON.parse(l))) : []);
-	return { call, raw, turn, until, records, requests, log, bodies, dir, agentDir };
+	return { call, raw, turn, until, records, requests, log, bodies, dir, agentDir, ws };
 }
 

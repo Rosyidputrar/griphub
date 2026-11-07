@@ -195,6 +195,15 @@ export interface AppSettings {
 	 * [visionTranslatorAllowed]: the approved translators (quality floor); unset = the default from the metadata.
 	 */
 	visionTranslator?: "auto" | "ask" | "off";
+	/**
+	 * Self-verification (verify.ts): a coding task that changed files is checked by the project's tests before the
+	 * agent may close it. Unset = on. [verifyRounds]: fix rounds after a failure (unset = 3). [verifyAlways]: check
+	 * tasks that changed nothing too (unset = off). [projectVerify]: the command per project folder the user set.
+	 */
+	verify?: boolean;
+	verifyRounds?: number;
+	verifyAlways?: boolean;
+	projectVerify?: Record<string, string>;
 	visionTranslatorModel?: string;
 	visionTranslatorAllowed?: string[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
@@ -390,6 +399,10 @@ export class Integrations {
 			smartRouter: this.settings.smartRouter ?? true,
 			smartRouterBlocked: (this.settings.smartRouterBlocked ?? []).filter((id) => typeof id === "string" && id),
 			visionTranslator: this.settings.visionTranslator ?? "auto",
+			verify: this.settings.verify ?? true,
+			verifyRounds: this.settings.verifyRounds ?? 3,
+			verifyAlways: this.settings.verifyAlways ?? false,
+			projectVerify: this.settings.projectVerify ?? {},
 			visionTranslatorModel: this.settings.visionTranslatorModel ?? null,
 			visionTranslatorAllowed: this.settings.visionTranslatorAllowed ?? null,
 			dailyBudget: dailyBudget ?? 0,
@@ -456,6 +469,19 @@ export class Integrations {
 				throw new Error("The smart router's blocked list holds model ids");
 			}
 			next.smartRouterBlocked = [...new Set(next.smartRouterBlocked.map((id) => id.trim()))];
+		}
+		if (next.verify !== undefined && typeof next.verify !== "boolean") throw new Error("Self-verification is on or off");
+		if (next.verifyAlways !== undefined && typeof next.verifyAlways !== "boolean") throw new Error("Self-verification is on or off");
+		if (next.verifyRounds !== undefined && !(Number.isInteger(next.verifyRounds) && next.verifyRounds >= 0 && next.verifyRounds <= 20)) {
+			throw new Error("Fix rounds are a whole number from 0 to 20");
+		}
+		if (next.projectVerify !== undefined) {
+			const pv = next.projectVerify;
+			if (!pv || typeof pv !== "object" || Array.isArray(pv) || Object.values(pv).some((c) => typeof c !== "string")) {
+				throw new Error("A project's verification command is text");
+			}
+			// An empty command removes the project's own and goes back to the detected one.
+			next.projectVerify = Object.fromEntries(Object.entries(pv).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
 		}
 		if (next.visionTranslator !== undefined && !["auto", "ask", "off"].includes(next.visionTranslator)) {
 			throw new Error("The vision translator is automatic, ask first, or off");

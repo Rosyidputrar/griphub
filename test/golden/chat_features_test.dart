@@ -9,9 +9,11 @@ import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/drafts.dart';
 import 'package:griphub_agent/agent/models.dart';
 import 'package:griphub_agent/ui/chat_screen.dart';
-import 'package:griphub_agent/ui/chat_extras.dart' show ApprovalCards;
+import 'package:griphub_agent/ui/chat_extras.dart' show ApprovalCards, editProjectCheck;
 import 'package:griphub_agent/ui/model_sheet.dart';
 import 'package:griphub_agent/ui/read_only_chat.dart';
+import 'package:griphub_agent/ui/verify_settings_screen.dart';
+import 'package:griphub_agent/ui/verify_view.dart';
 import 'package:griphub_agent/ui/smart_router_screen.dart';
 import 'package:griphub_agent/ui/vision_translator_screen.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -750,6 +752,174 @@ void main() {
         await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('read_only_chat_${look.name}')));
       });
     }
+  });
+
+  group('self-verification', () {
+    Map<String, dynamic> evidence(String status, {String next = 'close', int round = 0, List<String> touched = const [], String? command = 'npm test'}) => {
+      'role': 'custom',
+      'customType': 'griphub_verify',
+      'content': '[Verification evidence]',
+      'display': true,
+      'details': {
+        'next': next,
+        'evidence': {
+          'status': status,
+          'command': command,
+          'source': 'package.json',
+          'exitCode': status == 'passed' ? 0 : (command == null ? null : 1),
+          'durationMs': 12300,
+          'summary': status == 'passed' ? '> node test/check.test.js\nok.txt says ok\n1 passing' : 'ok.txt says bad\nFAIL: expected ok',
+          'outputId': 'abc-def',
+          'round': round,
+          'maxRounds': 3,
+          'testsTouched': touched,
+          'at': 0,
+        },
+      },
+    };
+    Map<String, dynamic> reply(String text) => {
+      'role': 'assistant',
+      'model': 'kimi-k3',
+      'stopReason': 'stop',
+      'content': [
+        {'type': 'text', 'text': text},
+      ],
+      'usage': {'input': 900, 'output': 40, 'cacheRead': 0, 'cacheWrite': 0, 'totalTokens': 940},
+      'griphubCost': {'credits': 0.01, 'floored': true},
+    };
+
+    AgentController verifiedChat() {
+      final agent = newAgent()
+        ..sessionId = 's1'
+        ..model = ModelInfo(const {'provider': 'griphub', 'id': 'kimi-k3', 'name': 'Kimi K3', 'input': ['text']});
+      for (final m in [
+        {'role': 'user', 'content': 'Perbaiki validasi ok.txt'},
+        reply('Saya mengubah ok.txt.'),
+        evidence('failed', next: 'fix'),
+        reply('Memperbaiki isi ok.txt.'),
+        evidence('passed', round: 1),
+        reply('Selesai: verifikasi `npm test` lulus.'),
+      ]) {
+        agent.addHistoryMessage(m);
+      }
+      return agent;
+    }
+
+    testWidgets('evidence is its own block; the closing message names the last result', (tester) async {
+      FakeHost();
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      await pumpLook(tester, const Look(), ChatScreen(agent: verifiedChat()), height: 1400);
+      await frames(tester);
+      expect(find.byType(VerifyEvidenceView), findsNWidgets(2));
+      expect(find.text('Tests failed'), findsOneWidget);
+      expect(find.text('Tests passed'), findsOneWidget);
+      expect(find.text('The agent fixes it now; the check runs again (1 of 3).'), findsOneWidget);
+      // The footer of the closing message refers to the last evidence, not the first.
+      expect(find.byType(VerifyStatusNote), findsOneWidget);
+      expect(find.text('Verification: Tests passed · npm test'), findsOneWidget);
+    });
+
+    testWidgets('the whole output opens from the evidence', (tester) async {
+      final host = FakeHost();
+      host.answers['verify_output'] = (cmd) => {'output': 'FULL OUTPUT of ${cmd['outputId']}'};
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      await pumpLook(tester, const Look(), ChatScreen(agent: verifiedChat()), height: 1400);
+      await frames(tester);
+      await tester.tap(find.text('Full output').first);
+      await frames(tester, 12);
+      expect(find.text('FULL OUTPUT of abc-def'), findsOneWidget);
+    });
+
+    testWidgets('while the check runs, the activity line says so', (tester) async {
+      final host = FakeHost();
+      Drafts.root = Directory.systemTemp.createTempSync('drafts-').path;
+      final agent = newAgent()..sessionId = 's1';
+      agent.addHistoryMessage({'role': 'user', 'content': 'Ubah ok.txt'});
+      await pumpLook(tester, const Look(), ChatScreen(agent: agent));
+      host.emit({'type': 'state', 'state': {'isStreaming': true, 'sessionId': 's1'}});
+      host.emit({'type': 'verify', 'sessionId': 's1', 'phase': 'running', 'command': 'npm test'});
+      await frames(tester);
+      expect(find.text('Checking: npm test'), findsOneWidget);
+      host.emit({'type': 'verify', 'sessionId': 's1', 'phase': 'done', 'status': 'passed'});
+      await frames(tester);
+      expect(find.text('Checking: npm test'), findsNothing);
+    });
+
+    for (final look in const [Look(), Look(dark: true, language: 'id'), Look(language: 'id', textScale: 1.3, width: 320)]) {
+      testWidgets('golden: evidence blocks ${look.name}', (tester) async {
+        FakeHost();
+        await pumpLook(
+          tester,
+          look,
+          Scaffold(
+            body: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                for (final m in [
+                  evidence('failed', next: 'fix'),
+                  evidence('tests-changed', touched: const ['test/check.test.js'], round: 3),
+                  evidence('passed', round: 1),
+                  evidence('none', command: null),
+                ]) ...[
+                  VerifyEvidenceView(VerifyEntry((m['details'] as Map).cast<String, dynamic>()), agent: newAgent()),
+                  const SizedBox(height: 12),
+                ],
+              ],
+            ),
+          ),
+          height: 1500,
+        );
+        await frames(tester);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('verify_evidence_${look.name}')));
+      });
+    }
+
+    for (final look in const [Look(), Look(dark: true, language: 'id')]) {
+      testWidgets('golden: self-verification settings ${look.name}', (tester) async {
+        final host = FakeHost();
+        host.stored['verifyRounds'] = 3;
+        await pumpLook(tester, look, VerifySettingsScreen(agent: newAgent()));
+        await frames(tester, 12);
+        expect(layoutErrors, isEmpty);
+        await expectLater(find.byType(MaterialApp), matchesGoldenFile(golden('verify_settings_${look.name}')));
+      });
+    }
+
+    testWidgets('settings: the switch, the rounds and "also tasks that change no file" go to the host', (tester) async {
+      final host = FakeHost();
+      await pumpLook(tester, const Look(), VerifySettingsScreen(agent: newAgent()));
+      await frames(tester, 12);
+      await tester.tap(find.byTooltip('More'));
+      await frames(tester);
+      expect(host.stored['verifyRounds'], 4);
+      await tester.tap(find.byType(Switch).last);
+      await frames(tester);
+      expect(host.stored['verifyAlways'], true);
+      await tester.tap(find.byType(Switch).first);
+      await frames(tester);
+      expect(host.stored['verify'], false);
+    });
+
+    testWidgets("a project's own check command is saved for its folder", (tester) async {
+      final host = FakeHost();
+      final agent = newAgent()..cwd = '/w/proj';
+      await pumpLook(
+        tester,
+        const Look(),
+        Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(onPressed: () => editProjectCheck(context, agent), child: const Text('open')),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await frames(tester);
+      await tester.enterText(find.byType(TextField), 'make check');
+      await tester.tap(find.text('Save'));
+      await frames(tester);
+      expect(host.stored['projectVerify'], {'/w/proj': 'make check'});
+    });
   });
 }
 

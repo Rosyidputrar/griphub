@@ -296,6 +296,33 @@ class CompactionEntry extends ChatEntry {
 
 /// A background job's result coming back to its chat: a notice, not a bubble (the user did not send it), and the start
 /// of the turn in which the agent carries on with it.
+/// Evidence of self-verification (agent/src/verify.ts): the project's check, run by the app in this session after the
+/// agent changed files. A block of its own in the chat, never a tool card.
+class VerifyEntry extends ChatEntry {
+  VerifyEntry(Map<String, dynamic> details)
+    : evidence = (details['evidence'] as Map? ?? const {}).cast<String, dynamic>(),
+      next = details['next'] as String? ?? 'close';
+  final Map<String, dynamic> evidence;
+
+  /// What the agent was told to do next: fix (another round) or close.
+  final String next;
+
+  /// passed, failed, none (no test could be run), declined (not allowed to run) or tests-changed.
+  String get status => evidence['status'] as String? ?? 'none';
+  String? get command => evidence['command'] as String?;
+  String? get source => evidence['source'] as String?;
+  int? get exitCode => (evidence['exitCode'] as num?)?.toInt();
+  Duration get took => Duration(milliseconds: (evidence['durationMs'] as num?)?.toInt() ?? 0);
+  String get summary => evidence['summary'] as String? ?? '';
+  String? get outputId => evidence['outputId'] as String?;
+  int get round => (evidence['round'] as num?)?.toInt() ?? 0;
+  int get maxRounds => (evidence['maxRounds'] as num?)?.toInt() ?? 0;
+  List<String> get testsTouched => (evidence['testsTouched'] as List? ?? const []).whereType<String>().toList();
+  String? get reason => evidence['reason'] as String?;
+  bool get timedOut => evidence['timedOut'] == true;
+  bool get passed => status == 'passed';
+}
+
 class JobEntry extends ChatEntry {
   JobEntry(this.job);
 
@@ -861,4 +888,15 @@ class ChatView {
     final first = entries.whereType<UserEntry>().firstOrNull?.text.trim();
     return first == null || first.isEmpty ? 'New chat' : first.split('\n').first;
   }
+}
+
+/// The last verification evidence in the turn that entry [i] ends (from the turn's user message, or job result, to
+/// [i]); null when the turn has none.
+VerifyEntry? lastVerifyOfTurn(List<ChatEntry> entries, int i) {
+  for (var k = i; k >= 0; k--) {
+    final e = entries[k];
+    if (e is VerifyEntry) return e;
+    if (e is UserEntry || e is JobEntry) return null;
+  }
+  return null;
 }
