@@ -39,28 +39,29 @@ class WorkingPill extends StatelessWidget {
             onTap: agent.leaveView,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
-              child: Row(
+              // The chat's name is the title, so it is what stays when the line is short; what it is doing is said
+              // above it, quietly. The dot, the badge and the chevron sit on the title's line, not mid-block.
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const LiveDot(),
-                  const SizedBox(width: 8),
-                  // The chat's name is the title, so it is what stays when the line is short; what it is doing is said
-                  // above it, quietly.
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(tr('The agent is working in'), maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall?.copyWith(color: p.muted)),
-                        Text(agent.chatTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.labelLarge),
-                      ],
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 16),
+                    child: Text(tr('The agent is working in'), maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall?.copyWith(color: p.muted)),
                   ),
-                  if (waiting > 0) ...[
-                    const SizedBox(width: 8),
-                    _Badge(count: waiting),
-                  ],
-                  const SizedBox(width: 4),
-                  Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+                  Row(
+                    children: [
+                      const LiveDot(),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(agent.chatTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.labelLarge)),
+                      if (waiting > 0) ...[
+                        const SizedBox(width: 8),
+                        _Badge(count: waiting),
+                      ],
+                      const SizedBox(width: 4),
+                      Icon(LucideIcons.chevronRight, size: 18, color: p.faint),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -192,7 +193,10 @@ class LockedComposer extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      tr('Read-only — the agent is working in {chat}.').replaceAll('{chat}', agent.chatTitle),
+                      // The pill above already names the chat at work: said once, there.
+                      tr(agent.viewing?.retryWhenFree == true
+                          ? 'Try again runs here once the agent is free.'
+                          : 'Read-only until the agent is free.'),
                       style: text.bodySmall?.copyWith(color: p.muted),
                     ),
                   ),
@@ -252,6 +256,7 @@ class ReadOnlyTranscript extends StatelessWidget {
             footer: footers[i],
             visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
             verified: footers[i] == null ? null : lastVerifyOfTurn(entries, i),
+            readOnly: true,
           ),
           NoticeEntry() => NoticeView(e),
           JobEntry() => JobNoticeView(e),

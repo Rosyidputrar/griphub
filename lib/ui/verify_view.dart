@@ -201,8 +201,10 @@ class VerifyStatusNote extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.palette;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(_statusIcon(entry.status), size: 13, color: p.faint),
+        // On the first line, however many lines the note takes.
+        Padding(padding: const EdgeInsets.only(top: 2), child: Icon(_statusIcon(entry.status), size: 13, color: p.faint)),
         const SizedBox(width: 6),
         Expanded(
           child: Text(

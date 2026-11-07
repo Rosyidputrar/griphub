@@ -8,7 +8,7 @@ import 'agent/agent_controller.dart';
 import 'agent/widget_sync.dart';
 import 'ui/panel_screen.dart';
 import 'ui/app_lock.dart';
-import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger;
+import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger, rootNavigator;
 import 'ui/home_shell.dart';
 import 'ui/onboarding.dart';
 import 'ui/predictive_back.dart';
@@ -33,6 +33,7 @@ void main() {
   WidgetSync(
     agent,
     translate: tr,
+    number: localNumber,
     dark: () => switch (Appearance.instance.value) {
       ThemeMode.dark => true,
       ThemeMode.light => false,
@@ -56,6 +57,7 @@ class GripHubApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         navigatorObservers: [PredictiveBack.instance],
         scaffoldMessengerKey: rootMessenger,
+        navigatorKey: rootNavigator,
         themeMode: appearance.value,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
@@ -68,7 +70,7 @@ class GripHubApp extends StatelessWidget {
               disableAnimations: MediaQuery.of(context).disableAnimations || appearance.animationsOff,
             ),
             // The floating panel (Fitur 4) sits inside the app lock: a locked app shows no chat in the panel either.
-            child: AppLockGate(child: PanelGate(agent: agent, child: StopToSwitchOverlay(agent: agent, child: child!))),
+            child: AppLockGate(child: PanelGate(agent: agent, appNavigator: rootNavigator, child: StopToSwitchOverlay(agent: agent, child: child!))),
           ),
         ),
         home: ListenableBuilder(

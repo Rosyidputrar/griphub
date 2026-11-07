@@ -9,6 +9,7 @@ import '../agent/agent_controller.dart';
 import '../agent/drafts.dart';
 import '../agent/companion.dart';
 import '../agent/models.dart';
+import '../agent/panel.dart';
 import '../agent/pricing.dart';
 import '../agent/features.dart';
 import 'i18n.dart';
@@ -553,7 +554,20 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _scan(String path) async {
     final file = File(path);
     try {
-      final result = await runWithProgress(context, tr('Reading the document…'), () => agent.scanDocument(file));
+      final result = await runWithProgress(context, tr('Reading the document…'), () async {
+        try {
+          return (await agent.scanDocument(file), null);
+        } on ScanNeedsConsent catch (e) {
+          return (null, e.ask);
+        }
+      }).then((r) async {
+        if (r == null) return null;
+        final (read, ask) = r;
+        if (ask == null || !mounted) return read;
+        // "Ask first": the paid reading waits for a yes, outside the progress dialog.
+        if (!await _confirmVisionReading(ask) || !mounted) return null;
+        return runWithProgress(context, tr('Reading the document…'), () => agent.scanDocument(file, consent: true));
+      });
       if (!mounted || result == null) return;
       final before = input.text.trim();
       final block = '${tr('Text of the scanned document:')}\n---\n${result.text.trim()}\n---\n\n';
@@ -751,17 +765,20 @@ class _ChatScreenState extends State<ChatScreen> {
                 children: [
                   // A first message still waiting for the server is the chat's start: show it, not the welcome.
                   // The panel is small: one quiet line instead of the welcome and its quick starts.
+                  // With a selection, the actions above are the way in; without one, the field below says it all.
                   agent.entries.isEmpty && agent.offlineForCurrent.isEmpty && widget.panel
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              tr('Ask anything, or pick an action above.'),
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: context.palette.muted),
-                            ),
-                          ),
-                        )
+                      ? (PanelState.instance.selection?.trim().isNotEmpty == true
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Text(
+                                    tr('Ask anything, or pick an action above.'),
+                                    textAlign: TextAlign.center,
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: context.palette.muted),
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.expand())
                       : agent.entries.isEmpty && agent.offlineForCurrent.isEmpty
                       ? _EmptyState(
                           agent: agent,

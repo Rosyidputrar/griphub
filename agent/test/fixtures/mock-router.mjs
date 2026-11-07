@@ -76,10 +76,20 @@ globalThis.fetch = async (input, init) => {
 		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary, model: request.model, images, vision })}\n`);
 	}
 	// A vision translator's reading (visiontranslate.ts: its instruction speaks of "model lain"): MOCK_VISION_TEXT is
-	// what it reads, MOCK_VISION_FAIL makes the router refuse it (500), MOCK_VISION_EMPTY makes it read nothing.
+	// what it reads, MOCK_VISION_DELAY_MS delays it, MOCK_VISION_FAIL makes the router refuse it (500), MOCK_VISION_EMPTY makes it read nothing.
 	// Counted in MOCK_LOG as "vision", and not as a chat request.
 	if (!summary && /model lain/i.test(JSON.stringify(last?.content ?? ""))) {
 		if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, "vision\n");
+		// MOCK_VISION_DELAY_MS: the reading takes this long (for Stop while it runs).
+		if (process.env.MOCK_VISION_DELAY_MS) {
+			await new Promise((done, fail) => {
+				const timer = setTimeout(done, Number(process.env.MOCK_VISION_DELAY_MS));
+				init?.signal?.addEventListener("abort", () => {
+					clearTimeout(timer);
+					fail(new DOMException("aborted", "AbortError"));
+				});
+			});
+		}
 		if (process.env.MOCK_VISION_FAIL) {
 			return new Response('{"error":{"message":"Vision upstream failed in the mock router"}}', { status: 500, headers: { "content-type": "application/json" } });
 		}

@@ -31,10 +31,10 @@ const opts = (coding = false) => ({ inputTokens: 2_000, coding });
 test("the catalog keeps only what the metadata states: vision and tools as said, prices from the live rates", () => {
 	const all = metas();
 	assert.ok(all.length >= 50, `${all.length} chat models`);
-	const fable = all.find((m) => m.id === "claude-fable-5");
-	assert.equal(fable.vision, true);
-	assert.equal(fable.tools, true);
-	assert.equal(fable.credits, 8, "live rate, not the built-in table");
+	const sol = all.find((m) => m.id === "gpt-5.6-sol");
+	assert.equal(sol.vision, true);
+	assert.equal(sol.tools, true);
+	assert.equal(sol.credits, 3.5, "the live rate");
 	// A model the metadata calls non-vision is recorded as such (not merely unknown).
 	const noVision = rawModels.find((m) => m.capabilities?.vision === false);
 	assert.ok(noVision, "the fixture has a non-vision model");
@@ -153,6 +153,12 @@ test("what counts as a failed turn, and how far the class climbs", () => {
 	assert.equal(sr.failureOf({ stopReason: "stop" }, "x", "Salah, bukan itu"), "rejected");
 	assert.equal(sr.failureOf({ stopReason: "stop" }, "x", "still broken after that"), "rejected");
 	assert.equal(sr.failureOf({ stopReason: "stop" }, "x", "Terima kasih, lanjut ke langkah 2"), null);
+	// "Salah satu" ("one of") and its kin start ordinary questions, not rebukes.
+	for (const text of ["Salah satu file ini error, kenapa?", "salah seorang teman bilang begitu", "Salah sebuah tombol tidak muncul", "Salah paham soal X", "salah ketik di baris 3?"]) {
+		assert.equal(sr.failureOf({ stopReason: "stop" }, "x", text), null, text);
+	}
+	assert.equal(sr.failureOf({ stopReason: "stop" }, "x", "Salah. Hasilnya harus 10"), "rejected");
+	assert.equal(sr.failureOf({ stopReason: "stop" }, "x", "salah lagi"), "rejected");
 	assert.equal(sr.nextFloor(0, 0), 1);
 	assert.equal(sr.nextFloor(0, 1), 2);
 	assert.equal(sr.nextFloor(1, 2), 2, "never past the top");

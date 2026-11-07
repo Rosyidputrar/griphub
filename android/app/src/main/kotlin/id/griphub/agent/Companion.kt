@@ -63,19 +63,41 @@ object ScreenCompanion {
 
     val active: Boolean get() = projection != null
 
-    /** The system consent screen; the activity starts the service with its answer. */
-    fun consentIntent(context: Context): Intent =
-        (context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent()
+    /**
+     * The system consent screen; the activity starts the service with its answer. Android 14+ offers "one app" first
+     * (QPR2 makes it the default): the companion guides across apps, so it asks for the whole screen.
+     */
+    fun consentIntent(context: Context): Intent {
+        val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        return if (Build.VERSION.SDK_INT >= 34) {
+            manager.createScreenCaptureIntent(android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay())
+        } else {
+            manager.createScreenCaptureIntent()
+        }
+    }
+
+    /**
+     * The whole screen in pixels, status and navigation bars, cutout and current rotation included: what the frame
+     * mirrors and where the highlight and the accessibility boxes are placed (a Service's displayMetrics can leave the
+     * bars out).
+     */
+    @Suppress("DEPRECATION")
+    private fun screenSize(context: Context): android.graphics.Point {
+        val display = (context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        val m = android.util.DisplayMetrics()
+        display.getRealMetrics(m)
+        return android.graphics.Point(m.widthPixels, m.heightPixels)
+    }
 
     /** Called by CompanionService once it is in the foreground (Android requires that order). */
     fun begin(context: Context, resultCode: Int, data: Intent) {
         val manager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         val p = manager.getMediaProjection(resultCode, data) ?: throw IllegalStateException("No consent")
-        val metrics = context.resources.displayMetrics
+        val screen = screenSize(context)
         // Half the screen's size: enough to read and point, a quarter of the pixels to send.
-        width = metrics.widthPixels / 2
-        height = metrics.heightPixels / 2
-        density = metrics.densityDpi
+        width = screen.x / 2
+        height = screen.y / 2
+        density = context.resources.displayMetrics.densityDpi
         thread = HandlerThread("companion").also { it.start() }
         handler = Handler(thread!!.looper)
         // On the main thread: end() touches windows and tells Flutter, both of which must happen there.
@@ -97,6 +119,16 @@ object ScreenCompanion {
      */
     fun capture(context: Context): Map<String, Any?>? {
         val d = display ?: return null
+        val screen = screenSize(context)
+        // Turned since the last frame: the mirror follows the screen's new shape (else it is letterboxed and the boxes
+        // from it land in the wrong place).
+        if (screen.x / 2 != width || screen.y / 2 != height) {
+            width = screen.x / 2
+            height = screen.y / 2
+            reader?.close()
+            reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+            d.resize(width, height, density)
+        }
         val r = reader ?: return null
         val latch = CountDownLatch(1)
         var bitmap: Bitmap? = null
@@ -125,14 +157,13 @@ object ScreenCompanion {
         val out = ByteArrayOutputStream()
         b.compress(Bitmap.CompressFormat.JPEG, 70, out)
         b.recycle()
-        val metrics = context.resources.displayMetrics
         return mapOf(
             "data" to Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP),
             "mimeType" to "image/jpeg",
             "width" to width,
             "height" to height,
-            "screenWidth" to metrics.widthPixels,
-            "screenHeight" to metrics.heightPixels,
+            "screenWidth" to screen.x,
+            "screenHeight" to screen.y,
             "mean" to mean,
             "deviation" to deviation,
         )

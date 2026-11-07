@@ -100,6 +100,55 @@ export function isTestPath(path: string): boolean {
 	return TEST_PATH.test(path);
 }
 
+/** Files that only configure how tests run: changing them while fixing a failure changes the tests too. */
+const TEST_CONFIG = /(^|\/)(pytest\.ini|tox\.ini|conftest\.py|phpunit\.xml(\.dist)?|karma\.conf\.[cm]?[jt]s|(jest|vitest|playwright|cypress)\.config\.[cm]?[jt]s|\.mocharc\.[a-z]+|\.nycrc(\.[a-z]+)?|dart_test\.yaml)$/i;
+
+export function isTestConfig(path: string): boolean {
+	return TEST_CONFIG.test(path);
+}
+
+/**
+ * How the project's tests are defined, beyond the test files: the test script in package.json, the Makefile's test
+ * target, pytest's section of pyproject.toml. Weakening one of these (`"test": "exit 0"`) is changing the tests; the
+ * rest of those files (a new dependency, another target) is not.
+ */
+export function testDefinition(cwd: string): Record<string, string> {
+	const read = (p: string) => {
+		try {
+			return readFileSync(join(cwd, p), "utf8");
+		} catch {
+			return null;
+		}
+	};
+	const out: Record<string, string> = {};
+	const pkg = read("package.json");
+	if (pkg !== null) {
+		try {
+			const scripts = JSON.parse(pkg)?.scripts ?? {};
+			for (const [k, v] of Object.entries(scripts)) if (/^(pre|post)?test(:|$)/.test(k)) out[`package.json (${k})`] = String(v);
+		} catch {
+			out["package.json (test)"] = "unreadable";
+		}
+	}
+	const make = read("Makefile");
+	if (make !== null) {
+		const m = /^test:.*(\n\t.*)*/m.exec(make);
+		if (m) out["Makefile (test)"] = m[0];
+	}
+	const py = read("pyproject.toml");
+	if (py !== null) {
+		const m = /^\[tool\.pytest[^\]]*\][^[]*/m.exec(py);
+		if (m) out["pyproject.toml (pytest)"] = m[0];
+	}
+	return out;
+}
+
+/** The names in [testDefinition] that differ between two readings of it. */
+export function testDefinitionChanged(before: Record<string, string>, after: Record<string, string>): string[] {
+	const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+	return [...keys].filter((k) => before[k] !== after[k]).sort();
+}
+
 // ---------------------------------------------------------------------------
 // Running it
 

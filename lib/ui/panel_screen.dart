@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
@@ -21,23 +22,57 @@ import 'theme.dart';
 
 /// Over the app's navigator: while the panel window shows the engine, the panel replaces what is on screen, and the
 /// app's pages stay as they were underneath for when the main window comes back.
-class PanelGate extends StatelessWidget {
-  const PanelGate({super.key, required this.agent, required this.child});
+class PanelGate extends StatefulWidget {
+  const PanelGate({super.key, required this.agent, required this.child, this.appNavigator});
   final AgentController agent;
   final Widget child;
 
+  /// The app's own navigator (MaterialApp's), whose pages Back closes in the app window.
+  final GlobalKey<NavigatorState>? appNavigator;
+
+  @override
+  State<PanelGate> createState() => _PanelGateState();
+}
+
+class _PanelGateState extends State<PanelGate> {
+  final _panelNavigator = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    PanelState.instance.addListener(_surfaceShown);
+  }
+
+  @override
+  void dispose() {
+    PanelState.instance.removeListener(_surfaceShown);
+    super.dispose();
+  }
+
+  /// A window came to the front with the engine (the app after the panel, or the panel): Android's window was made
+  /// anew and asks Flutter for Back only when told. Flutter tells it only when its pages change, so it is told here,
+  /// for the navigator on show: Back closes the open chat instead of leaving the app.
+  void _surfaceShown() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final navigator = (PanelState.instance.isPanel ? _panelNavigator : widget.appNavigator)?.currentState;
+      if (navigator != null) unawaited(SystemNavigator.setFrameworkHandlesBack(navigator.canPop()));
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final agent = widget.agent;
     return ListenableBuilder(
       listenable: PanelState.instance,
       builder: (context, _) {
         final panel = PanelState.instance.isPanel && agent.status == BootStatus.ready;
         return Stack(
           children: [
-            Offstage(offstage: panel, child: TickerMode(enabled: !panel, child: child)),
+            Offstage(offstage: panel, child: TickerMode(enabled: !panel, child: widget.child)),
             if (panel)
               // Its own navigator, for the dialogs and sheets the chat opens.
-              Navigator(onGenerateRoute: (_) => MaterialPageRoute<void>(builder: (_) => PanelScreen(agent: agent))),
+              Navigator(key: _panelNavigator, onGenerateRoute: (_) => MaterialPageRoute<void>(builder: (_) => PanelScreen(agent: agent))),
           ],
         );
       },

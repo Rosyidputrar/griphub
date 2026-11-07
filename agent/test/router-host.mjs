@@ -52,7 +52,7 @@ export async function host(t, mock = {}, opts = {}) {
 	// No automatic retries by pi: a failed request ends the turn, as the escalation test needs.
 	writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ retry: { enabled: false } }));
 	// Live rates the router served earlier (router.ts cache).
-	const rates = Object.fromEntries(Object.entries(RATES).map(([k, credits]) => [k, { credits }]));
+	const rates = Object.fromEntries(Object.entries({ ...RATES, ...opts.rates }).map(([k, credits]) => [k, { credits }]));
 	writeFileSync(join(agentDir, "griphub", "router-cache.json"), JSON.stringify({ version: 1, rates, ratesAt: Date.now(), floors: {}, requests: [], daily: {} }));
 	const files = { MOCK_LOG: join(dir, "mock.log"), MOCK_REQUESTS: join(dir, "requests.log"), MOCK_BODIES: join(dir, "bodies.log"), MOCK_RELEASE: join(dir, "release") };
 	writeFileSync(files.MOCK_RELEASE, "");
@@ -116,7 +116,7 @@ export async function host(t, mock = {}, opts = {}) {
 		return r.data;
 	};
 	await until((r) => r.type === "ready", 60_000, "for ready");
-	await call("custom_provider_save", { provider: { apiKey: "sk-test", models: MODELS } });
+	await call("custom_provider_save", { provider: { apiKey: "sk-test", models: opts.models ?? MODELS } });
 	await call("set_model", { provider: "griphub", model: "kimi-k3" });
 	const requests = () =>
 		existsSync(files.MOCK_REQUESTS) ? readFileSync(files.MOCK_REQUESTS, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => !r.summary && !r.vision) : [];

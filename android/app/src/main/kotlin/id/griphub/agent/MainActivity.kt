@@ -1,7 +1,5 @@
 package id.griphub.agent
 
-import io.flutter.embedding.engine.FlutterEngine
-
 /** The app's main window: the whole app, and what the rest of Android sends it (shares, shortcuts, notifications). */
 class MainActivity : BridgeActivity() {
     companion object {
@@ -13,9 +11,4 @@ class MainActivity : BridgeActivity() {
     }
 
     override val surface = "app"
-
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        Updater.register(this, flutterEngine.dartExecutor.binaryMessenger)
-    }
 }

@@ -186,9 +186,12 @@ function noCandidateReason(need: Need, rejected: Record<string, number>): string
 // ---------------------------------------------------------------------------
 // Escalation (pure)
 
-/** Rebukes of the last answer, in Indonesian and English. */
+/**
+ * Rebukes of the last answer, in Indonesian and English. "Salah satu" ("one of"), "salah seorang", "salah sebuah",
+ * "salah paham" and "salah ketik" start everyday questions, not rebukes.
+ */
 const REBUKE =
-	/^(salah|keliru|bukan( itu| begitu)?|tidak benar|gak bener|ga bener|nggak bener|masih (salah|error|gagal|belum)|tetap (salah|error|gagal)|tidak (jalan|bekerja|berhasil)|gak jalan|ga jalan|wrong|that'?s (wrong|not (it|right|what))|not what i|still (wrong|broken|failing|not working|doesn'?t)|doesn'?t work|didn'?t work|it'?s broken|try again|coba lagi|ulangi)\b/i;
+	/^(salah(?!\s+(satu|seorang|sebuah|paham|ketik))|keliru|bukan( itu| begitu)?|tidak benar|gak bener|ga bener|nggak bener|masih (salah|error|gagal|belum)|tetap (salah|error|gagal)|tidak (jalan|bekerja|berhasil)|gak jalan|ga jalan|wrong|that'?s (wrong|not (it|right|what))|not what i|still (wrong|broken|failing|not working|doesn'?t)|doesn'?t work|didn'?t work|it'?s broken|try again|coba lagi|ulangi)\b/i;
 
 export function normalise(text: string): string {
 	return text.toLowerCase().replace(/\s+/g, " ").trim();

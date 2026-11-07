@@ -134,6 +134,8 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
         super.configureFlutterEngine(flutterEngine)
         owner = java.lang.ref.WeakReference(this)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+        // Every window registers it: a cold start into the panel builds the whole app too (offstage), updater included.
+        Updater.register(this, messenger)
 
         EventChannel(messenger, "griphub/agent/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, sink: EventChannel.EventSink) {
@@ -145,6 +147,8 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
             }
         })
 
+        // The engine outlives this window: what lives as long as it holds the application, not the window.
+        val app = applicationContext
         AgentRuntime.listener = object : AgentRuntime.Listener {
             override fun onStdout(line: String) {
                 events?.success(mapOf("kind" to "stdout", "line" to line))
@@ -157,7 +161,7 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
             override fun onExit(code: Int) {
                 // Only the chat side ends here; schedules keep the service
                 // alive through keepAlive until they are switched off.
-                AgentService.setBusy(this@BridgeActivity, false)
+                AgentService.setBusy(app, false)
                 events?.success(mapOf("kind" to "exit", "code" to code))
             }
         }
@@ -384,6 +388,11 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                     // Screen companion (Companion.kt, Fitur 5): Android's own consent every session, frames only on request,
                     // a highlight that takes no touches, and the optional read-only accessibility tree.
                     "companionStart" -> {
+                        // Already on: the session that runs stays (a second consent would tear it down from under it).
+                        if (ScreenCompanion.active) {
+                            result.success(true)
+                            return@setMethodCallHandler
+                        }
                         pendingCompanion?.success(false)
                         pendingCompanion = result
                         @Suppress("DEPRECATION")

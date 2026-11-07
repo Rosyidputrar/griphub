@@ -13,7 +13,7 @@
  * stdout is reserved for protocol records; logs go to stderr.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -86,7 +86,20 @@ import { lookup, Router } from "./router.js";
 import { catalog, type ModelMeta } from "./modelcaps.js";
 import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, resolveSnapshot, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt, storeSnapshot } from "./memory.js";
 import { COMPANION_MARK, companionInstruction, type Frame, pointerOf, treeText, type TreeNode, withFrame } from "./companion.js";
-import { detectVerifyCommand, type Evidence, evidenceText, isTestPath, outputSummary, runVerify, VERIFY_MESSAGE, VERIFY_NOTE, VerifyOutputs } from "./verify.js";
+import {
+	detectVerifyCommand,
+	type Evidence,
+	evidenceText,
+	isTestConfig,
+	isTestPath,
+	outputSummary,
+	runVerify,
+	testDefinition,
+	testDefinitionChanged,
+	VERIFY_MESSAGE,
+	VERIFY_NOTE,
+	VerifyOutputs,
+} from "./verify.js";
 import { asksAboutPicture, defaultAllowed, SCAN_INSTRUCTION, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
 import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
@@ -129,6 +142,8 @@ let memoryStore: MemoryStore;
 let memoryProposals: Proposals;
 /** The verification command running now, so Stop stops it too. */
 let verifyAbort: AbortController | null = null;
+/** The vision readings under way (the translator, a scan): Stop ends them as it ends the turn. */
+let visionAbort = new AbortController();
 /**
  * Screen companion (companion.ts): the chat it runs in, and the frame held for the one request it was taken for. The
  * frame lives here only (never in a message, a file or a log) and is dropped when the turn ends or the companion stops.
@@ -614,6 +629,14 @@ function openSession(sessionManager: SessionManager) {
 				return result.session;
 			},
 			retire: () => {
+				// The screen companion belongs to the chat it was started in: leaving that chat ends it, recorded there.
+				if (session && companionSession === session.sessionId) {
+					session.sessionManager.appendCustomMessageEntry(COMPANION_RECORD, "Screen companion stopped: the chat was left.", true, { event: "stop", at: Date.now() });
+					send({ type: "companion", sessionId: companionSession, event: "stop" });
+					companionSession = null;
+					companionFrame = null;
+					companionStep = false;
+				}
 				unsubscribe?.();
 				guard.cancelAll();
 				session?.dispose();
@@ -921,7 +944,7 @@ async function tryFallback(error: string) {
 			logDecision(failed, { kind: "fallback", model: model.id, modelName: model.name ?? model.id, reason: `fallback model after an error: ${error.slice(0, 120)}` });
 		}
 		send({ type: "state", state: state() });
-		failed.prompt("Continue where you left off (the previous model failed).").catch(() => {});
+		failed.prompt(`${CONTINUE_PREFIX} (the previous model failed).`).catch(() => {});
 	} finally {
 		fallbackPending = false;
 	}
@@ -1014,7 +1037,10 @@ async function routeTurn(s: AgentSession, text: string, images: number, opts: { 
 
 	const { difficulty, reasons } = classify({ text, images, coding, contextTokens });
 	const wanted = Math.max(difficulty, floor) as Difficulty;
-	const need = { vision: images > 0, tools: coding, minContext: contextTokens + promptTokens + (coding ? ROUTE_RESERVE.coding : ROUTE_RESERVE.chat) };
+	// A plain chat calls tools too (web search, reading a file, remember, images): any tool on offer needs a model that
+	// can call it.
+	const tools = coding || s.getActiveToolNames().length > 0;
+	const need = { vision: images > 0, tools, minContext: contextTokens + promptTokens + (coding ? ROUTE_RESERVE.coding : ROUTE_RESERVE.chat) };
 	const blocked = new Set(integrations.settings.smartRouterBlocked ?? []);
 	let models = routerCatalog();
 	// A list saved before the router's tool flags were kept (an app update) states none: read /v1/models again once
@@ -1069,9 +1095,44 @@ const VISION_OFF =
 const VISION_NONE =
 	"No approved vision model is available to read the picture. Switch to a model that reads pictures, or change the approved list in Settings → Vision translator.";
 const VISION_FAILED = "The vision model could not read the picture, so nothing was sent. Try again, or switch to a model that reads pictures.";
+const VISION_STOPPED = "Stopped before the picture was read, so nothing was sent.";
+const SCAN_OFF = "Scanning reads the photo with a vision model, and the vision translator is off. Turn it on in Settings → Vision translator to scan.";
+
+/**
+ * Requests made for a chat outside its turns whose chat has no file yet (pi writes one only once the chat has a
+ * message): the cost is kept here, so Usage and the daily budget count it even if that chat never gets one. The entry
+ * in the chat says so (ledger: true), so a chat that is saved later is not counted twice.
+ */
+const USAGE_LEDGER = join(stateDir, "usage-ledger.jsonl");
+
+function recordOutside(s: AgentSession, data: Record<string, unknown>) {
+	const unsaved = !(s.sessionManager as any).flushed;
+	if (unsaved) {
+		try {
+			// Kept small: once past 256 KB, only the last 40 days stay (Usage shows 30).
+			if (existsSync(USAGE_LEDGER) && statSync(USAGE_LEDGER).size > 256_000) {
+				const keep = Date.now() - 40 * 86_400_000;
+				const lines = readFileSync(USAGE_LEDGER, "utf8").split("\n").filter((l) => {
+					try {
+						return l && Date.parse(JSON.parse(l).timestamp) >= keep;
+					} catch {
+						return false;
+					}
+				});
+				writeFileSync(USAGE_LEDGER, lines.map((l) => `${l}\n`).join(""));
+			}
+			appendFileSync(USAGE_LEDGER, `${JSON.stringify({ type: "usage", provider: data.provider, model: data.model, usage: data.usage, timestamp: new Date(Number(data.at) || Date.now()).toISOString(), purpose: data.purpose })}\n`);
+		} catch {
+			// A full disk: the chat's own entry is still there if the chat is saved.
+		}
+	}
+	s.sessionManager.appendCustomEntry("griphub-usage", unsaved ? { ...data, ledger: true } : data);
+}
 
 /** What Try again says when the failed request is already in the chat. */
-const RETRY_TEXT = "Continue where you left off (the previous request failed).";
+/** How the host's own continuations of a failed run begin (fallback model, Try again); verification knows them by it. */
+const CONTINUE_PREFIX = "Continue where you left off";
+const RETRY_TEXT = `${CONTINUE_PREFIX} (the previous request failed).`;
 
 /**
  * The pictures of the chat's last user message (the turn a retry continues). None when that turn already carries a
@@ -1110,21 +1171,26 @@ async function readPictures(s: AgentSession, meta: ModelMeta, images: any[], ins
 	const model = modelRuntime.getModel(GRIPHUB_ID, meta.id);
 	if (!model) throw new Error(VISION_NONE);
 	let reply: any;
+	const stop = visionAbort.signal;
 	try {
 		reply = await (s as any).modelRuntime.completeSimple(
 			model,
 			{ messages: [{ role: "user", content: [{ type: "text", text: instruction }, ...images], timestamp: Date.now() }] },
-			{ maxTokens: 2_000, cacheRetention: "none", signal: AbortSignal.timeout(120_000) },
+			{ maxTokens: 2_000, cacheRetention: "none", signal: AbortSignal.any([AbortSignal.timeout(120_000), stop]) },
 		);
 	} catch {
 		reply = { stopReason: "error" };
 	}
 	const usage = reply?.usage;
-	const failed = reply?.stopReason === "error" || reply?.stopReason === "aborted";
+	const failed = reply?.stopReason === "error" || reply?.stopReason === "aborted" || stop.aborted;
 	const credits = usage ? requestEstimate(meta.id, usageOf(usage), !failed) : null;
 	if (usage) {
 		// In the chat's file, so Usage, the daily budget and the chat's history count it (workbench.ts usageSummary).
-		s.sessionManager.appendCustomEntry("griphub-usage", { provider: GRIPHUB_ID, model: meta.id, usage, purpose: "vision", kind, ok: !failed, at: Date.now() });
+		recordOutside(s, { provider: GRIPHUB_ID, model: meta.id, usage, purpose: "vision", kind, ok: !failed, at: Date.now() });
+	}
+	if (stop.aborted) {
+		send({ type: "vision", sessionId: s.sessionId, reading: { model: meta.id, name: meta.name, kind, credits, ok: false } });
+		throw new Error(VISION_STOPPED);
 	}
 	const text = failed ? "" : (reply?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("").trim();
 	send({ type: "vision", sessionId: s.sessionId, reading: { model: meta.id, name: meta.name, kind, credits, ok: !!text } });
@@ -1179,15 +1245,34 @@ async function prepareTurn(s: AgentSession, text: string, images: any[] | undefi
  */
 function verifyExtension(cwd: string) {
 	type Phase = "work" | "fix" | "closing";
-	let st: { base: string | null; phase: Phase; round: number; failTree: string | null; evidenceTree: string | null; checks: number } | null = null;
+	type Run = {
+		base: string | null;
+		phase: Phase;
+		round: number;
+		failTree: string | null;
+		failDefinition?: Record<string, string>;
+		evidenceTree: string | null;
+		checks: number;
+	};
+	let st: Run | null = null;
 	const on = () => integrations.settings.verify !== false;
+	/** A run that ended on an error, kept for the host's own "Continue where you left off" (fallback, Try again). */
+	let carried: Run | null = null;
 	return (pi: any) => {
 		// A run that starts from a message (the user's, or a job's result): what the folder is now is what the task
 		// changes are measured from. The agent going on after evidence is the same run (no new start here), so its rounds
 		// and the tests' state at the first failure carry over.
 		pi.on("before_agent_start", async (event: any) => {
+			// The host continuing a run that failed (another model after an error, Try again) is the same task: the
+			// folder is measured from where that task began, not from the half-done state the error left.
+			const resumed = typeof event.prompt === "string" && event.prompt.startsWith(CONTINUE_PREFIX) ? carried : null;
+			carried = null;
 			st = null;
 			if (!on()) return undefined;
+			if (resumed) {
+				st = { ...resumed };
+				return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
+			}
 			const base = await checkpoints.tree(cwd).catch(() => null);
 			st = { base, phase: "work", round: 0, failTree: null, evidenceTree: null, checks: 0 };
 			return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
@@ -1195,6 +1280,8 @@ function verifyExtension(cwd: string) {
 		pi.on("agent_before_settle", async (event: any) => {
 			const run = st;
 			if (!run || !on() || event.outcome !== "completed" || !run.base) {
+				// An error (not the user's Stop) may be continued by the host: the task's start is kept for that.
+				carried = run && event.outcome === "error" && run.base ? run : null;
 				st = null;
 				return undefined;
 			}
@@ -1223,6 +1310,7 @@ function verifyExtension(cwd: string) {
 				return undefined;
 			}
 			run.checks++;
+			let after = now;
 			const found = detectVerifyCommand(cwd, integrations.settings.projectVerify?.[cwd]);
 			const evidence: Evidence = {
 				status: "none",
@@ -1238,7 +1326,8 @@ function verifyExtension(cwd: string) {
 				at: Date.now(),
 			};
 			if (found) {
-				const refused = await guard.allowCommand(found.command);
+				// The user's own command (project setting) is theirs; one found in the project's files is the project's code.
+				const refused = await guard.allowCommand(found.command, found.source === "project setting" ? undefined : cwd);
 				if (refused) {
 					evidence.status = "declined";
 					evidence.reason = refused;
@@ -1259,9 +1348,15 @@ function verifyExtension(cwd: string) {
 					evidence.summary = outputSummary(result.output);
 					evidence.outputId = verifyOutputs.save(result.output);
 					evidence.status = result.exitCode === 0 && !result.timedOut ? "passed" : "failed";
-					// While fixing a failure, test files must stay as they were at that failure.
+					// What the test run itself wrote (a lockfile, caches, reports) is not the agent's change: the folder is
+					// taken again after it, and later changes are measured from there.
+					after = (await checkpoints.tree(cwd).catch(() => null)) ?? now;
+					// While fixing a failure, test files and the way tests are run must stay as they were at that failure.
 					if (run.failTree) {
-						const touched = (await checkpoints.changedBetween(cwd, run.failTree, now).catch(() => [] as string[])).filter(isTestPath);
+						const touched = [
+							...(await checkpoints.changedBetween(cwd, run.failTree, now).catch(() => [] as string[])).filter((f) => isTestPath(f) || isTestConfig(f)),
+							...testDefinitionChanged(run.failDefinition ?? {}, testDefinition(cwd)),
+						];
 						if (touched.length) {
 							evidence.testsTouched = touched;
 							evidence.status = "tests-changed";
@@ -1271,10 +1366,13 @@ function verifyExtension(cwd: string) {
 			}
 			const failed = evidence.status === "failed" || evidence.status === "tests-changed";
 			const next = failed && run.round < maxRounds ? "fix" : "close";
-			if (failed && !run.failTree) run.failTree = now;
+			if (failed && !run.failTree) {
+				run.failTree = after;
+				run.failDefinition = testDefinition(cwd);
+			}
 			run.phase = next === "fix" ? "fix" : "closing";
 			run.round += next === "fix" ? 1 : 0;
-			run.evidenceTree = now;
+			run.evidenceTree = after;
 			send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "done", status: evidence.status });
 			return {
 				entries: [{ type: "custom_message", customType: VERIFY_MESSAGE, content: evidenceText(evidence, next), display: true, details: { evidence, next } }],
@@ -1387,7 +1485,7 @@ function spentToday(): { credits: number; real: boolean } {
 	const sessions = join(agentDir, "sessions");
 	const day = wibDay(Date.now());
 	const local = (from?: number) =>
-		usageSummary(sessions, 1, estimateUsage, from)
+		usageSummary(sessions, 1, estimateUsage, from, USAGE_LEDGER)
 			.filter((r) => r.day === day)
 			.reduce((sum, r) => sum + (r.credits ?? 0), 0);
 	// Subagents run on in-memory sessions (no chat file): their spend since the
@@ -1968,6 +2066,8 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "abort":
 			guard.cancelAll();
 			verifyAbort?.abort();
+			visionAbort.abort();
+			visionAbort = new AbortController();
 			await s.abort();
 			return null;
 		case "session_stats":
@@ -2101,7 +2201,15 @@ async function handle(cmd: Command): Promise<unknown> {
 			companionFrame = secure ? null : { data: frame.data, mimeType: frame.mimeType, ...(nodes.length ? { tree: treeText(nodes) } : {}) };
 			const text = companionInstruction({ goal, tree: nodes.length > 0, width: Number(frame?.width) || 0, height: Number(frame?.height) || 0, secure });
 			companionStep = true;
-			s.prompt(text).catch((e) => send({ type: "error", message: String(e?.message ?? e) }));
+			s.prompt(text).catch((e) => {
+				// The step never ran: its frame goes, and the app is told the step ended (it stops "looking").
+				companionFrame = null;
+				if (companionStep) {
+					companionStep = false;
+					send({ type: "companion_pointer", sessionId: s.sessionId, pointer: null });
+				}
+				send({ type: "error", message: String(e?.message ?? e) });
+			});
 			return null;
 		}
 		// Scanning a document (Fitur 4): a photo read into text by a vision model through the router, for the user to ask
@@ -2111,8 +2219,15 @@ async function handle(cmd: Command): Promise<unknown> {
 			if (!image || image.type !== "image" || typeof image.data !== "string" || typeof image.mimeType !== "string") {
 				throw new Error("No picture to scan");
 			}
+			// The translator's setting holds here too: off is off, and "ask first" asks (once per chat, as for a message).
+			const visionMode = integrations.settings.visionTranslator ?? "auto";
+			if (visionMode === "off") throw new Error(SCAN_OFF);
 			const pick = visionTranslator(1);
 			if (!pick.ok) throw new Error(VISION_NONE);
+			if (visionMode === "ask" && !visionConsent.given(s.sessionId)) {
+				if (cmd.visionConsent !== true) return { visionConsent: { model: pick.model.id, modelName: pick.model.name, estimate: estimateRead(pick.model, 1) } };
+				visionConsent.give(s.sessionId);
+			}
 			const reading = await readPictures(s, pick.model, [image], SCAN_INSTRUCTION, "full");
 			return { text: reading.text, model: reading.model, name: reading.name, credits: reading.credits };
 		}
@@ -2532,7 +2647,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "tunnels":
 			return tunnels.list();
 		case "usage":
-			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30, estimateUsage);
+			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30, estimateUsage, undefined, USAGE_LEDGER);
 
 		// Prompt templates: slash commands pi expands.
 		case "templates":

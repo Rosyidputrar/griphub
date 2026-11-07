@@ -3,7 +3,7 @@
 // the next one climb a class; a model picked by hand stops the automatic choice for that chat.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { host, PNG } from "./router-host.mjs";
+import { host, MODELS, PNG } from "./router-host.mjs";
 
 test("a light question in an automatic plain chat runs on the cheapest fitting model, and the reason is logged", async (t) => {
 	const h = await host(t);
@@ -25,6 +25,16 @@ test("a light question in an automatic plain chat runs on the cheapest fitting m
 	assert.ok(route.estimate > 0, "an estimate in credits");
 	// The decision also went to the app as it happened.
 	assert.ok(h.records.some((r) => r.type === "routing" && r.decision.kind === "route"));
+});
+
+test("a plain chat has tools on offer (web search, remember), so a model that cannot call tools is never picked", async (t) => {
+	// The cheapest model of all says it cannot call tools.
+	const h = await host(t, {}, { models: [...MODELS, { id: "tiny-chat", name: "Tiny Chat", contextWindow: 128_000, vision: false, tools: false }], rates: { "tiny-chat": 0.1 } });
+	await h.call("new_session", { chatMode: "chat" });
+	await h.call("smart_router_set", { on: true });
+	assert.ok((await h.call("hello")).tools.length > 0, "the plain chat offers tools");
+	const sent = await h.turn("Ibu kota Jepang apa?");
+	assert.deepEqual(sent.map((r) => r.model), ["glm-5.3-flash"], "the cheapest that can call tools");
 });
 
 test("an attached image is routed to a model the metadata calls vision", async (t) => {

@@ -94,13 +94,13 @@ class _VerifySettingsScreenState extends State<VerifySettingsScreen> {
                           ),
                         ),
                         IconButton(
-                          tooltip: tr('Fewer'),
+                          tooltip: tr('One round fewer'),
                           onPressed: !on || _saving || rounds <= 0 ? null : () => _save({'verifyRounds': rounds - 1}),
                           icon: const Icon(LucideIcons.minus, size: 18),
                         ),
                         Text('$rounds', style: text.titleMedium),
                         IconButton(
-                          tooltip: tr('More'),
+                          tooltip: tr('One more round'),
                           onPressed: !on || _saving || rounds >= 20 ? null : () => _save({'verifyRounds': rounds + 1}),
                           icon: const Icon(LucideIcons.plus, size: 18),
                         ),

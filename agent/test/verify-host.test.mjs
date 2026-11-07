@@ -28,6 +28,19 @@ function project(ws, { tests = true } = {}) {
 
 const bash = (command) => JSON.stringify({ name: "bash", arguments: { command } });
 
+/** Says yes to every approval card as it comes (the first check of a project folder is asked about). */
+function approveAll(h, t, allow = () => true) {
+	const answered = new Set();
+	const timer = setInterval(() => {
+		for (const r of h.records) {
+			if (r.type !== "approval" || answered.has(r.approvalId)) continue;
+			answered.add(r.approvalId);
+			h.call("approval_reply", { approvalId: r.approvalId, allow: allow(r) }).catch(() => {});
+		}
+	}, 20);
+	t.after(() => clearInterval(timer));
+}
+
 /** The evidence entries of the open chat, in order. */
 async function evidence(h) {
 	const messages = await h.call("messages");
@@ -42,6 +55,7 @@ async function lastAfterEvidence(h) {
 
 test("a change that keeps the tests green ends with passed evidence from this session, then the closing message", async (t) => {
 	const h = await host(t, { MOCK_TOOL: bash("echo ok > ok.txt && echo extra > notes.txt") });
+	approveAll(h, t);
 	await h.call("new_session", { cwd: project(h.ws) });
 	await h.turn("Tambahkan notes.txt");
 	const ev = await evidence(h);
@@ -64,6 +78,7 @@ test("a change that keeps the tests green ends with passed evidence from this se
 
 test("a failing test sends the agent back to fix it; fixed, the next check passes", async (t) => {
 	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt"), MOCK_FIX: bash("echo ok > ok.txt") });
+	approveAll(h, t);
 	await h.call("new_session", { cwd: project(h.ws) });
 	await h.turn("Ubah ok.txt");
 	const ev = (await evidence(h)).map((e) => [e.evidence.status, e.next, e.evidence.round]);
@@ -76,6 +91,7 @@ test("a failing test sends the agent back to fix it; fixed, the next check passe
 
 test("a failure that is not fixed: each round is checked again, then the failure is reported, never 'done'", async (t) => {
 	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt") });
+	approveAll(h, t);
 	await h.call("settings_set", { settings: { verifyRounds: 2 } });
 	await h.call("new_session", { cwd: project(h.ws) });
 	await h.turn("Ubah ok.txt");
@@ -96,6 +112,7 @@ test("a failure that is not fixed: each round is checked again, then the failure
 
 test("fixing a failure by changing the tests is not taken as a pass", async (t) => {
 	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt"), MOCK_FIX: bash("echo 'console.log(\"1 passing\")' > test/check.test.js") });
+	approveAll(h, t);
 	await h.call("settings_set", { settings: { verifyRounds: 1 } });
 	await h.call("new_session", { cwd: project(h.ws) });
 	await h.turn("Ubah ok.txt");
@@ -160,4 +177,70 @@ test("the project's own command from Settings wins, and it is asked about like a
 	assert.equal(ev[0].evidence.source, "project setting");
 	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /NOT RUN/);
 	assert.equal(readFileSync(join(dir, "notes.txt"), "utf8").trim(), "extra");
+});
+
+test("the first check of a project folder is asked about once, saying it runs the project's own code", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo extra >> notes.txt") });
+	const dir = project(h.ws);
+	let no = true;
+	approveAll(h, t, () => !(no && (no = false) === false));
+	await h.call("new_session", { cwd: dir });
+	await h.turn("Tambah notes.txt");
+	let ev = await evidence(h);
+	assert.equal(ev.at(-1).evidence.status, "declined", "a no: nothing ran");
+	const asked = h.records.filter((r) => r.type === "approval");
+	assert.equal(asked.length, 1);
+	assert.match(asked[0].reason, /project's own test command/);
+	await h.turn("Tambah lagi");
+	ev = await evidence(h);
+	assert.equal(ev.at(-1).evidence.status, "passed");
+	assert.equal(h.records.filter((r) => r.type === "approval").length, 2, "asked again after the no, then yes");
+	await h.turn("Sekali lagi");
+	assert.equal((await evidence(h)).at(-1).evidence.status, "passed");
+	assert.equal(h.records.filter((r) => r.type === "approval").length, 2, "the yes covers the folder");
+});
+
+test("what the test run writes itself is not the agent's change: one check, no extra rounds", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo extra > notes.txt") });
+	approveAll(h, t);
+	const dir = project(h.ws);
+	// A test run that leaves a report behind (as lockfiles, caches and coverage do), different every time.
+	writeFileSync(
+		join(dir, "package.json"),
+		JSON.stringify({ name: "p", scripts: { test: "node test/check.test.js && node -e \"require('fs').writeFileSync('report.txt', String(Date.now()))\"" } }),
+	);
+	await h.call("new_session", { cwd: dir });
+	await h.turn("Tambah notes.txt");
+	const ev = await evidence(h);
+	assert.deepEqual(ev.map((e) => [e.evidence.status, e.next]), [["passed", "close"]]);
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /PASSED/);
+});
+
+test("weakening the test script while fixing a failure is changing the tests", async (t) => {
+	const weaken = "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.scripts.test='echo 1 passing';fs.writeFileSync('package.json',JSON.stringify(p))\"";
+	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt"), MOCK_FIX: bash(weaken) });
+	approveAll(h, t);
+	await h.call("settings_set", { settings: { verifyRounds: 1 } });
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Ubah ok.txt");
+	const ev = await evidence(h);
+	assert.equal(ev[0].evidence.status, "failed");
+	assert.equal(ev[1].evidence.status, "tests-changed");
+	assert.deepEqual(ev[1].evidence.testsTouched, ["package.json (test)"]);
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /NOT ACCEPTED/);
+});
+
+test("Try again after an error continues the same task: its changes are still verified", async (t) => {
+	// The edit is made, then the next request fails; Try again's continuation makes the same edit (nothing new).
+	const h = await host(t, { MOCK_TOOL: bash("echo extra > notes.txt"), MOCK_FAIL_CHAT: "2" });
+	approveAll(h, t);
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Tambah notes.txt");
+	assert.equal((await evidence(h)).length, 0, "the failed turn ended without evidence");
+	const done = h.records.length;
+	await h.call("retry");
+	await h.until((r) => r.type === "agent_done" && h.records.indexOf(r) >= done && !r.retrying, 30_000, "the retry");
+	const ev = await evidence(h);
+	assert.equal(ev.length, 1, "measured from where the task began, so notes.txt counts");
+	assert.equal(ev[0].evidence.status, "passed");
 });

@@ -651,7 +651,7 @@ void main() {
           'models': [
             {'id': 'gemini-3.8-flash', 'name': 'Gemini 3.8 Flash', 'credits': 1.5, 'available': true},
             {'id': 'gemini-3.1-pro', 'name': 'Gemini 3.1 Pro', 'credits': 2, 'available': true},
-            {'id': 'claude-haiku-5.5', 'name': 'Claude Haiku 5.5', 'credits': 1, 'available': true},
+            {'id': 'gpt-5.6-luna', 'name': 'GPT 5.6 Luna', 'credits': 1, 'available': true},
           ],
           'defaultAllowed': ['gemini-3.8-flash', 'gemini-3.1-pro'],
           'current': {'id': 'gemini-3.8-flash', 'name': 'Gemini 3.8 Flash', 'manual': false},
@@ -718,7 +718,7 @@ void main() {
       await frames(tester);
       expect(find.text('The agent is working in'), findsOneWidget);
       expect(find.descendant(of: find.byType(WorkingPill), matching: find.text('Refactor modul auth')), findsOneWidget);
-      expect(find.text('Read-only — the agent is working in Refactor modul auth.'), findsOneWidget);
+      expect(find.text('Read-only until the agent is free.'), findsOneWidget, reason: 'the pill names the chat; said once');
       expect(find.text('Bagaimana cara membuat rendang?'), findsOneWidget);
       // No field, no Send: nothing here can send.
       expect(composerField(), findsNothing);
@@ -781,6 +781,19 @@ void main() {
       // The composer is back, with B's draft.
       expect(tester.widget<TextField>(composerField().last).controller!.text, 'lanjutkan resepnya');
       expect(agent.finishedUnseen, contains('a.jsonl'));
+    });
+
+    testWidgets('Try again (from a notification) on a chat shown read-only runs there once the agent is free', (tester) async {
+      final (host, agent) = await working(tester);
+      await agent.openSession('b.jsonl');
+      await agent.retry();
+      await frames(tester);
+      expect(host.sent('retry'), isEmpty, reason: 'nothing runs while the agent works elsewhere');
+      expect(find.text('Try again runs here once the agent is free.'), findsOneWidget);
+      host.emit({'type': 'state', 'state': {'isStreaming': false, 'sessionFile': 'a.jsonl', 'sessionId': 'a'}});
+      await frames(tester, 14);
+      expect(host.sent('open_session').single['path'], 'b.jsonl');
+      expect(host.sent('retry'), hasLength(1), reason: 'in chat B, now open for real');
     });
 
     testWidgets('a new chat given text while the agent works keeps it when it opens for real', (tester) async {
@@ -873,9 +886,17 @@ void main() {
       expect(find.text('Tests failed'), findsOneWidget);
       expect(find.text('Tests passed'), findsOneWidget);
       expect(find.text('The agent fixes it now; the check runs again (1 of 3).'), findsOneWidget);
-      // The footer of the closing message refers to the last evidence, not the first.
-      expect(find.byType(VerifyStatusNote), findsOneWidget);
-      expect(find.text('Verification: Tests passed · npm test'), findsOneWidget);
+      // The closing message comes right after the evidence block: the status is not said a second time under it.
+      expect(find.byType(VerifyStatusNote), findsNothing);
+    });
+
+    test('the note under the closing message: only when the evidence is not right above it, and the last one', () {
+      final agent = verifiedChat();
+      final last = agent.entries.length - 1;
+      expect(lastVerifyOfTurn(agent.entries, last), isNull, reason: 'the block is right above');
+      agent.addHistoryMessage(reply('Ringkasan perubahan lainnya.'));
+      final note = lastVerifyOfTurn(agent.entries, agent.entries.length - 1);
+      expect(note?.status, 'passed', reason: 'the last evidence of the turn, not the first');
     });
 
     testWidgets('the whole output opens from the evidence', (tester) async {
@@ -949,7 +970,7 @@ void main() {
       final host = FakeHost();
       await pumpLook(tester, const Look(), VerifySettingsScreen(agent: newAgent()));
       await frames(tester, 12);
-      await tester.tap(find.byTooltip('More'));
+      await tester.tap(find.byTooltip('One more round'));
       await frames(tester);
       expect(host.stored['verifyRounds'], 4);
       await tester.tap(find.byType(Switch).last);
@@ -1039,6 +1060,18 @@ void main() {
       expect(host.sent('memory_decide').single, containsPair('action', 'save'));
       expect(find.text('Saved to memory'), findsOneWidget);
       expect(find.text('Save'), findsNothing);
+    });
+
+    testWidgets('in a chat shown read-only, an open proposal offers no Save or Refuse', (tester) async {
+      final host = FakeHost();
+      final agent = proposingChat();
+      await pumpLook(tester, const Look(), Material(child: MemoryProposalCard(agent: agent, run: agent.tools['call_1'], readOnly: true)));
+      await frames(tester);
+      expect(find.text('Pengguna lebih suka jawaban singkat'), findsOneWidget);
+      expect(find.text('Save'), findsNothing);
+      expect(find.text('Refuse'), findsNothing);
+      expect(find.text('Read-only until the agent is free.'), findsOneWidget);
+      expect(host.sent('memory_decide'), isEmpty);
     });
 
     testWidgets('Refuse keeps nothing; Edit saves the user\'s own words', (tester) async {

@@ -20,9 +20,12 @@ String memorySummary(AppSettings? s) => s?.json['memory'] == false ? tr('Off') :
 /// The card of a `remember` call: the fact the agent proposes, and the user's Save / Edit / Refuse. Nothing is kept
 /// before Save; a refused text (a secret) says why instead.
 class MemoryProposalCard extends StatefulWidget {
-  const MemoryProposalCard({super.key, required this.agent, required this.run});
+  const MemoryProposalCard({super.key, required this.agent, required this.run, this.readOnly = false});
   final AgentController agent;
   final ToolRun? run;
+
+  /// In a chat shown read-only: an open proposal is answered there once it opens, not from here.
+  final bool readOnly;
 
   @override
   State<MemoryProposalCard> createState() => _MemoryProposalCardState();
@@ -109,6 +112,7 @@ class _MemoryProposalCardState extends State<MemoryProposalCard> {
               child: switch (proposal.status) {
                 'saved' => _Decided(icon: LucideIcons.check, label: tr('Saved to memory')),
                 'rejected' => _Decided(icon: LucideIcons.x, label: tr('Not saved')),
+                _ when widget.readOnly => _Decided(icon: LucideIcons.lock, label: tr('Read-only until the agent is free.')),
                 _ => Wrap(
                   spacing: 4,
                   children: [

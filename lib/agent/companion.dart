@@ -120,7 +120,25 @@ class ScreenCompanion extends ChangeNotifier {
       // Stopped from the notification (or Android ended the capture).
       case 'companion_native' when r['active'] == false:
         if (active) unawaited(stop(agent));
+      // The host ended it (the chat it belongs to was left): capture ends on the phone too; the chat has the record.
+      case 'companion' when r['event'] == 'stop':
+        if (active) unawaited(_endOnPhone());
+      // A step that failed (or ended without its pointer): no longer looking, so the next step can be asked for.
+      case 'error' || 'agent_done' when looking && r['retrying'] != true:
+        looking = false;
+        notifyListeners();
     }
+  }
+
+  Future<void> _endOnPhone() async {
+    active = false;
+    looking = false;
+    _frame = null;
+    _nodes.clear();
+    notifyListeners();
+    try {
+      await _method.invokeMethod('companionStop');
+    } catch (_) {}
   }
 
   /// Stops at once: capture, the service and the highlight on the phone, then the record in the chat.

@@ -21,6 +21,16 @@ WidgetSync sync(AgentController agent, {List<String>? sent}) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('times and credits in the app\'s language, as the app shows them', () {
+    FakeHost();
+    final agent = AgentController(AgentClient())
+      ..busy = true
+      ..turnStartedAt = _now.subtract(const Duration(hours: 1, minutes: 5));
+    final id = {'{h}h {m}m': '{h} j {m} mnt', 'For {time}': 'Selama {time}'};
+    final s = WidgetSync(agent, translate: (k) => id[k] ?? k, number: (n) => n.replaceAll('.', ','), now: () => _now).snapshot();
+    expect(jsonEncode(s), contains('Selama 1 j 5 mnt'));
+  });
+
   test('nothing running: the calm empty state, with the next task when there is one', () {
     FakeHost();
     final agent = AgentController(AgentClient());

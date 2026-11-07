@@ -879,6 +879,10 @@ class ChatView {
   bool isChat = false;
   bool loaded = false;
   Object? error;
+
+  /// Try again was asked for this chat (a notification's) while the agent worked elsewhere: it runs once the chat
+  /// opens for real.
+  bool retryWhenFree = false;
   final entries = <ChatEntry>[];
   final tools = <String, ToolRun>{};
 
@@ -894,11 +898,12 @@ class ChatView {
 }
 
 /// The last verification evidence in the turn that entry [i] ends (from the turn's user message, or job result, to
-/// [i]); null when the turn has none.
+/// [i]), for the quiet note above that entry's footer; null when the turn has none, and when the evidence block is
+/// right above entry [i]: the block says it already, and the signal is said once.
 VerifyEntry? lastVerifyOfTurn(List<ChatEntry> entries, int i) {
   for (var k = i; k >= 0; k--) {
     final e = entries[k];
-    if (e is VerifyEntry) return e;
+    if (e is VerifyEntry) return k == i - 1 ? null : e;
     if (e is UserEntry || e is JobEntry) return null;
   }
   return null;

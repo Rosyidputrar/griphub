@@ -283,8 +283,12 @@ class RoutingDecisionRow extends StatelessWidget {
         children: [
           // The icon belongs to the title line, not to the middle of the block.
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (icon == null) const SmartRouterMark(size: 16) else Icon(icon, size: 16, color: d.kind == 'none' ? p.danger : p.text),
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: icon == null ? const SmartRouterMark(size: 16) : Icon(icon, size: 16, color: d.kind == 'none' ? p.danger : p.text),
+              ),
               const SizedBox(width: 8),
               Expanded(child: Text(title, style: text.titleSmall)),
               Text(

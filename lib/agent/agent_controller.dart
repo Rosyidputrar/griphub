@@ -24,6 +24,12 @@ enum BootStatus { starting, ready, failed }
 
 /// App-wide agent state: boot, the active session's transcript rebuilt from
 /// pi's event stream, and model/provider selection.
+/// A scan waits for the user's yes to a paid reading ("ask first" in Settings → Vision translator).
+class ScanNeedsConsent implements Exception {
+  ScanNeedsConsent(this.ask);
+  final VisionAsk ask;
+}
+
 class AgentController extends ChangeNotifier {
   AgentController(this.client) : features = Features(client) {
     client.records.listen(_onRecord);
@@ -89,13 +95,17 @@ class AgentController extends ChangeNotifier {
   }
 
   /// A photographed document read into text by a vision model through the router (Fitur 4); null when nothing was read.
-  Future<({String text, String name, double? credits})?> scanDocument(File photo) async {
+  /// With "ask first" in Settings and no yes in this chat yet, throws [ScanNeedsConsent]: the caller asks, then calls
+  /// again with [consent].
+  Future<({String text, String name, double? credits})?> scanDocument(File photo, {bool consent = false}) async {
     final bytes = await photo.readAsBytes();
     final lower = photo.path.toLowerCase();
     final mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
     final r = (await client.call<Map>('scan_document', {
       'image': {'type': 'image', 'data': base64Encode(bytes), 'mimeType': mime},
+      if (consent) 'visionConsent': true,
     })).cast<String, dynamic>();
+    if (_visionAsk(r) case final ask?) throw ScanNeedsConsent(ask);
     final text = r['text'] as String? ?? '';
     return text.trim().isEmpty ? null : (text: text, name: r['name'] as String? ?? '', credits: (r['credits'] as num?)?.toDouble());
   }
@@ -673,8 +683,8 @@ class AgentController extends ChangeNotifier {
         if (v.isNew) {
           // What the waiting chat was given (a share, a selection, a quick start) comes along into the real one.
           await _newSession(dir: v.newDir, chat: v.newChatMode, draftFrom: v.key);
-        } else {
-          await openSession(v.path!);
+        } else if (await openSession(v.path!) && v.retryWhenFree && viewing == null) {
+          await retry();
         }
       } catch (e) {
         switchProblems.add('$e');
@@ -1048,8 +1058,16 @@ class AgentController extends ChangeNotifier {
 
   /// Tries the last failed request again (on the current model, which may have been changed since).
   Future<void> retry() async {
-    // Another chat on screen while this one works: Try again (a notification's too) waits until it is free.
-    if (sendLocked) return;
+    // Another chat on screen while this one works: Try again (a notification's too) waits until it is free, then runs
+    // in that chat; the locked composer says so meanwhile.
+    if (sendLocked) {
+      final v = viewing!;
+      if (!v.isNew && !v.retryWhenFree) {
+        v.retryWhenFree = true;
+        notifyListeners();
+      }
+      return;
+    }
     try {
       final r = await client.call<Object?>('retry');
       if (_visionAsk(r) case final ask?) {

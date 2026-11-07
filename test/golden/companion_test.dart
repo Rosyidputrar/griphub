@@ -151,6 +151,49 @@ void main() {
     expect(host.sent('companion_stop'), hasLength(1), reason: 'recorded in the chat');
   });
 
+  testWidgets('a step that fails is no longer "looking": the next one can be asked for', (tester) async {
+    final (host, calls) = phone();
+    final agent = newAgent();
+    await tester.pump();
+    await ScreenCompanion.instance.start(agent);
+    await ScreenCompanion.instance.step(agent, 'Langkah pertama');
+    expect(ScreenCompanion.instance.looking, isTrue);
+    host.emit({'type': 'error', 'message': 'Upstream failed'});
+    await frames(tester);
+    expect(ScreenCompanion.instance.looking, isFalse);
+    await ScreenCompanion.instance.step(agent, 'Coba lagi');
+    expect(host.sent('companion_turn'), hasLength(2));
+    await ScreenCompanion.instance.stop(agent);
+  });
+
+  testWidgets('the host ends it (its chat was left): capture stops on the phone, without a second record', (tester) async {
+    final (host, calls) = phone();
+    final agent = newAgent();
+    await tester.pump();
+    await ScreenCompanion.instance.start(agent);
+    host.emit({'type': 'companion', 'sessionId': 's', 'event': 'stop'});
+    await frames(tester);
+    expect(ScreenCompanion.instance.active, isFalse);
+    expect(calls.last, 'stop');
+    expect(host.sent('companion_stop'), isEmpty, reason: 'the host already wrote it in the chat');
+  });
+
+  testWidgets('started from Settings with a coding chat open: it starts in a new plain chat, the panel\'s', (tester) async {
+    final (host, _) = phone();
+    host.methods['panelOpen'] = (_) => true;
+    host.answers['new_session'] = (_) => {'sessionFile': 'c.jsonl', 'sessionId': 'c', 'cwd': '/w/.chats', 'chatMode': 'chat'};
+    final agent = newAgent()
+      ..sessionId = 'code'
+      ..isChat = false;
+    await pumpLook(tester, const Look(), Builder(builder: (context) => TextButton(onPressed: () => startCompanion(context, agent, openPanel: true), child: const Text('go'))));
+    await tester.tap(find.text('go'));
+    await frames(tester);
+    expect(host.sent('new_session').single['chatMode'], 'chat');
+    expect(agent.sessionId, 'c');
+    expect(host.sent('companion_start'), hasLength(1));
+    await ScreenCompanion.instance.stop(agent);
+  });
+
   Future<(FakeHost, List<String>, AgentController)> panelWithCompanion(WidgetTester tester, {Look look = const Look()}) async {
     final (host, calls) = phone();
     host.methods['takeLaunch'] = (_) => null;

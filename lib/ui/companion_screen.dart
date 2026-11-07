@@ -17,6 +17,9 @@ String hideCompanionPointer(String text) =>
 
 Future<void> startCompanion(BuildContext context, AgentController agent, {bool openPanel = false}) async {
   try {
+    // The panel shows plain chats: from Settings, with a coding chat open, the companion starts in a new plain chat
+    // (the one the panel will show), not in the coding chat it would then leave.
+    if (openPanel && !agent.isChat && !agent.busy) await agent.newSession(chat: true);
     final ok = await ScreenCompanion.instance.start(agent);
     if (!ok) return;
     if (openPanel) await agent.client.panelOpen();

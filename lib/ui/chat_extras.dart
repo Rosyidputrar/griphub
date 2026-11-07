@@ -490,6 +490,9 @@ Future<bool> confirmStopToSwitch(BuildContext context) async {
 /// The app-wide messenger, for what is said outside any one screen (a chat switch that could not go ahead).
 final rootMessenger = GlobalKey<ScaffoldMessengerState>();
 
+/// The app window's navigator (MaterialApp's).
+final rootNavigator = GlobalKey<NavigatorState>();
+
 /// Covers every screen while Stop and switch waits for the agent to stop, so the wait is visible and nothing else can
 /// be tapped meanwhile; and says it when the agent did not stop in time (the switch then does not happen).
 class StopToSwitchOverlay extends StatefulWidget {
@@ -1265,7 +1268,8 @@ Future<void> editProjectCheck(BuildContext context, AgentController agent) async
     builder: (_) => _CheckCommandDialog(initial: it.settings?.projectVerify[agent.cwd] ?? ''),
   );
   if (saved == null) return;
-  final map = {...?it.settings?.projectVerify, agent.cwd: saved.trim()};
+  // Cleared: the project's command is found by itself again (no empty entry left behind).
+  final map = {...?it.settings?.projectVerify, agent.cwd: saved.trim()}..removeWhere((_, v) => v.isEmpty);
   try {
     await it.updateSettings({'projectVerify': map});
   } catch (e) {
@@ -1462,7 +1466,7 @@ Future<void> showProjectTools(
                         icon: LucideIcons.listChecks,
                         color: const Color(0xFF22C55E),
                         title: tr('Check command'),
-                        subtitle: check ?? tr('Found by itself (npm test, flutter test, ...)'),
+                        subtitle: check == null || check.trim().isEmpty ? tr('Found by itself (npm test, flutter test, ...)') : check,
                         onTap: () => editProjectCheck(sheet, agent),
                       ),
                     ],

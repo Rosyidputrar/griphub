@@ -285,7 +285,8 @@ const _id = <String, String>{
   'The agent is working in {chat}': 'Agent sedang bekerja di {chat}',
   'The agent is working in': 'Agent sedang bekerja di',
   '{n} waiting for your approval': '{n} menunggu persetujuanmu',
-  'Read-only — the agent is working in {chat}.': 'Hanya-baca — agent sedang bekerja di {chat}.',
+  'Read-only until the agent is free.': 'Hanya-baca sampai agent selesai bekerja.',
+  'Try again runs here once the agent is free.': 'Coba lagi akan berjalan di sini begitu agent selesai bekerja.',
   'This chat starts once the agent is free.': 'Chat ini dimulai begitu agent selesai bekerja.',
   'No messages yet.': 'Belum ada pesan.',
   'The agent is done in {chat}': 'Agent selesai di {chat}',
@@ -318,7 +319,11 @@ const _id = <String, String>{
       'Setelah agent mengubah file, aplikasi sendiri yang menjalankan pemeriksaan proyek (tesnya, atau perintah yang diatur di alat proyek) dan menampilkan hasilnya di chat. Bila gagal, agent diminta memperbaikinya; agent tidak boleh mengubah atau melewati tes agar lulus. Pemeriksaan meminta persetujuan seperti perintah lain. Memperbaiki memakai permintaan model seperti giliran lain.',
   'Fix rounds': 'Putaran perbaikan',
   'Up to {n} rounds of fixing after a failure': 'Maks {n} putaran perbaikan setelah gagal',
-  'Fewer': 'Kurangi',
+  'One round fewer': 'Kurangi satu putaran',
+  'One more round': 'Tambah satu putaran',
+  '{h}h {m}m': '{h} j {m} mnt',
+  '{m}m': '{m} mnt',
+  '{s}s': '{s} dtk',
   'Also tasks that change no file': 'Juga tugas yang tidak mengubah file',
   'Run the check after every coding task': 'Jalankan pemeriksaan setelah setiap tugas coding',
   // Agent memory (memory_screen.dart, agent_controller.dart; refusals from agent/src/memory.ts).
@@ -463,6 +468,9 @@ const _id = <String, String>{
       'Model ini tidak bisa membaca gambar, dan penerjemah vision sedang mati. Ganti ke model yang bisa membaca gambar, atau nyalakan penerjemah di Pengaturan → Penerjemah vision.',
   'No approved vision model is available to read the picture. Switch to a model that reads pictures, or change the approved list in Settings → Vision translator.':
       'Tidak ada model vision yang disetujui dan tersedia untuk membaca gambar. Ganti ke model yang bisa membaca gambar, atau ubah daftar yang disetujui di Pengaturan → Penerjemah vision.',
+  'Stopped before the picture was read, so nothing was sent.': 'Dihentikan sebelum gambar dibaca, jadi tidak ada yang dikirim.',
+  'Scanning reads the photo with a vision model, and the vision translator is off. Turn it on in Settings → Vision translator to scan.':
+      'Pemindaian membaca foto dengan model vision, dan penerjemah vision sedang mati. Nyalakan di Pengaturan → Penerjemah vision untuk memindai.',
   'The vision model could not read the picture, so nothing was sent. Try again, or switch to a model that reads pictures.':
       'Model vision gagal membaca gambar, jadi tidak ada yang dikirim. Coba lagi, atau ganti ke model yang bisa membaca gambar.',
   'The smart router found no model that can do this message. Pick a model yourself for it.':
@@ -1279,6 +1287,8 @@ const _id = <String, String>{
   'External tool from an MCP server': 'Tool eksternal dari server MCP',
   'This starts a subagent that works on its own and spends credits':
       'Ini memulai subagent yang bekerja sendiri dan memakai kredit',
+  'This runs the project\'s own test command, code that comes with the project, for the first time in this folder':
+      'Ini menjalankan perintah tes milik proyek, kode yang datang bersama proyek, untuk pertama kalinya di folder ini',
   'Set a daily limit?': 'Atur batas harian?',
   'The agent stops starting requests once a day\'s spend reaches it. 1 credit = Rp 300. You can change it later in Settings, under Usage & budget.':
       'Agent berhenti memulai permintaan begitu pengeluaran sehari mencapainya. 1 kredit = Rp 300. Bisa diubah nanti di Pengaturan, di Pemakaian & anggaran.',

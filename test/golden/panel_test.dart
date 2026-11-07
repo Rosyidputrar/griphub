@@ -2,10 +2,12 @@
 // engine and leaves the app's pages as they were; one-tap actions on a selection; the answer back into the other app
 // when it allows that; nothing privileged decided in the panel; the panel's own controls; the permission screen;
 // scanning a document; and "Tanya GripHub" without the permission landing in the app.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:griphub_agent/agent/agent_controller.dart';
 import 'package:griphub_agent/agent/drafts.dart';
@@ -148,6 +150,36 @@ void main() {
     host.emit({'type': 'approval_dismiss', 'approvalId': 'a1'});
     await frames(tester);
     expect(find.text('This chat uses project tools. Continue in the app'), findsOneWidget);
+  });
+
+  testWidgets('back in the app window after the panel: Android is told Back closes the open page', (tester) async {
+    FakeHost();
+    final agent = newAgent()..status = BootStatus.ready;
+    final nav = GlobalKey<NavigatorState>();
+    final told = <Object?>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'SystemNavigator.setFrameworkHandlesBack') told.add(call.arguments);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: nav,
+      builder: (context, child) => PanelGate(agent: agent, appNavigator: nav, child: child!),
+      home: const Text('home'),
+    ));
+    unawaited(nav.currentState!.push(MaterialPageRoute<void>(builder: (_) => const Text('chat'))));
+    await frames(tester);
+    // The window was made anew (a takeover): Flutter's pages did not change, so only this tells Android.
+    told.clear();
+    PanelState.instance.apply({'surface': 'app'});
+    await frames(tester);
+    expect(told, [true]);
+    nav.currentState!.pop();
+    await frames(tester);
+    told.clear();
+    PanelState.instance.apply({'surface': 'app'});
+    await frames(tester);
+    expect(told, [false], reason: 'nothing to close: Back leaves the app, as Android expects');
   });
 
   testWidgets('opened for a selection, the panel starts a plain chat', (tester) async {

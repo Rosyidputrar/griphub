@@ -12,12 +12,17 @@ import 'models.dart';
 /// jobs, subagents, tasks, approvals and credits, sent to the widgets whenever it changes. Nothing polls: the
 /// snapshot follows the app's own change notifications, a second apart at most.
 class WidgetSync {
-  WidgetSync(this.agent, {required this.translate, this.dark, this.send, DateTime Function()? now}) : _now = now ?? DateTime.now;
+  WidgetSync(this.agent, {required this.translate, String Function(String)? number, this.dark, this.send, DateTime Function()? now})
+    : _now = now ?? DateTime.now,
+      number = number ?? ((s) => s);
 
   final AgentController agent;
 
   /// The app's language for the widgets' texts.
   final String Function(String) translate;
+
+  /// A number in the app's language ("1,5" in Indonesian), as the app shows it (i18n.dart localNumber).
+  final String Function(String) number;
 
   /// The app's theme: dark or not (the widgets follow it).
   final bool Function()? dark;
@@ -175,10 +180,11 @@ class WidgetSync {
     return best;
   }
 
-  static String _duration(Duration d) {
-    if (d.inHours >= 1) return '${d.inHours}h ${d.inMinutes % 60}m';
-    if (d.inMinutes >= 1) return '${d.inMinutes}m';
-    return '${d.inSeconds.clamp(0, 59)}s';
+  /// "1h 5m", "12m", "40s" in the app's language.
+  String _duration(Duration d) {
+    if (d.inHours >= 1) return translate('{h}h {m}m').replaceAll('{h}', '${d.inHours}').replaceAll('{m}', '${d.inMinutes % 60}');
+    if (d.inMinutes >= 1) return translate('{m}m').replaceAll('{m}', '${d.inMinutes}');
+    return translate('{s}s').replaceAll('{s}', '${d.inSeconds.clamp(0, 59)}');
   }
 
   static String _two(int n) => n.toString().padLeft(2, '0');
@@ -190,5 +196,5 @@ class WidgetSync {
     return sameDay ? time : '${at.day}/${at.month} $time';
   }
 
-  static String _credits(double v) => v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(v >= 10 ? 1 : 2);
+  String _credits(double v) => number(v >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(v >= 10 ? 1 : 2));
 }

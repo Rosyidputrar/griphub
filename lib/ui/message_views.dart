@@ -448,9 +448,13 @@ class AssistantMessageView extends StatelessWidget {
     this.autoRouted = false,
     this.visionReads = const [],
     this.verified,
+    this.readOnly = false,
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
+
+  /// Shown in a chat that is read-only (Fitur 8): its cards answer nothing.
+  final bool readOnly;
 
   /// Where relative tool paths resolve, for previews.
   final String? cwd;
@@ -509,7 +513,7 @@ class AssistantMessageView extends StatelessWidget {
                 (b.toolName == 'todo_write'
                     ? TodoCard(block: b, run: tools[b.toolCallId])
                     : b.toolName == 'remember' && agent != null
-                    ? MemoryProposalCard(agent: agent!, run: tools[b.toolCallId])
+                    ? MemoryProposalCard(agent: agent!, run: tools[b.toolCallId], readOnly: readOnly)
                     : b.toolName == 'generate_image' && tools[b.toolCallId]?.imageJob != null
                     ? _imageCard(context, tools[b.toolCallId]!, agent: agent)
                     : ToolCallView(
@@ -573,8 +577,10 @@ class VisionReadNote extends StatelessWidget {
       if (known) '~${localNumber(formatCredits(credits))} ${tr('credits')}',
     ].join(' · ');
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(LucideIcons.scanEye, size: 13, color: p.faint),
+        // On the first line, however many lines the note takes.
+        Padding(padding: const EdgeInsets.only(top: 2), child: Icon(LucideIcons.scanEye, size: 13, color: p.faint)),
         const SizedBox(width: 6),
         Expanded(child: Text(text, style: TextStyle(fontSize: 11.5, color: p.faint))),
       ],

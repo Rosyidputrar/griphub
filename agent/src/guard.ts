@@ -293,6 +293,8 @@ function describe(toolName: string, input: Record<string, unknown>) {
 
 /** Why the first subagent of a chat is asked about: it works on its own and spends credits and time while it does. */
 export const SUBAGENT_RISK = "This starts a subagent that works on its own and spends credits";
+/** The first check of a project folder runs code that comes with the project (its test script), not the agent's. */
+export const PROJECT_CHECK_RISK = "This runs the project's own test command, code that comes with the project, for the first time in this folder";
 
 export class Guard {
 	mode: ApprovalMode = "ask_risky";
@@ -308,6 +310,8 @@ export class Guard {
 	private changedThisRun = false;
 	/** Chats where the person has already said yes to a subagent: the next ones there are not asked again. */
 	private subagentChats = new Set<string>();
+	/** Project folders whose own check the person has let run (self-verification): not asked again there. */
+	private checkedProjects = new Set<string>();
 
 	constructor(private readonly hooks: GuardHooks) {}
 
@@ -440,7 +444,22 @@ export class Guard {
 	 * bash call of the agent's would meet: the approval mode, "Always allow", plan mode, and no question at all where
 	 * nobody is watching. Asks the user when the mode wants that. Null when it may run, else why not.
 	 */
-	async allowCommand(command: string): Promise<string | null> {
+	async allowCommand(command: string, project?: string): Promise<string | null> {
+		// A test script is the project's code, not a command the agent chose: a freshly cloned repository's `npm test`
+		// runs whatever it says. The first one in a folder is asked about ("Ask risky"), or refused where nobody watches
+		// ("deny risky") unless the person let it run there before; the yes covers the folder.
+		if (project && !this.planMode && (this.mode === "ask_risky" || this.mode === "deny_risky")) {
+			const key = `check:${project}`;
+			if (!this.checkedProjects.has(project) && !this.allowed.has(key)) {
+				if (this.mode === "deny_risky") {
+					return `Refused: nobody is watching this run, and this project's own test command has not been allowed to run in this folder yet (${PROJECT_CHECK_RISK}).`;
+				}
+				const ok = await this.ask("bash", { command }, PROJECT_CHECK_RISK, key);
+				if (!ok) return "The user declined running the project's test command.";
+				this.checkedProjects.add(project);
+				return null;
+			}
+		}
 		const verdict = await this.decide({ toolName: "bash", input: { command } });
 		return verdict ? verdict.reason : null;
 	}

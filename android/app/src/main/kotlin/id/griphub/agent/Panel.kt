@@ -101,6 +101,8 @@ class PanelActivity : BridgeActivity() {
         const val ACTION_VOICE = "id.griphub.agent.PANEL_VOICE"
         /** The sheet's share of the screen height. */
         private const val HEIGHT = 0.6f
+        private const val STATE_SELECTION = "selection"
+        private const val STATE_WRITABLE = "writable"
     }
 
     override val surface = "panel"
@@ -110,6 +112,11 @@ class PanelActivity : BridgeActivity() {
     private var writable = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Made anew (the app took the engine and gave it back): the selection it was opened with is still this one's.
+        savedInstanceState?.let {
+            selection = it.getString(STATE_SELECTION)
+            writable = it.getBoolean(STATE_WRITABLE)
+        }
         super.onCreate(savedInstanceState)
         val metrics = resources.displayMetrics
         window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, (metrics.heightPixels * HEIGHT).toInt())
@@ -119,6 +126,13 @@ class PanelActivity : BridgeActivity() {
         window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         // The bubble is the panel folded away: no need for both on screen.
         BubbleService.hide(this)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // Capped: a saved state too big for Android's binder would crash on the way out.
+        outState.putString(STATE_SELECTION, selection?.take(100_000))
+        outState.putBoolean(STATE_WRITABLE, writable)
     }
 
     override fun surfaceInfo(): Map<String, Any?> = mapOf(
@@ -191,14 +205,31 @@ class PanelActivity : BridgeActivity() {
 class ProcessTextActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Exported: only a text selection is passed on, as a fresh intent with just its text (never another action or
+        // anything else the caller put in).
         val source = intent
-        if (Overlay.allowed(this)) {
-            startActivity(
-                Intent(source).setClass(this, PanelActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT),
-            )
+        if (source?.action != Intent.ACTION_PROCESS_TEXT) {
+            finish()
+            return
+        }
+        val text = source.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+        if (text.isNullOrBlank()) {
+            finish()
+            return
+        }
+        val readOnly = source.getBooleanExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true)
+        val selection = Intent(Intent.ACTION_PROCESS_TEXT)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_PROCESS_TEXT, text)
+            .putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, readOnly)
+        // From GripHub's own text (its selection menu lists every app's action, ours too): the app asks about it in a new
+        // chat; a panel over itself would answer into a window that is no longer there.
+        val own = callingPackage == packageName
+        if (!own && Overlay.allowed(this)) {
+            startActivity(selection.setClass(this, PanelActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT))
         } else {
             startActivity(
-                Intent(source).setClass(this, MainActivity::class.java)
+                selection.setClass(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             )
         }
