@@ -100,7 +100,8 @@ void main() {
       agent.switchProblems.stream.listen(problems.add);
 
       bool? switched;
-      agent.openSession('b.jsonl').then((v) => switched = v);
+      // Opening another chat no longer stops the agent (Fitur 8); rewinding the chat at work (edit, fork) still does.
+      agent.readyToSwitch().then((v) => switched = v);
       await frames(tester, 2);
       expect(host.sent('abort'), hasLength(1));
       expect(agent.stoppingToSwitch, isTrue);
@@ -129,7 +130,7 @@ void main() {
         );
         agent.busy = true;
         agent.confirmStopToSwitch = () async => true;
-        unawaited(agent.openSession('b.jsonl'));
+        unawaited(agent.readyToSwitch());
         await frames(tester, 3);
         expect(layoutErrors, isEmpty);
         await expectLater(find.byType(Scaffold), matchesGoldenFile(golden('stop_to_switch_${look.name}')));

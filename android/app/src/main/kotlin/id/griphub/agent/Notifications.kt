@@ -62,9 +62,12 @@ object Notifications {
     }
 
     /** Opens the app with [launch] (null: just open it). */
-    fun openIntent(context: Context, requestCode: Int, launch: Map<String, Any?>?): PendingIntent {
+    fun openIntent(context: Context, requestCode: Int, launch: Map<String, Any?>?, kind: String = "notification"): PendingIntent {
+        // The data names who it is for: a widget's tap and a notification with the same number are different
+        // PendingIntents (else the last one written replaces the other's launch).
         val intent = Intent(context, MainActivity::class.java)
             .setAction(MainActivity.ACTION_OPEN)
+            .setData(android.net.Uri.parse("griphub-launch://$kind/$requestCode"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         if (launch != null) {
             intent.putExtra(EXTRA_LAUNCH, JSONObject(launch).toString()).putExtra(EXTRA_TOKEN, token(context))

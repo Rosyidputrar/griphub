@@ -8,6 +8,7 @@ import 'chat_export.dart';
 import 'i18n.dart';
 import 'kit.dart';
 import 'message_views.dart';
+import 'verify_view.dart';
 
 /// The open chat's older turns that a summary replaced, to read again: the model no longer gets them, but they were
 /// the user's work, and the chat itself shows only the summary's line in their place. Read only; they can be copied as
@@ -103,6 +104,7 @@ class _SummarizedTurnsScreenState extends State<SummarizedTurnsScreen> {
                   ),
                   NoticeEntry() => NoticeView(e),
                   JobEntry() => JobNoticeView(e),
+                  VerifyEntry() => VerifyEvidenceView(e),
                   CompactionEntry() => CompactionView(e),
                 };
                 return Padding(

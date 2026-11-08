@@ -104,9 +104,18 @@ Penjelasan.
       expect(x.date, isNotEmpty, reason: x.key);
     }
     expect(v.map((x) => x.key).toSet().length, v.length, reason: 'keys are unique');
-    // The newest releases, as they were published: the first three of this stretch, newest first.
-    expect(v.take(4).map((x) => x.key), ['1.0.131', '1.0.128', '1.0.126', '1.0.119']);
-    expect(compareDotted(v[0].key, v[1].key), 1);
+    // Releases already published stay listed, back to back and newest first. A release adds versions above them,
+    // so the check finds the stretch instead of pinning the top of the file (which every release moves).
+    final keys = v.map((x) => x.key).toList();
+    const published = ['1.0.131', '1.0.128', '1.0.126', '1.0.119'];
+    final at = keys.indexOf(published.first);
+    expect(at, greaterThanOrEqualTo(0), reason: 'v${published.first} is still listed');
+    expect(keys.skip(at).take(published.length), published);
+    // Public releases run newest first, all the way down (early builds have their own list and share numbers).
+    final releases = v.where((x) => !x.early).map((x) => x.version).toList();
+    for (var i = 0; i + 1 < releases.length; i++) {
+      expect(compareDotted(releases[i], releases[i + 1]), 1, reason: '${releases[i]} before ${releases[i + 1]}');
+    }
     // What is waiting for the next release is not in the list until it has a version.
     expect(text, contains('## Belum dirilis'));
     // Users read this inside the app: no repository, account, link or commit.

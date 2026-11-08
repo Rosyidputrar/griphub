@@ -12,6 +12,8 @@ import 'package:griphub_agent/ui/theme.dart';
 
 /// file:text pairs that are meant to stay as written.
 const _allowed = {
+  'panel_screen.dart:GripHub', // the brand name in the panel's header
+  'chat_extras.dart:npm test', // an example command in the check command field, not text
   'network_screen.dart:https://dns.example/dns-query',
   'network_screen.dart:Search1API',
   'network_screen.dart:TinyFish',

@@ -13,7 +13,7 @@
  * stdout is reserved for protocol records; logs go to stderr.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -82,7 +82,28 @@ import {
 } from "./workbench.js";
 import { FALLBACK_RATES, messageCost, requestEstimate, usageOf, usePricingRouter } from "./pricing.js";
 import { PromptQueue } from "./promptqueue.js";
-import { Router } from "./router.js";
+import { lookup, Router } from "./router.js";
+import { catalog, type ModelMeta } from "./modelcaps.js";
+import { DEFAULT_BUDGET, type Layer, MemoryStore, Proposals, REMEMBER_TOOL, rememberThis, rememberTool, resolveSnapshot, snapshot as memorySnapshot, type MemorySnapshot, snapshotPrompt, storeSnapshot } from "./memory.js";
+import { COMPANION_MARK, companionInstruction, type Frame, pointerOf, treeText, type TreeNode, withFrame } from "./companion.js";
+import {
+	detectVerifyCommand,
+	type Evidence,
+	evidenceText,
+	definitionKey,
+	isTestConfig,
+	outputSummary,
+	runVerify,
+	testDefinition,
+	testDefinitionChanged,
+	testFingerprint,
+	testsChanged,
+	VERIFY_MESSAGE,
+	VERIFY_NOTE,
+	VerifyOutputs,
+} from "./verify.js";
+import { asksAboutPicture, defaultAllowed, SCAN_INSTRUCTION, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
+import { CALM_TURNS, classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
@@ -112,6 +133,27 @@ let jobs: Jobs;
 /** Pictures: the generate_image tool, its limits and the day's picture log (image.ts). */
 let images: Images;
 let router: Router;
+/** Smart router state and decision log per chat (smartrouter.ts). */
+let routing: RoutingStore;
+/** "Ask first" consent of the vision translator, per chat (visiontranslate.ts). */
+let visionConsent: VisionConsent;
+/** Whole outputs of verification runs (verify.ts), for "show the full output". */
+let verifyOutputs: VerifyOutputs;
+/** Agent memory (memory.ts): the facts, and what the user decided about the agent's proposals. */
+let memoryStore: MemoryStore;
+let memoryProposals: Proposals;
+/** The verification command running now, so Stop stops it too. */
+let verifyAbort: AbortController | null = null;
+/** The vision readings under way (the translator, a scan): Stop ends them as it ends the turn. */
+let visionAbort = new AbortController();
+/**
+ * Screen companion (companion.ts): the chat it runs in, and the frame held for the one request it was taken for. The
+ * frame lives here only (never in a message, a file or a log) and is dropped when the turn ends or the companion stops.
+ */
+let companionSession: string | null = null;
+let companionFrame: Frame | null = null;
+/** A companion step is running: when it ends, where it points goes to the phone (companion_pointer). */
+let companionStep = false;
 let modelBoard: ModelBoard;
 let fsService: Fs;
 let preview: Preview;
@@ -380,6 +422,7 @@ function state() {
 		// hello already says with that whether this host is a phone's or a server's, and spreads this state after it.
 		chatMode: modeOf(s.sessionManager.getCwd(), workspace),
 		billingNotice: billingNotice(),
+		smartRouter: smartRouterState(s),
 		planMode: guard.planMode,
 		approvalMode: guard.mode,
 		// How long the running turn has taken so far, by this host's clock (the app counts on from there).
@@ -420,6 +463,15 @@ async function buildSession(
 			...(chat ? [{ name: "griphub-chat", factory: chatModeExtension({ dir: cwd, stopped: opts.onLimit }), hidden: true }] : []),
 			{ name: "griphub-images", factory: (pi: any) => pi.on("agent_start", () => images.startRun(runKey)), hidden: true },
 			...(opts.interactive ? [{ name: "griphub", factory: guard.extension, hidden: true }] : []),
+			// Screen companion (companion.ts): the held frame goes onto the request only, never into the chat's file.
+			...(opts.interactive ? [{ name: "griphub-companion", factory: (pi: any) => pi.on("context", (event: any) => {
+				const out = withFrame(event.messages, companionFrame);
+				return out ? { messages: out } : undefined;
+			}), hidden: true }] : []),
+			// Agent memory (memory.ts): what the agent remembers, in the system prompt of every chat someone watches.
+			...(opts.interactive ? [{ name: "griphub-memory", factory: memoryExtension(sessionManager, chat), hidden: true }] : []),
+			// Self-verification (verify.ts): a coding chat someone watches; after the guard, so its own command is asked about.
+			...(opts.interactive && !chat ? [{ name: "griphub-verify", factory: verifyExtension(cwd), hidden: true }] : []),
 			// A server's background runs go on while nobody is there: what would need approval is refused instead.
 			...(opts.unattended ? [{ name: "griphub-unattended", factory: opts.unattended.extension, hidden: true }] : []),
 		],
@@ -437,6 +489,8 @@ async function buildSession(
 		activeModel: session?.model?.id ?? "",
 	});
 	// Pictures (image.ts): over the user's limit the open chat asks; a run nobody watches is refused instead.
+	// Proposing memories needs someone to decide on them: chats the user watches, with memory on.
+	const remember = opts.interactive && integrations.settings.memory !== false;
 	const imageTool = () =>
 		images.tool(runKey, () => sessionManager.getCwd(), opts.interactive ? (summary, reason) => guard.askSpend(IMAGE_TOOL, summary, reason) : undefined);
 	const result = await createAgentSession({
@@ -449,10 +503,10 @@ async function buildSession(
 		// "subagent" must be named here: the SDK drops custom tools whose
 		// name is not in this allow-list (that is why 1.0.42 never showed it).
 		tools: chat
-			? [...CHAT_TOOLS, ...(pictures ? [IMAGE_TOOL] : [])]
-			: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...mcpTools.map((t) => t.name)],
+			? [...CHAT_TOOLS, ...(pictures ? [IMAGE_TOOL] : []), ...(remember ? [REMEMBER_TOOL] : [])]
+			: [...TOOLS, ...(opts.interactive ? ["subagent", "background_job"] : []), ...(pictures ? [IMAGE_TOOL] : []), ...(remember ? [REMEMBER_TOOL] : []), ...mcpTools.map((t) => t.name)],
 		customTools: (chat
-			? [...webTools(searchKeys, () => sessionManager.getCwd(), { chat: true }), ...(pictures ? [imageTool()] : [])]
+			? [...webTools(searchKeys, () => sessionManager.getCwd(), { chat: true }), ...(pictures ? [imageTool()] : []), ...(remember ? [rememberToolFor(sessionManager)] : [])]
 			: [
 					...webTools(searchKeys, () => sessionManager.getCwd()),
 					todoTool(),
@@ -464,6 +518,7 @@ async function buildSession(
 					// Long commands the chat does not wait for; their result calls the chat back (jobs.ts, deliverJobs).
 					...(opts.interactive ? [jobTool(jobs, () => currentParent())] : []),
 					...(pictures ? [imageTool()] : []),
+					...(remember ? [rememberToolFor(sessionManager)] : []),
 				]) as any,
 	});
 	// Some models send "None" or numbers-as-strings for tool arguments.
@@ -576,6 +631,14 @@ function openSession(sessionManager: SessionManager) {
 				return result.session;
 			},
 			retire: () => {
+				// The screen companion belongs to the chat it was started in: leaving that chat ends it, recorded there.
+				if (session && companionSession === session.sessionId) {
+					session.sessionManager.appendCustomMessageEntry(COMPANION_RECORD, "Screen companion stopped: the chat was left.", true, { event: "stop", at: Date.now() });
+					send({ type: "companion", sessionId: companionSession, event: "stop" });
+					companionSession = null;
+					companionFrame = null;
+					companionStep = false;
+				}
 				unsubscribe?.();
 				guard.cancelAll();
 				session?.dispose();
@@ -621,6 +684,12 @@ function onSessionEvent(event: AgentSessionEvent) {
 		if (over) {
 			if (turnMs !== undefined) recordTurnTime(turnMs);
 			turnStartedAt = null;
+			// The companion's frame was for this turn only; where the step points goes to the phone to highlight.
+			companionFrame = null;
+			if (companionStep) {
+				companionStep = false;
+				send({ type: "companion_pointer", sessionId: session?.sessionId ?? null, pointer: pointerOf(text) });
+			}
 		}
 		send({
 			type: "agent_done",
@@ -873,11 +942,597 @@ async function tryFallback(error: string) {
 		await failed.setModel(model, { persist: false });
 		if (session !== failed) return;
 		send({ type: "notice", message: `Switched to ${model.name ?? model.id} after an error: ${error.slice(0, 120)}` });
+		if (routing.get(failed.sessionId).auto) {
+			logDecision(failed, { kind: "fallback", model: model.id, modelName: model.name ?? model.id, reason: `fallback model after an error: ${error.slice(0, 120)}` });
+		}
 		send({ type: "state", state: state() });
-		failed.prompt("Continue where you left off (the previous model failed).").catch(() => {});
+		failed.prompt(`${CONTINUE_PREFIX} (the previous model failed).`).catch(() => {});
 	} finally {
 		fallbackPending = false;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Smart router (smartrouter.ts): "Otomatis (Pintar)" per chat
+
+function smartRouterOn(): boolean {
+	return integrations?.settings.smartRouter !== false;
+}
+
+/** What the app shows: whether the switch allows it, whether this chat is automatic, and its current floor. */
+function smartRouterState(s: AgentSession) {
+	const r = routing?.get(s.sessionId);
+	return { enabled: smartRouterOn(), auto: !!r?.auto && smartRouterOn(), floor: r?.floor ?? 0 };
+}
+
+function userTurns(s: AgentSession): number {
+	return (s.messages as any[]).filter((m) => m?.role === "user").length;
+}
+
+/** GripHub's chat models as the router describes them, limited to the ones this host can actually run. */
+function routerCatalog(): ModelMeta[] {
+	const saved = customProviders.list().find((p) => p.id === GRIPHUB_ID)?.models ?? [];
+	return catalog({
+		models: saved.filter((m) => !!modelRuntime.getModel(GRIPHUB_ID, m.id)),
+		liveRates: router.liveRates(),
+		floor: (id) => router.floor(id),
+		available: (id) => router.modelAvailable(id),
+		lookup,
+	}).filter((m) => isChatModel({ provider: GRIPHUB_ID, id: m.id }));
+}
+
+function logDecision(s: AgentSession, d: Omit<Decision, "at" | "turn">, change?: (r: ReturnType<RoutingStore["get"]>) => void) {
+	const decision: Decision = { at: Date.now(), turn: userTurns(s), ...d };
+	routing.update(s.sessionId, (r) => {
+		change?.(r);
+		r.log.push(decision);
+	});
+	send({ type: "routing", sessionId: s.sessionId, decision, smartRouter: smartRouterState(s) });
+	return decision;
+}
+
+/** Turns "Otomatis (Pintar)" on or off for the open chat. */
+function setSmartRouter(s: AgentSession, on: boolean) {
+	if (on && !smartRouterOn()) throw new Error("The smart router is turned off in Settings");
+	const r = routing.get(s.sessionId);
+	if (r.auto === on) return;
+	logDecision(s, { kind: on ? "on" : "off", reason: on ? "chosen in the model picker" : "turned off" }, (x) => {
+		x.auto = on;
+		if (!on) x.floor = 0;
+	});
+}
+
+/** Tokens the routed model must hold besides the conversation: this message and room for the answer. */
+const ROUTE_RESERVE = { chat: 4_096, coding: 16_384 };
+
+/**
+ * Picks the open chat's model for the turn about to start, when the chat is automatic. Throws, with the reason, when no
+ * model fits: the turn is not sent on a guess.
+ */
+/**
+ * [step]: a screen companion step (companion.ts). It is routed like any turn (it needs vision), but it is not the
+ * user's request: "Sudah, lanjut" again is not the same request sent again, and it does not replace the request a
+ * later failure is measured against.
+ */
+async function routeTurn(s: AgentSession, text: string, images: number, opts: { step?: boolean } = {}) {
+	if (!smartRouterOn()) return;
+	const state0 = routing.get(s.sessionId);
+	if (!state0.auto) return;
+	const coding = !isChatCwd(s.sessionManager.getCwd(), workspace);
+	const contextTokens =
+		s.getContextUsage()?.tokens ?? Math.ceil((s.messages as any[]).reduce((n, m) => n + messageText(m).length, 0) / 4);
+	const promptTokens = Math.ceil(text.length / 4) + images * 1_500;
+
+	// A failure of the last routed turn raises the chat's floor one band above what it used.
+	const lastAssistant = [...(s.messages as any[])].reverse().find((m) => m?.role === "assistant") ?? null;
+	const failure = state0.last && !opts.step ? failureOf(lastAssistant, state0.last.text, text) : null;
+	let floor = state0.floor;
+	if (failure) {
+		const raised = nextFloor(floor, state0.last?.band ?? null);
+		if (raised !== floor) {
+			logDecision(s, { kind: "escalate", band: raised, why: [failure], reason: `${failure}: class raised to ${DIFFICULTY_NAMES[raised]}` }, (r) => {
+				r.floor = raised;
+				r.calm = 0;
+			});
+			floor = raised;
+		} else {
+			routing.update(s.sessionId, (r) => {
+				r.calm = 0;
+			});
+		}
+	} else if (state0.last && !opts.step && floor > 0) {
+		// A raised class is not for ever: after a few turns in a row that went well, it comes down one band.
+		const calm = (state0.calm ?? 0) + 1;
+		if (calm >= CALM_TURNS) {
+			const lowered = (floor - 1) as Difficulty;
+			logDecision(s, { kind: "relax", band: lowered, why: ["calm"], reason: `${CALM_TURNS} turns without a failure: class lowered to ${DIFFICULTY_NAMES[lowered]}` }, (r) => {
+				r.floor = lowered;
+				r.calm = 0;
+			});
+			floor = lowered;
+		} else {
+			routing.update(s.sessionId, (r) => {
+				r.calm = calm;
+			});
+		}
+	}
+
+	const { difficulty, reasons } = classify({ text, images, coding, contextTokens });
+	const wanted = Math.max(difficulty, floor) as Difficulty;
+	// A plain chat calls tools too (web search, reading a file, remember, images): any tool on offer needs a model that
+	// can call it.
+	const tools = coding || s.getActiveToolNames().length > 0;
+	const need = { vision: images > 0, tools, minContext: contextTokens + promptTokens + (coding ? ROUTE_RESERVE.coding : ROUTE_RESERVE.chat) };
+	const blocked = new Set(integrations.settings.smartRouterBlocked ?? []);
+	let models = routerCatalog();
+	// A list saved before the router's tool flags were kept (an app update) states none: read /v1/models again once
+	// (a free listing, not a model call) rather than refuse every coding turn until the daily refresh.
+	if (models.length && models.every((m) => m.tools === undefined)) {
+		await refreshGripHubModels().catch(() => {});
+		models = routerCatalog();
+	}
+	const picked = select(models, need, wanted, { blocked, inputTokens: contextTokens + promptTokens, coding });
+	if (!picked.ok) {
+		logDecision(s, { kind: "none", difficulty, why: picked.missing, reason: picked.reason });
+		// One fixed sentence, which the app translates; the details are in the chat's routing log.
+		throw new Error("The smart router found no model that can do this message. Pick a model yourself for it.");
+	}
+	const { choice } = picked;
+	const model = modelRuntime.getModel(GRIPHUB_ID, choice.model.id);
+	if (!model) throw new Error("The smart router found no model that can do this message. Pick a model yourself for it.");
+	const why = [...reasons, ...(floor > difficulty ? ["floor"] : []), ...(need.vision ? ["vision"] : []), ...(choice.belowWanted ? ["below"] : []), "cheapest"];
+	const reason = [
+		`${DIFFICULTY_NAMES[difficulty]} (${reasons.join(", ")})`,
+		...(floor > difficulty ? [`class floor ${DIFFICULTY_NAMES[floor]} after an earlier failure`] : []),
+		...(need.vision ? ["needs vision"] : []),
+		...(choice.belowWanted ? [`no ${DIFFICULTY_NAMES[wanted]} model fits; strongest that does`] : []),
+		"cheapest that fits",
+	].join("; ");
+	logDecision(
+		s,
+		{ kind: "route", model: choice.model.id, modelName: choice.model.name, band: choice.band, difficulty, why, reason, estimate: choice.estimate },
+		(r) => {
+			if (!opts.step) r.last = { model: choice.model.id, band: choice.band, text };
+		},
+	);
+	if (s.model?.provider !== GRIPHUB_ID || s.model.id !== model.id) {
+		// The same call a manual pick makes (thinking effort is kept the way pi keeps it then), without making this
+		// model the default for new chats.
+		await s.setModel(model, { persist: false });
+		send({ type: "state", state: state() });
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Vision translator (visiontranslate.ts): pictures for a model that cannot read them
+
+/** The record of the screen companion starting or stopping, in the chat. */
+const COMPANION_RECORD = "griphub_companion";
+const COMPANION_NEEDS_VISION =
+	"The screen companion needs a model that can see pictures. Choose one in the model picker, or Automatic (Smart).";
+
+/** Fixed sentences, so the app can say them in the user's language. */
+const VISION_OFF =
+	"This model can't read pictures, and the vision translator is off. Switch to a model that reads pictures, or turn the translator on in Settings → Vision translator.";
+const VISION_NONE =
+	"No approved vision model is available to read the picture. Switch to a model that reads pictures, or change the approved list in Settings → Vision translator.";
+const VISION_FAILED = "The vision model could not read the picture, so nothing was sent. Try again, or switch to a model that reads pictures.";
+const VISION_STOPPED = "Stopped before the picture was read, so nothing was sent.";
+const SCAN_OFF = "Scanning reads the photo with a vision model, and the vision translator is off. Turn it on in Settings → Vision translator to scan.";
+
+/**
+ * Requests made for a chat outside its turns whose chat has no file yet (pi writes one only once the chat has a
+ * message): the cost is kept here, so Usage and the daily budget count it even if that chat never gets one. The entry
+ * in the chat says so (ledger: true), so a chat that is saved later is not counted twice.
+ */
+const USAGE_LEDGER = join(stateDir, "usage-ledger.jsonl");
+
+function recordOutside(s: AgentSession, data: Record<string, unknown>) {
+	const unsaved = !(s.sessionManager as any).flushed;
+	if (unsaved) {
+		try {
+			// Kept small: once past 256 KB, only the last 40 days stay (Usage shows 30).
+			if (existsSync(USAGE_LEDGER) && statSync(USAGE_LEDGER).size > 256_000) {
+				const keep = Date.now() - 40 * 86_400_000;
+				const lines = readFileSync(USAGE_LEDGER, "utf8").split("\n").filter((l) => {
+					try {
+						return l && Date.parse(JSON.parse(l).timestamp) >= keep;
+					} catch {
+						return false;
+					}
+				});
+				writeFileSync(USAGE_LEDGER, lines.map((l) => `${l}\n`).join(""));
+			}
+			appendFileSync(USAGE_LEDGER, `${JSON.stringify({ type: "usage", provider: data.provider, model: data.model, usage: data.usage, timestamp: new Date(Number(data.at) || Date.now()).toISOString(), purpose: data.purpose })}\n`);
+		} catch {
+			// A full disk: the chat's own entry is still there if the chat is saved.
+		}
+	}
+	s.sessionManager.appendCustomEntry("griphub-usage", unsaved ? { ...data, ledger: true } : data);
+}
+
+/** What Try again says when the failed request is already in the chat. */
+/** How the host's own continuations of a failed run begin (fallback model, Try again); verification knows them by it. */
+const CONTINUE_PREFIX = "Continue where you left off";
+const RETRY_TEXT = `${CONTINUE_PREFIX} (the previous request failed).`;
+
+/**
+ * The pictures of the chat's last user message (the turn a retry continues). None when that turn already carries a
+ * reading of them (visiontranslate.ts): reading them again would be paid twice for the same text.
+ */
+function lastUserPictures(s: AgentSession): any[] {
+	const last = [...(s.messages as any[])].reverse().find((m) => m?.role === "user");
+	if (!Array.isArray(last?.content)) return [];
+	if (messageText(last).includes("<griphub-vision")) return [];
+	return last.content.filter((c: any) => c?.type === "image");
+}
+
+/** How many of the latest user messages a follow-up question may reach back over to find the picture it is about. */
+const VISION_LOOKBACK = 6;
+
+type Prepared = { text: string; images?: any[] } | { visionConsent: { model: string; modelName: string; estimate: number | null } };
+
+/** The vision model for [images] pictures, or a refusal; never a model outside the router's metadata. */
+function visionTranslator(images: number) {
+	const st = integrations.settings;
+	return pickTranslator(routerCatalog(), {
+		manual: st.visionTranslatorModel,
+		allowed: st.visionTranslatorAllowed,
+		blocked: new Set(st.smartRouterBlocked ?? []),
+		images,
+	});
+}
+
+/**
+ * Reads [images] with [meta] (one request, no tools, not part of the chat's turns), records what it cost in the chat's
+ * file like any other request, and returns the text. Throws VISION_FAILED when it fails or reads nothing: the turn is
+ * then not sent, and nothing is made up.
+ */
+async function readPictures(s: AgentSession, meta: ModelMeta, images: any[], instruction: string, kind: "full" | "targeted") {
+	checkBudget();
+	const model = modelRuntime.getModel(GRIPHUB_ID, meta.id);
+	if (!model) throw new Error(VISION_NONE);
+	let reply: any;
+	const stop = visionAbort.signal;
+	try {
+		reply = await (s as any).modelRuntime.completeSimple(
+			model,
+			{ messages: [{ role: "user", content: [{ type: "text", text: instruction }, ...images], timestamp: Date.now() }] },
+			{ maxTokens: 2_000, cacheRetention: "none", signal: AbortSignal.any([AbortSignal.timeout(120_000), stop]) },
+		);
+	} catch {
+		reply = { stopReason: "error" };
+	}
+	const usage = reply?.usage;
+	const failed = reply?.stopReason === "error" || reply?.stopReason === "aborted" || stop.aborted;
+	const credits = usage ? requestEstimate(meta.id, usageOf(usage), !failed) : null;
+	if (usage) {
+		// In the chat's file, so Usage, the daily budget and the chat's history count it (workbench.ts usageSummary).
+		recordOutside(s, { provider: GRIPHUB_ID, model: meta.id, usage, purpose: "vision", kind, ok: !failed, at: Date.now() });
+	}
+	if (stop.aborted) {
+		send({ type: "vision", sessionId: s.sessionId, reading: { model: meta.id, name: meta.name, kind, credits, ok: false } });
+		throw new Error(VISION_STOPPED);
+	}
+	const text = failed ? "" : (reply?.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("").trim();
+	send({ type: "vision", sessionId: s.sessionId, reading: { model: meta.id, name: meta.name, kind, credits, ok: !!text } });
+	if (!text) throw new Error(VISION_FAILED);
+	return { model: meta.id, name: meta.name, credits, kind, text };
+}
+
+/**
+ * What the chat's model is given for a turn: unchanged when it reads pictures (or there are none to read); with the
+ * pictures read into text when it cannot. Asks first (returns visionConsent) when Settings say so and this chat has not
+ * agreed yet; refuses when the translator is off. A question about a picture sent earlier gets one targeted reading
+ * of that picture, never a second full one.
+ */
+async function prepareTurn(s: AgentSession, text: string, images: any[] | undefined, consent: boolean): Promise<Prepared> {
+	const mode = integrations.settings.visionTranslator ?? "auto";
+	const meta = s.model?.provider === GRIPHUB_ID ? routerCatalog().find((m) => m.id === s.model!.id) : undefined;
+	// A model of another provider (none in this build), or one that reads pictures: nothing to do.
+	if (!meta || readsImages(meta)) return { text, images };
+	const fresh = Array.isArray(images) ? images.filter((i) => i?.type === "image") : [];
+	let source = fresh;
+	let kind: "full" | "targeted" = "full";
+	if (!fresh.length) {
+		if (mode === "off" || !asksAboutPicture(text)) return { text, images };
+		const users = (s.messages as any[]).filter((m) => m?.role === "user").slice(-VISION_LOOKBACK);
+		const last = [...users].reverse().find((m) => Array.isArray(m.content) && m.content.some((c: any) => c?.type === "image"));
+		if (!last) return { text, images };
+		source = last.content.filter((c: any) => c?.type === "image");
+		kind = "targeted";
+	}
+	if (mode === "off") throw new Error(VISION_OFF);
+	const pick = visionTranslator(source.length);
+	if (!pick.ok) throw new Error(VISION_NONE);
+	if (mode === "ask" && !visionConsent.given(s.sessionId)) {
+		if (!consent) return { visionConsent: { model: pick.model.id, modelName: pick.model.name, estimate: estimateRead(pick.model, source.length) } };
+		visionConsent.give(s.sessionId);
+	}
+	const reading = await readPictures(s, pick.model, source, kind === "full" ? FULL_INSTRUCTION : targetedInstruction(text), kind);
+	// The pictures stay with the message (pi keeps them in the chat and leaves them out of requests to this model).
+	return { text: `${text}\n\n${readingBlock(reading)}`, images };
+}
+
+// ---------------------------------------------------------------------------
+// Self-verification (verify.ts): a coding task that changed files ends on evidence, not on the agent's word
+
+/**
+ * The pi extension of a coding chat. At the start of a run it notes the folder's state (a tree id in the checkpoint
+ * repository; no checkpoint is made). Before the run settles, when files changed, it runs the project's check (asked
+ * about by the guard like any bash call), adds the result to the chat as evidence and lets the agent go on: to fix a
+ * failure, up to the rounds in Settings, each one checked again; or to write its closing message, which the evidence
+ * tells it to base on that result. Changes made after the evidence are checked again; a failure "fixed" by changing
+ * the tests is not taken as a pass.
+ */
+function verifyExtension(cwd: string) {
+	type Phase = "work" | "fix" | "closing";
+	type Run = {
+		/** The folder at the task's start (checkpoint tree), null when it could not be taken. */
+		base: string | null;
+		/** The tests and how they run at the task's start: what the task may not quietly weaken. */
+		startTests: Record<string, string>;
+		startDefinition: Record<string, string>;
+		phase: Phase;
+		round: number;
+		failTree: string | null;
+		failTests?: Record<string, string>;
+		failDefinition?: Record<string, string>;
+		evidenceTree: string | null;
+		checks: number;
+		/** A tool that can change files ran in this task (for a folder that could not be measured). */
+		wrote: boolean;
+	};
+	let st: Run | null = null;
+	const on = () => integrations.settings.verify !== false;
+	/** A run that ended on an error, kept for the host's own "Continue where you left off" (fallback, Try again). */
+	let carried: Run | null = null;
+	const WRITES = new Set(["write", "edit", "bash", "background_job"]);
+	return (pi: any) => {
+		pi.on("tool_call", (event: any) => {
+			if (st && WRITES.has(event.toolName)) st.wrote = true;
+			return undefined;
+		});
+		// A run that starts from a message (the user's, or a job's result): what the folder is now is what the task
+		// changes are measured from. The agent going on after evidence is the same run (no new start here), so its rounds
+		// and the tests' state at the first failure carry over.
+		pi.on("before_agent_start", async (event: any) => {
+			// The host continuing a run that failed (another model after an error, Try again) is the same task: the
+			// folder is measured from where that task began, not from the half-done state the error left.
+			const resumed = typeof event.prompt === "string" && event.prompt.startsWith(CONTINUE_PREFIX) ? carried : null;
+			carried = null;
+			st = null;
+			if (!on()) return undefined;
+			if (resumed) {
+				st = { ...resumed };
+				return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
+			}
+			const base = await checkpoints.tree(cwd).catch(() => null);
+			st = {
+				base,
+				startTests: testFingerprint(cwd),
+				startDefinition: testDefinition(cwd),
+				phase: "work",
+				round: 0,
+				failTree: null,
+				evidenceTree: null,
+				checks: 0,
+				wrote: false,
+			};
+			return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
+		});
+		pi.on("agent_before_settle", async (event: any) => {
+			const run = st;
+			if (!run || !on() || event.outcome !== "completed") {
+				// An error (not the user's Stop) may be continued by the host: the task's start is kept for that.
+				carried = run && event.outcome === "error" ? run : null;
+				st = null;
+				return undefined;
+			}
+			const maxRounds = integrations.settings.verifyRounds ?? 3;
+			const found = detectVerifyCommand(cwd, integrations.settings.projectVerify?.[cwd]);
+			const evidence: Evidence = {
+				status: "none",
+				command: found?.command ?? null,
+				source: found?.source ?? null,
+				exitCode: null,
+				durationMs: 0,
+				summary: "",
+				outputId: null,
+				round: run.round,
+				maxRounds,
+				testsTouched: [],
+				at: Date.now(),
+			};
+			const settleWith = (next: "fix" | "close") => {
+				send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "done", status: evidence.status });
+				return {
+					entries: [{ type: "custom_message", customType: VERIFY_MESSAGE, content: evidenceText(evidence, next), display: true, details: { evidence, next } }],
+					continue: true,
+				};
+			};
+			const now = run.base ? await checkpoints.tree(cwd).catch(() => null) : null;
+			const changed = run.base && now ? await checkpoints.changedBetween(cwd, run.base, now).catch(() => null) : null;
+			// The folder could not be measured: never a silent "done". Said once, when the task may have changed files.
+			if (changed === null || !now) {
+				st = null;
+				if (!run.wrote && !integrations.settings.verifyAlways) return undefined;
+				evidence.status = "unmeasured";
+				return settleWith("close");
+			}
+			if (run.phase === "closing") {
+				// The closing message changed nothing since the evidence: the run may end. Otherwise it is checked again.
+				const since = run.evidenceTree ? await checkpoints.changedBetween(cwd, run.evidenceTree, now).catch(() => []) : [];
+				if (!since.length) {
+					st = null;
+					return undefined;
+				}
+			}
+			if (run.phase === "work" && !changed.length && !integrations.settings.verifyAlways) {
+				st = null;
+				return undefined;
+			}
+			// A model that keeps changing files in its closing message is not checked forever: the last evidence stands.
+			if (run.checks > maxRounds + 2) {
+				st = null;
+				return undefined;
+			}
+			run.checks++;
+			let after = now;
+			// How the tests run, and the tests, against where they stood at the task's start, and at the failure while
+			// fixing one. Read before anything runs, so a changed setup is never run on trust.
+			const fixing = !!run.failTree;
+			const definition = testDefinition(cwd);
+			const testsNow = testFingerprint(cwd);
+			const since = (tests: Record<string, string>, def: Record<string, string>) => ({
+				setup: testDefinitionChanged(def, definition),
+				// Changed or removed tests, and any new test configuration (a new test file is fine).
+				tests: [...testsChanged(tests, testsNow), ...testsChanged(tests, testsNow, { added: true }).filter(isTestConfig)],
+			});
+			const fromStart = since(run.startTests, run.startDefinition);
+			const fromFail = fixing ? since(run.failTests ?? {}, run.failDefinition ?? {}) : { setup: [], tests: [] };
+			const list = (c: { setup: string[]; tests: string[] }) => [...new Set([...c.tests, ...c.setup])].sort();
+			const setupChanged = fromStart.setup.length ? fromStart.setup : fromFail.setup;
+			if (found && setupChanged.length && found.source !== "project setting") {
+				// Not run: the command would run what the task wrote into the test setup.
+				evidence.testsTouched = list(fromFail.setup.length ? fromFail : fromStart);
+				evidence.status = fromFail.setup.length ? "tests-changed" : "setup-changed";
+			} else if (found) {
+				// The user's own command (project setting) is theirs; one found in the project's files is the project's code,
+				// and a yes covers it as it is now (another setup is asked about again).
+				const refused = await guard.allowCommand(
+					found.command,
+					found.source === "project setting" ? undefined : { project: cwd, key: definitionKey(found.command, definition) },
+				);
+				if (refused) {
+					evidence.status = "declined";
+					evidence.reason = refused;
+				} else {
+					send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "running", command: found.command, round: run.round });
+					verifyAbort = new AbortController();
+					const result = await runVerify(found.command, cwd, settingsManager.getShellPath(), verifyAbort.signal).finally(() => {
+						verifyAbort = null;
+					});
+					if (result.aborted) {
+						st = null;
+						send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "stopped" });
+						return undefined;
+					}
+					evidence.exitCode = result.exitCode;
+					evidence.durationMs = result.durationMs;
+					evidence.timedOut = result.timedOut;
+					evidence.summary = outputSummary(result.output);
+					evidence.outputId = verifyOutputs.save(result.output);
+					const passed = result.exitCode === 0 && !result.timedOut;
+					evidence.status = passed ? "passed" : "failed";
+					// What the test run itself wrote (a lockfile, caches, reports) is not the agent's change: the folder is
+					// taken again after it, and later changes are measured from there.
+					after = (await checkpoints.tree(cwd).catch(() => null)) ?? now;
+					// While fixing, tests changed since the failure are not a pass; a pass of tests the task changed is said so.
+					if (fromFail.tests.length) {
+						evidence.testsTouched = list(fromFail);
+						evidence.status = "tests-changed";
+					} else if (fromStart.tests.length) {
+						evidence.testsTouched = list(fromStart);
+						if (passed) evidence.status = "passed-tests-changed";
+					}
+				}
+			}
+			const failed = evidence.status === "failed" || evidence.status === "tests-changed";
+			const next = failed && run.round < maxRounds ? "fix" : "close";
+			if (failed && !run.failTree) {
+				run.failTree = after;
+				// As they stand after that run (what the run itself writes among the tests is not the agent's change).
+				run.failTests = testFingerprint(cwd);
+				run.failDefinition = testDefinition(cwd);
+			}
+			run.phase = next === "fix" ? "fix" : "closing";
+			run.round += next === "fix" ? 1 : 0;
+			run.evidenceTree = after;
+			return settleWith(next);
+		});
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Agent memory (memory.ts)
+
+/** The custom entry that keeps what a chat started with, so the user can see it. */
+const MEMORY_SNAPSHOT = "griphub-memory-snapshot";
+
+/** The project folder a chat works in, for its project memory: a coding chat in a folder other than the workspace. */
+function projectOf(cwd: string, chat: boolean): string | null {
+	if (chat || !cwd) return null;
+	return resolve(cwd) === resolve(workspace) ? null : resolve(cwd);
+}
+
+/** What the chat in [sm] started with: the snapshot it keeps, or null when it has none yet. */
+/**
+ * What the chat in [sm] started with, as the facts are now (the chat keeps ids only: a deleted fact is gone, an edited
+ * one is used as edited); null when it has no snapshot yet.
+ */
+function chatSnapshot(sm: SessionManager): MemorySnapshot | null {
+	const e = (sm.getEntries() as any[]).find((x) => x.type === "custom" && x.customType === MEMORY_SNAPSHOT);
+	return e ? resolveSnapshot(e.data, memoryStore) : null;
+}
+
+/**
+ * The memory extension of a chat: at its first run, what the agent remembers (global, and the project's when the chat
+ * works in one) is taken within the budget and kept in the chat; every run of the chat then starts with that same
+ * snapshot in its system prompt.
+ */
+function memoryExtension(sm: SessionManager, chat: boolean) {
+	return (pi: any) => {
+		pi.on("before_agent_start", (event: any) => {
+			if (integrations.settings.memory === false) return undefined;
+			let snap = chatSnapshot(sm);
+			if (!snap) {
+				const project = projectOf(sm.getCwd(), chat);
+				snap = memorySnapshot(
+					memoryStore.list("global"),
+					project ? memoryStore.list("project", project) : [],
+					project,
+					integrations.settings.memoryBudget ?? DEFAULT_BUDGET,
+				);
+				// Ids only in the chat's file (it syncs and is backed up); the texts stay in the memory files.
+				sm.appendCustomEntry(MEMORY_SNAPSHOT, storeSnapshot(snap));
+			}
+			const add = snapshotPrompt(snap);
+			return add ? { systemPrompt: `${event.systemPrompt}${add}` } : undefined;
+		});
+	};
+}
+
+function rememberToolFor(sm: SessionManager) {
+	return rememberTool({
+		proposals: memoryProposals,
+		store: memoryStore,
+		chat: () => ({ sessionId: sm.getSessionId(), project: projectOf(sm.getCwd(), isChatCwd(sm.getCwd(), workspace)) }),
+		send: (r) => send(r),
+	});
+}
+
+/** "ingat ini: …" at the start of a message: the user's own words are the consent; kept now, or refused with why. */
+function rememberFromMessage(s: AgentSession, text: string) {
+	const fact = rememberThis(text);
+	if (!fact || integrations.settings.memory === false) return;
+	try {
+		const entry = memoryStore.add("global", fact, { source: s.sessionName || "chat", sessionId: s.sessionId });
+		send({ type: "memory_saved", layer: "global", entry });
+	} catch (e) {
+		send({ type: "memory_refused", reason: (e as Error).message });
+	}
+}
+
+/** Layer and project of a memory command; a project needs its folder. */
+function memoryTarget(cmd: any): { layer: Layer; project?: string } {
+	const layer: Layer = cmd.layer === "project" ? "project" : "global";
+	if (layer === "project") {
+		const project = typeof cmd.project === "string" && cmd.project ? resolve(cmd.project) : null;
+		if (!project) throw new Error("A project's memory needs its folder");
+		return { layer, project };
+	}
+	return { layer };
 }
 
 /** Estimated GripHub credits of one pi usage record (rate + floor + cache, see router.ts). */
@@ -902,7 +1557,7 @@ function spentToday(): { credits: number; real: boolean } {
 	const sessions = join(agentDir, "sessions");
 	const day = wibDay(Date.now());
 	const local = (from?: number) =>
-		usageSummary(sessions, 1, estimateUsage, from)
+		usageSummary(sessions, 1, estimateUsage, from, USAGE_LEDGER)
 			.filter((r) => r.day === day)
 			.reduce((sum, r) => sum + (r.credits ?? 0), 0);
 	// Subagents run on in-memory sessions (no chat file): their spend since the
@@ -989,7 +1644,8 @@ function recentAsks(s: AgentSession, n = 3): string[] {
 	const out: string[] = [];
 	for (const m of s.messages as any[]) {
 		if (m.role !== "user") continue;
-		const text = typeof m.content === "string" ? m.content : (m.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+		const raw = typeof m.content === "string" ? m.content : (m.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+		const text = stripReadings(raw);
 		if (text.trim()) out.push(text.trim().slice(0, 600));
 	}
 	return out.slice(-n);
@@ -1412,15 +2068,23 @@ async function handle(cmd: Command): Promise<unknown> {
 			void integrations.githubFresh();
 			// The chat is being summarized: pi refuses prompts until it is done, so this one waits for it.
 			if (!s.isStreaming) await compactionDone(s);
+			// An automatic chat picks this turn's model first (smartrouter.ts); a follow-up while the agent works keeps the
+			// running model, and a message sent again after "ask first" was already routed.
+			if (!s.isStreaming && !cmd.visionConsent) await routeTurn(s, String(cmd.text ?? ""), Array.isArray(cmd.images) ? cmd.images.length : 0);
+			// Pictures for a model that cannot read them are read into text first (visiontranslate.ts).
+			const prepared = await prepareTurn(s, text, cmd.images, !!cmd.visionConsent);
+			if ("visionConsent" in prepared) return prepared;
+			// "ingat ini: …": kept now, by the user's own words (memory.ts).
+			rememberFromMessage(s, String(cmd.text ?? ""));
 			// While the agent works, a follow-up waits for the turn's boundary; the
 			// app shows it as a waiting bubble and can cancel it (prompt_queue_remove).
 			const behavior = s.isStreaming ? (cmd.behavior ?? "followUp") : undefined;
 			if (behavior === "followUp") {
-				const id = await promptQueue.add(s, text, cmd.text, cmd.images);
+				const id = await promptQueue.add(s, prepared.text, cmd.text, prepared.images);
 				return id ? { queued: id } : null;
 			}
 			// Don't await the run; progress arrives as events.
-			s.prompt(text, { images: cmd.images, streamingBehavior: behavior }).catch((e) =>
+			s.prompt(prepared.text, { images: prepared.images, streamingBehavior: behavior }).catch((e) =>
 				send({ type: "error", message: String(e?.message ?? e) }),
 			);
 			return null;
@@ -1435,12 +2099,27 @@ async function handle(cmd: Command): Promise<unknown> {
 			// The last prompt from this chat that never made it into the history (refused, or failed to start).
 			const unsent = lastPrompt && lastPrompt.sessionId === s.sessionId ? lastPrompt : null;
 			fallbackTried = false;
+			// The pictures of the turn being continued (already in the chat): the retry needs to see them too.
+			const pictures = !unsent && failedTurn ? lastUserPictures(s) : [];
+			// Try again after a failure: an automatic chat climbs a class for it (smartrouter.ts failureOf).
+			if (!cmd.visionConsent) {
+				await routeTurn(s, unsent?.text ?? routing.get(s.sessionId).last?.text ?? "", unsent?.images?.length ?? pictures.length);
+			}
 			if (unsent) {
-				s.prompt(unsent.text, { images: unsent.images }).catch((e) =>
+				// The same preparation as a new message: the model may have been changed to one that reads pictures since.
+				const prepared = await prepareTurn(s, unsent.text, unsent.images, !!cmd.visionConsent);
+				if ("visionConsent" in prepared) return prepared;
+				s.prompt(prepared.text, { images: prepared.images }).catch((e) =>
 					send({ type: "error", message: String(e?.message ?? e) }),
 				);
 			} else if (failedTurn) {
-				s.prompt("Continue where you left off (the previous request failed).").catch((e) =>
+				// A model that cannot see them gets them read into text first (pi would only leave a placeholder); they are
+				// not sent again, the chat has them.
+				const prepared = pictures.length
+					? await prepareTurn(s, RETRY_TEXT, pictures, !!cmd.visionConsent)
+					: { text: RETRY_TEXT };
+				if ("visionConsent" in prepared) return prepared;
+				s.prompt(prepared.text).catch((e) =>
 					send({ type: "error", message: String(e?.message ?? e) }),
 				);
 			} else {
@@ -1458,6 +2137,9 @@ async function handle(cmd: Command): Promise<unknown> {
 			return null;
 		case "abort":
 			guard.cancelAll();
+			verifyAbort?.abort();
+			visionAbort.abort();
+			visionAbort = new AbortController();
 			await s.abort();
 			return null;
 		case "session_stats":
@@ -1535,7 +2217,162 @@ async function handle(cmd: Command): Promise<unknown> {
 			const model = modelRuntime.getModel(cmd.provider, cmd.model);
 			if (!model) throw new Error(`Unknown model ${cmd.provider}/${cmd.model}`);
 			await s.setModel(model, { persist: true });
+			// A pick of the user's own always wins: an automatic chat stops being automatic, without argument.
+			if (routing.get(s.sessionId).auto) {
+				logDecision(s, { kind: "manual", model: model.id, modelName: model.name ?? model.id, reason: "model chosen by hand; automatic choice stopped for this chat" }, (r) => {
+					r.auto = false;
+					r.floor = 0;
+				});
+			}
 			return state();
+		}
+		// The vision translator's choices for Settings: vision models from the metadata, the default approved list, and
+		// the translator a picture would go to now.
+		case "vision_translator_info": {
+			const models = routerCatalog();
+			const pick = visionTranslator(1);
+			return {
+				models: models.filter((m) => m.vision === true && m.credits !== undefined).map((m) => ({ id: m.id, name: m.name, credits: m.credits, available: m.available })),
+				defaultAllowed: defaultAllowed(models),
+				current: pick.ok ? { id: pick.model.id, name: pick.model.name, manual: pick.manual } : null,
+			};
+		}
+		// Screen companion (Fitur 5; companion.ts). Started and stopped only by the user; both are recorded in the chat.
+		case "companion_start": {
+			if (s.isStreaming) throw new Error("The agent is still working in this chat.");
+			companionSession = s.sessionId;
+			companionFrame = null;
+			s.sessionManager.appendCustomMessageEntry(COMPANION_RECORD, "Screen companion started by the user.", true, { event: "start", at: Date.now() });
+			send({ type: "companion", sessionId: s.sessionId, event: "start" });
+			return { active: true };
+		}
+		case "companion_stop": {
+			const was = companionSession;
+			companionSession = null;
+			companionFrame = null;
+			companionStep = false;
+			if (was) {
+				s.sessionManager.appendCustomMessageEntry(COMPANION_RECORD, "Screen companion stopped by the user.", true, { event: "stop", at: Date.now() });
+				send({ type: "companion", sessionId: was, event: "stop" });
+			}
+			return { active: false };
+		}
+		// One step: the user's words, and the screen as it is now (or the fact that it cannot be seen).
+		case "companion_turn": {
+			if (companionSession !== s.sessionId) throw new Error("The screen companion is not on in this chat.");
+			if (s.isStreaming) throw new Error("The agent is still working in this chat.");
+			checkBudget();
+			const goal = String(cmd.text ?? "").trim() || "Lanjut.";
+			const secure = cmd.secure === true;
+			const frame = cmd.frame;
+			if (!secure && (!frame || typeof frame.data !== "string" || typeof frame.mimeType !== "string")) throw new Error("No screen to look at");
+			await routeTurn(s, goal, secure ? 0 : 1, { step: true });
+			const meta = s.model?.provider === GRIPHUB_ID ? routerCatalog().find((m) => m.id === s.model!.id) : undefined;
+			if (!secure && !readsImages(meta)) throw new Error(COMPANION_NEEDS_VISION);
+			const nodes: TreeNode[] = Array.isArray(cmd.tree) ? cmd.tree : [];
+			companionFrame = secure ? null : { data: frame.data, mimeType: frame.mimeType, ...(nodes.length ? { tree: treeText(nodes) } : {}) };
+			const text = companionInstruction({ goal, tree: nodes.length > 0, width: Number(frame?.width) || 0, height: Number(frame?.height) || 0, secure });
+			companionStep = true;
+			s.prompt(text).catch((e) => {
+				// The step never ran: its frame goes, and the app is told the step ended (it stops "looking").
+				companionFrame = null;
+				if (companionStep) {
+					companionStep = false;
+					send({ type: "companion_pointer", sessionId: s.sessionId, pointer: null });
+				}
+				send({ type: "error", message: String(e?.message ?? e) });
+			});
+			return null;
+		}
+		// Scanning a document (Fitur 4): a photo read into text by a vision model through the router, for the user to ask
+		// about. The photo is not kept: the app deletes its copy; the reading's cost is in the chat like any request.
+		case "scan_document": {
+			const image = cmd.image;
+			if (!image || image.type !== "image" || typeof image.data !== "string" || typeof image.mimeType !== "string") {
+				throw new Error("No picture to scan");
+			}
+			// The translator's setting holds here too: off is off, and "ask first" asks (once per chat, as for a message).
+			const visionMode = integrations.settings.visionTranslator ?? "auto";
+			if (visionMode === "off") throw new Error(SCAN_OFF);
+			const pick = visionTranslator(1);
+			if (!pick.ok) throw new Error(VISION_NONE);
+			if (visionMode === "ask" && !visionConsent.given(s.sessionId)) {
+				if (cmd.visionConsent !== true) return { visionConsent: { model: pick.model.id, modelName: pick.model.name, estimate: estimateRead(pick.model, 1) } };
+				visionConsent.give(s.sessionId);
+			}
+			const reading = await readPictures(s, pick.model, [image], SCAN_INSTRUCTION, "full");
+			return { text: reading.text, model: reading.model, name: reading.name, credits: reading.credits };
+		}
+		// Agent memory (memory.ts).
+		case "memory_list": {
+			const t = memoryTarget(cmd);
+			return { entries: memoryStore.list(t.layer, t.project), host: mode === "server" ? "server" : "phone", on: integrations.settings.memory !== false };
+		}
+		case "memory_add": {
+			const t = memoryTarget(cmd);
+			return memoryStore.add(t.layer, String(cmd.text ?? ""), { project: t.project, source: "you" });
+		}
+		case "memory_update": {
+			const t = memoryTarget(cmd);
+			return memoryStore.update(t.layer, String(cmd.entryId ?? ""), String(cmd.text ?? ""), { project: t.project });
+		}
+		case "memory_remove": {
+			const t = memoryTarget(cmd);
+			return { removed: memoryStore.remove(t.layer, String(cmd.entryId ?? ""), t.project) };
+		}
+		case "memory_clear": {
+			const t = memoryTarget(cmd);
+			memoryStore.clear(t.layer, t.project);
+			return { cleared: true };
+		}
+		// The user's answer to a proposal card: save (as proposed, or with their own text) or refuse.
+		case "memory_decide": {
+			const p = memoryProposals.get(String(cmd.proposalId ?? ""));
+			if (!p) throw new Error("This proposal is no longer known");
+			if (p.status !== "pending") return p;
+			// Only the two answers there are: anything else (a typo, an older or newer app) saves nothing.
+			if (cmd.action !== "save" && cmd.action !== "reject") throw new Error("Unknown answer to a memory proposal");
+			if (cmd.action === "reject") {
+				p.status = "rejected";
+			} else {
+				const text = typeof cmd.text === "string" && cmd.text.trim() ? cmd.text : p.text;
+				const entry = memoryStore.add(p.layer, text, {
+					project: p.project ?? undefined,
+					source: s.sessionId === p.sessionId ? s.sessionName || "chat" : "chat",
+					sessionId: p.sessionId,
+					replaces: p.replaces ?? undefined,
+				});
+				p.status = "saved";
+				p.entryId = entry.id;
+				p.text = entry.text;
+			}
+			memoryProposals.put(p);
+			send({ type: "memory_proposal", proposal: p });
+			return p;
+		}
+		case "memory_proposals":
+			return memoryProposals.many(Array.isArray(cmd.ids) ? cmd.ids.map(String) : []);
+		// What a chat started with (the open one by default): the snapshot it keeps.
+		case "memory_snapshot": {
+			if (typeof cmd.path === "string" && cmd.path) {
+				const sessions = resolve(join(agentDir, "sessions"));
+				const path = resolve(cmd.path);
+				if (!path.startsWith(sessions + sep) || !existsSync(path)) throw new Error("Not a chat of this agent");
+				return chatSnapshot(SessionManager.open(path));
+			}
+			return chatSnapshot(s.sessionManager);
+		}
+		// The whole output of a verification run, for the evidence block's "show all".
+		case "verify_output":
+			return { output: verifyOutputs.read(String(cmd.outputId ?? "")) };
+		case "smart_router_set":
+			setSmartRouter(s, !!cmd.on);
+			return state();
+		// The open chat's routing decisions (or another chat's, by session id), oldest first.
+		case "routing_log": {
+			const id = typeof cmd.sessionId === "string" && cmd.sessionId ? cmd.sessionId : s.sessionId;
+			const r = routing.get(id);
+			return { sessionId: id, auto: r.auto && smartRouterOn(), floor: r.floor, log: r.log };
 		}
 		case "set_thinking":
 			s.setThinkingLevel(cmd.level, { persist: true });
@@ -1657,7 +2494,8 @@ async function handle(cmd: Command): Promise<unknown> {
 				name: info.name ?? null,
 				modified: info.modified.getTime(),
 				messageCount: info.messageCount,
-				firstMessage: info.firstMessage,
+				// What the user wrote, without a picture's reading (visiontranslate.ts).
+				firstMessage: typeof info.firstMessage === "string" ? stripReadings(info.firstMessage) : info.firstMessage,
 			}));
 		case "open_session":
 			if (s.sessionFile && resolve(cmd.path) === resolve(s.sessionFile)) return state();
@@ -1691,6 +2529,34 @@ async function handle(cmd: Command): Promise<unknown> {
 				const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
 				return ms === undefined ? out : { ...out, griphubTurnMs: ms };
 			});
+		}
+		// Another chat, read from its file without opening it (Fitur 8): the app shows it read-only while the open chat
+		// works. Only chat files of this host; nothing about the open chat changes, so the one chat at work stays the
+		// one chat at work.
+		case "session_read": {
+			const sessions = resolve(join(agentDir, "sessions"));
+			const path = resolve(String(cmd.path ?? ""));
+			if (!path.startsWith(sessions + sep) || !path.endsWith(".jsonl")) throw new Error("Not a chat of this agent");
+			if (!existsSync(path)) throw new Error("This chat no longer exists");
+			const sm = SessionManager.open(path);
+			const times = new Map<number, number>();
+			for (const e of sm.getBranch() as any[]) {
+				if (e.type === "custom" && e.customType === TURN_TIME && typeof e.data?.at === "number") times.set(e.data.at, e.data.ms);
+			}
+			const cwd = sm.getCwd();
+			return {
+				path,
+				sessionId: sm.getSessionId(),
+				sessionName: sm.getSessionName() ?? null,
+				cwd,
+				chatMode: modeOf(cwd, workspace),
+				// What the open chat would hold (session.messages): the built context also carries the system prompt.
+				messages: (sm.buildSessionContext().messages as any[]).filter((m) => m?.role !== "system").map((m) => {
+					const out = withCost(m);
+					const ms = m.role === "assistant" ? times.get(m.timestamp) : undefined;
+					return ms === undefined ? out : { ...out, griphubTurnMs: ms };
+				}),
+			};
 		}
 		case "summarized_messages":
 			return summarizedMessages(s).map(withCost);
@@ -1855,7 +2721,7 @@ async function handle(cmd: Command): Promise<unknown> {
 		case "tunnels":
 			return tunnels.list();
 		case "usage":
-			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30, estimateUsage);
+			return usageSummary(join(agentDir, "sessions"), cmd.days ?? 30, estimateUsage, undefined, USAGE_LEDGER);
 
 		// Prompt templates: slash commands pi expands.
 		case "templates":
@@ -2295,6 +3161,11 @@ async function main() {
 		fallbackRates: FALLBACK_RATES,
 	});
 	usePricingRouter(router);
+	routing = new RoutingStore(join(stateDir, "routing"));
+	visionConsent = new VisionConsent(join(stateDir, "vision"));
+	verifyOutputs = new VerifyOutputs(join(stateDir, "verify-output"));
+	memoryStore = new MemoryStore(join(stateDir, "memory"));
+	memoryProposals = new Proposals(join(stateDir, "memory", "proposals.json"));
 	modelBoard = new ModelBoard({
 		key: () => customProviders?.key(GRIPHUB_ID) ?? "",
 		cacheFile: join(stateDir, "model-board-cache.json"),

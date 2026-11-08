@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import 'agent_client.dart';
 import 'agent_fs.dart';
 import 'clock.dart';
+import 'drafts.dart';
 import 'features.dart';
 import 'host_messages.dart';
 import 'integrations.dart';
@@ -21,6 +24,12 @@ enum BootStatus { starting, ready, failed }
 
 /// App-wide agent state: boot, the active session's transcript rebuilt from
 /// pi's event stream, and model/provider selection.
+/// A scan waits for the user's yes to a paid reading ("ask first" in Settings → Vision translator).
+class ScanNeedsConsent implements Exception {
+  ScanNeedsConsent(this.ask);
+  final VisionAsk ask;
+}
+
 class AgentController extends ChangeNotifier {
   AgentController(this.client) : features = Features(client) {
     client.records.listen(_onRecord);
@@ -62,6 +71,64 @@ class AgentController extends ChangeNotifier {
 
   /// Set when the current model is billed differently than the user may expect.
   String? billingNotice;
+
+  /// Who asks whether a vision model may read a picture for this chat ("ask first" in Settings → Vision translator):
+  /// every chat screen on screen adds itself and removes itself when it goes, and the newest one asks. A stack, not
+  /// one slot: the panel's chat and the app's (kept underneath) are both alive, and the one that closes must not take
+  /// the other's question away.
+  final _visionConfirmers = <Future<bool> Function(VisionAsk ask)>[];
+
+  void addVisionConfirmer(Future<bool> Function(VisionAsk ask) ask) => _visionConfirmers.add(ask);
+
+  void removeVisionConfirmer(Future<bool> Function(VisionAsk ask) ask) => _visionConfirmers.remove(ask);
+
+  static VisionAsk? _visionAsk(Object? r) =>
+      r is Map && r['visionConsent'] is Map ? VisionAsk((r['visionConsent'] as Map).cast<String, dynamic>()) : null;
+
+  /// Nobody to ask (no chat on screen): the message is not sent, and the chat says why instead of nothing happening.
+  Future<bool> _confirmVision(VisionAsk ask) async {
+    if (_visionConfirmers.isEmpty) {
+      _addNotice(translate('The picture was not sent: open the chat to allow a vision model to read it.'), error: true);
+      return false;
+    }
+    return _visionConfirmers.last(ask);
+  }
+
+  /// A photographed document read into text by a vision model through the router (Fitur 4); null when nothing was read.
+  /// With "ask first" in Settings and no yes in this chat yet, throws [ScanNeedsConsent]: the caller asks, then calls
+  /// again with [consent].
+  Future<({String text, String name, double? credits})?> scanDocument(File photo, {bool consent = false}) async {
+    final bytes = await photo.readAsBytes();
+    final lower = photo.path.toLowerCase();
+    final mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+    final r = (await client.call<Map>('scan_document', {
+      'image': {'type': 'image', 'data': base64Encode(bytes), 'mimeType': mime},
+      if (consent) 'visionConsent': true,
+    })).cast<String, dynamic>();
+    if (_visionAsk(r) case final ask?) throw ScanNeedsConsent(ask);
+    final text = r['text'] as String? ?? '';
+    return text.trim().isEmpty ? null : (text: text, name: r['name'] as String? ?? '', credits: (r['credits'] as num?)?.toDouble());
+  }
+
+  /// The verification command running now for the open chat (agent/src/verify.ts), for the activity line; null when
+  /// none runs.
+  String? verifying;
+
+  /// The whole output of a verification run.
+  Future<String> verifyOutput(String id) async =>
+      ((await client.call<Map>('verify_output', {'outputId': id}))['output'] as String?) ?? '';
+
+  /// Smart router ("Otomatis (Pintar)") for the open chat.
+  SmartRouterState smartRouter = const SmartRouterState();
+
+  /// The open chat's routing decisions, oldest first (loaded with the chat, then added to as they happen).
+  List<RoutingDecision> routingLog = const [];
+
+  /// User turns (0-based) whose model the smart router picked: their footers say so.
+  Set<int> get autoRoutedTurns => {
+    for (final d in routingLog)
+      if (d.kind == 'route') d.turn,
+  };
 
   /// Plan mode: the agent plans first and changes nothing until approved.
   bool planMode = false;
@@ -423,6 +490,7 @@ class AgentController extends ChangeNotifier {
   Future<bool> send(String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
+    if (sendLocked) return false;
     if (_mustWait) return _hold(trimmed);
     try {
       _noteQueued(await client.call<Object?>('prompt', {'text': trimmed}));
@@ -549,8 +617,86 @@ class AgentController extends ChangeNotifier {
   @visibleForTesting
   static Duration stopToSwitchTimeout = const Duration(seconds: 10);
 
+  // -------------------------------------------------------------------------
+  // Browsing while the agent works (Fitur 8): looking is never locked, only sending is.
+
+  /// Another chat shown read-only while the open chat (the one at work) works; null when the open chat is shown.
+  ChatView? viewing;
+
+  /// Chats whose turn ended while the user looked elsewhere: the chat list marks them until opened.
+  final finishedUnseen = <String>{};
+
+  /// Says "`chat` is done" when the chat at work ends while another is on screen (the chat screen shows it quietly).
+  final viewFinished = StreamController<String>.broadcast();
+
+  /// Sending is locked: another chat is on screen while this one works.
+  bool get sendLocked => viewing != null;
+
+  /// Shows [path] read-only, or the open chat again when it is the open one.
+  Future<void> _view(String path) async {
+    if (path == sessionFile) return leaveView();
+    final v = ChatView.chat(path);
+    viewing = v;
+    notifyListeners();
+    try {
+      final r = (await client.call<Map>('session_read', {'path': path})).cast<String, dynamic>();
+      v
+        ..sessionId = r['sessionId'] as String?
+        ..name = r['sessionName'] as String?
+        ..isChat = r['chatMode'] == 'chat';
+      final sid = v.sessionId;
+      var ordinal = 0;
+      for (final m in (r['messages'] as List? ?? const []).cast<Map>()) {
+        final msg = m.cast<String, dynamic>();
+        addSavedMessage(
+          msg,
+          v.entries,
+          v.tools,
+          attached: msg['role'] == 'user' ? SentAttachments.instance.forMessage(sid, ordinal++) : const [],
+        );
+      }
+    } catch (e) {
+      v.error = e;
+    }
+    v.loaded = true;
+    if (identical(viewing, v)) notifyListeners();
+  }
+
+  /// Back to the open chat (the one at work), as it is now.
+  void leaveView() {
+    if (viewing == null) return;
+    viewing = null;
+    notifyListeners();
+  }
+
+  /// The open chat's turn ended while another chat was on screen: that chat opens for real now (the agent is free),
+  /// and its composer works. Waits a moment first: a queued follow-up starts the next turn at once.
+  void _unlockViewSoon() {
+    final chat = sessionFile;
+    final title = chatTitle;
+    Timer(const Duration(milliseconds: 400), () async {
+      final v = viewing;
+      if (v == null || busy) return;
+      if (chat != null) finishedUnseen.add(chat);
+      viewFinished.add(title);
+      try {
+        if (v.isNew) {
+          // What the waiting chat was given (a share, a selection, a quick start) comes along into the real one.
+          await _newSession(dir: v.newDir, chat: v.newChatMode, draftFrom: v.key);
+        } else if (await openSession(v.path!) && v.retryWhenFree && viewing == null) {
+          await retry();
+        }
+      } catch (e) {
+        switchProblems.add('$e');
+      }
+      if (identical(viewing, v)) viewing = null;
+      notifyListeners();
+    });
+  }
+
   /// Whether a chat switch may go ahead: always when idle; while the agent
-  /// works only if the user agrees to stop it, then once it has stopped.
+  /// works only if the user agrees to stop it, then once it has stopped. Opening or starting another chat no longer
+  /// asks (it is shown read-only instead, see [viewing]); only rewinding the chat at work (edit, fork) still does.
   Future<bool> readyToSwitch() async {
     if (!busy) return true;
     final ask = confirmStopToSwitch;
@@ -606,19 +752,44 @@ class AgentController extends ChangeNotifier {
   /// Starts a session, in [dir] when given (a project folder), else the workspace. With [chat], a plain conversation
   /// instead (agent/src/chatmode.ts): the host gives it its own folder, so [dir] does not count then. False when the
   /// user kept the running turn instead, or another switch is still under way.
-  Future<bool> newSession({String? dir, bool chat = false}) => _switch(newChatKey(dir, chat: chat), () async {
-    _applyState(
-      await client.call<Map<String, dynamic>>('new_session', chat ? {'chatMode': 'chat'} : {'cwd': ?dir}),
-    );
-    _resetTranscript();
-  });
+  Future<bool> newSession({String? dir, bool chat = false}) async {
+    // The agent works in the open chat: the new chat waits, read-only, and starts once it is free.
+    if (busy) {
+      viewing = ChatView.newChat(newDir: dir, newChatMode: chat);
+      notifyListeners();
+      return true;
+    }
+    return _newSession(dir: dir, chat: chat);
+  }
+
+  /// [draftFrom]: the key a read-only "new chat" kept its draft under; it moves to the new chat's id before anyone is
+  /// told, so the composer opens with it.
+  Future<bool> _newSession({String? dir, bool chat = false, String? draftFrom}) =>
+      _switch(newChatKey(dir, chat: chat), () async {
+        viewing = null;
+        _applyState(
+          await client.call<Map<String, dynamic>>('new_session', chat ? {'chatMode': 'chat'} : {'cwd': ?dir}),
+        );
+        if (draftFrom != null) Drafts.instance.move(draftFrom, sessionId);
+        _resetTranscript();
+      });
 
   /// Opens another chat. False when the user kept the running turn instead, or another switch is still under way.
   Future<bool> openSession(String path) async {
-    if (path == sessionFile && switchingTo == null) return true;
+    finishedUnseen.remove(path);
+    if (path == sessionFile && switchingTo == null) {
+      leaveView();
+      return true;
+    }
+    // The agent works in the open chat: show this one read-only, without a question and without stopping anything.
+    if (busy) {
+      await _view(path);
+      return true;
+    }
     return _switch(path, () async {
       _applyState(await client.call<Map<String, dynamic>>('open_session', {'path': path}));
       await loadHistory();
+      viewing = null;
     });
   }
 
@@ -673,6 +844,94 @@ class AgentController extends ChangeNotifier {
       final q = await client.call<Object?>('prompt_queue');
       if (q is List) _applyQueue({'items': q});
     } catch (_) {}
+    await _loadRoutingLog();
+    await _loadMemoryDecisions();
+    notifyListeners();
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent memory (agent/src/memory.ts)
+
+  /// The agent's memory proposals by id, as decided so far (their cards show Save / Edit / Refuse until then).
+  final memoryProposals = <String, MemoryProposal>{};
+
+  /// What the user decided about the proposals in the loaded chat.
+  Future<void> _loadMemoryDecisions() async {
+    // Ids as the host wrote them; anything else in a saved chat (another type, a hand-edited file) is passed over.
+    final ids = [
+      for (final r in tools.values)
+        if (r.details?['proposal'] case {'id': final String id} when id.isNotEmpty) id,
+    ];
+    if (ids.isEmpty) return;
+    try {
+      final r = (await client.call<Map>('memory_proposals', {'ids': ids})).cast<String, dynamic>();
+      for (final v in r.values) {
+        final p = MemoryProposal((v as Map).cast<String, dynamic>());
+        memoryProposals[p.id] = p;
+      }
+    } catch (_) {}
+  }
+
+  /// Saves a proposal (as proposed, or with the user's [text]) or refuses it.
+  Future<void> decideMemory(String proposalId, {required bool save, String? text}) async {
+    final r = await client.call<Map>('memory_decide', {
+      'proposalId': proposalId,
+      'action': save ? 'save' : 'reject',
+      'text': ?text,
+    });
+    final p = MemoryProposal(r.cast<String, dynamic>());
+    memoryProposals[p.id] = p;
+    notifyListeners();
+  }
+
+  Map<String, dynamic> _memoryArgs(String layer, String? project) => {'layer': layer, 'project': ?project};
+
+  /// A layer's entries, where they are kept (phone or server), and whether memory is on.
+  Future<({List<MemoryEntry> entries, String host, bool on})> memoryList(String layer, {String? project}) async {
+    final r = (await client.call<Map>('memory_list', _memoryArgs(layer, project))).cast<String, dynamic>();
+    return (
+      entries: [for (final e in (r['entries'] as List? ?? const [])) MemoryEntry((e as Map).cast<String, dynamic>())],
+      host: r['host'] as String? ?? 'phone',
+      on: r['on'] != false,
+    );
+  }
+
+  Future<void> memoryAdd(String layer, String text, {String? project}) =>
+      client.call('memory_add', {..._memoryArgs(layer, project), 'text': text});
+
+  Future<void> memoryUpdate(String layer, String id, String text, {String? project}) =>
+      client.call('memory_update', {..._memoryArgs(layer, project), 'entryId': id, 'text': text});
+
+  Future<void> memoryRemove(String layer, String id, {String? project}) =>
+      client.call('memory_remove', {..._memoryArgs(layer, project), 'entryId': id});
+
+  Future<void> memoryClear(String layer, {String? project}) => client.call('memory_clear', _memoryArgs(layer, project));
+
+  /// What a chat started with (the open one when [path] is null); null when it kept none.
+  Future<MemorySnapshotInfo?> memorySnapshot([String? path]) async {
+    final r = await client.call<Object?>('memory_snapshot', {'path': ?path});
+    return r is Map ? MemorySnapshotInfo(r.cast<String, dynamic>()) : null;
+  }
+
+  /// The open chat's routing log; an older host without the smart router has none.
+  Future<void> _loadRoutingLog() async {
+    try {
+      final r = (await client.call<Map>('routing_log')).cast<String, dynamic>();
+      routingLog = [for (final d in (r['log'] as List? ?? const [])) RoutingDecision((d as Map).cast<String, dynamic>())];
+    } catch (_) {
+      routingLog = const [];
+    }
+  }
+
+  /// A chat's routing log by session id (the open chat's when null), for its details screen.
+  Future<List<RoutingDecision>> routingLogOf([String? id]) async {
+    final r = (await client.call<Map>('routing_log', {'sessionId': ?id})).cast<String, dynamic>();
+    return [for (final d in (r['log'] as List? ?? const [])) RoutingDecision((d as Map).cast<String, dynamic>())];
+  }
+
+  /// Turns "Otomatis (Pintar)" on or off for the open chat. Picking a model by hand ([setModel]) also turns it off.
+  Future<void> setSmartRouter(bool on) async {
+    _applyState(await client.call<Map<String, dynamic>>('smart_router_set', {'on': on}));
     notifyListeners();
   }
 
@@ -726,14 +985,24 @@ class AgentController extends ChangeNotifier {
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && images.isEmpty) return false;
+    // Another chat is on screen while this one works: nothing is sent from it, whatever asked (Fitur 8).
+    if (sendLocked) return false;
     final body = trimmed.isEmpty ? 'See the attached image.' : trimmed;
     if (_mustWait) return _hold(body, images: images, attachments: attachments);
     queueSentAttachments(attachments);
     try {
-      final r = await client.call<Object?>('prompt', {
+      var r = await client.call<Object?>('prompt', {
         'text': body,
         'images': images,
       });
+      // "Ask first": a picture for a model that cannot read it waits for a yes before the paid reading.
+      if (_visionAsk(r) case final ask?) {
+        if (!await _confirmVision(ask)) {
+          retractSentAttachments(attachments);
+          return false;
+        }
+        r = await client.call<Object?>('prompt', {'text': body, 'images': images, 'visionConsent': true});
+      }
       _noteQueued(r, attachments);
       return true;
     } on AgentError catch (e) {
@@ -790,8 +1059,21 @@ class AgentController extends ChangeNotifier {
 
   /// Tries the last failed request again (on the current model, which may have been changed since).
   Future<void> retry() async {
+    // Another chat on screen while this one works: Try again (a notification's too) waits until it is free, then runs
+    // in that chat; the locked composer says so meanwhile.
+    if (sendLocked) {
+      final v = viewing!;
+      if (!v.isNew && !v.retryWhenFree) {
+        v.retryWhenFree = true;
+        notifyListeners();
+      }
+      return;
+    }
     try {
-      await client.call('retry');
+      final r = await client.call<Object?>('retry');
+      if (_visionAsk(r) case final ask?) {
+        if (await _confirmVision(ask)) await client.call<Object?>('retry', {'visionConsent': true});
+      }
     } on AgentError catch (e) {
       _addNotice(e.message, error: true);
     }
@@ -970,6 +1252,27 @@ class AgentController extends ChangeNotifier {
       case 'state':
         _applyState((record['state'] as Map).cast<String, dynamic>());
         notifyListeners();
+      // A memory proposal was made or decided (agent/src/memory.ts).
+      case 'memory_proposal':
+        final p = MemoryProposal((record['proposal'] as Map).cast<String, dynamic>());
+        memoryProposals[p.id] = p;
+        notifyListeners();
+      // "ingat ini": kept at once, or refused (a secret, not a fact): said quietly in the chat.
+      case 'memory_saved':
+        final entry = (record['entry'] as Map?)?['text'] as String? ?? '';
+        _addNotice(translate('Remembered: {fact}').replaceAll('{fact}', entry));
+      case 'memory_refused':
+        _addNotice('${translate('Not remembered')}: ${translate(record['reason'] as String? ?? '')}');
+      // Self-verification's check started or ended (agent/src/verify.ts).
+      case 'verify' when record['sessionId'] == null || record['sessionId'] == sessionId:
+        verifying = record['phase'] == 'running' ? record['command'] as String? : null;
+        notifyListeners();
+      // A routing decision of the open chat, as it happened (agent/src/smartrouter.ts).
+      case 'routing' when record['sessionId'] == sessionId:
+        routingLog = [...routingLog, RoutingDecision((record['decision'] as Map).cast<String, dynamic>())];
+        final sr = record['smartRouter'];
+        if (sr is Map) smartRouter = SmartRouterState.fromJson(sr.cast<String, dynamic>());
+        notifyListeners();
       case 'error':
         _addNotice(readableError(record['message'] as String? ?? 'Error'), error: true);
       // A server link that could not replay what it missed: reload instead.
@@ -1023,6 +1326,7 @@ class AgentController extends ChangeNotifier {
         run.output = contentText((e['result'] as Map?)?['content']);
         run.images = contentImageData((e['result'] as Map?)?['content']);
         run.imageJob = ImageJob.fromDetails((e['result'] as Map?)?['details']) ?? run.imageJob;
+        run.details = ((e['result'] as Map?)?['details'] as Map?)?.cast<String, dynamic>();
         run.status = e['isError'] == true ? ToolStatus.failed : ToolStatus.done;
         runningTool = null;
       // The older turns are being summarized; the line it adds runs a clock until compaction_end says how it went.
@@ -1116,7 +1420,8 @@ class AgentController extends ChangeNotifier {
   }) {
     switch (m['role']) {
       case 'user':
-        entries.add(UserEntry(contentText(m['content']), images: contentImages(m['content']), attachments: attached));
+        final (text, reads) = splitVisionReads(contentText(m['content']));
+        entries.add(UserEntry(text, images: contentImages(m['content']), attachments: attached, visionReads: reads));
       case 'assistant':
         entries.add(
           AssistantEntry()
@@ -1128,6 +1433,7 @@ class AgentController extends ChangeNotifier {
         run.output = contentText(m['content']);
         run.images = contentImageData(m['content']);
         run.imageJob = ImageJob.fromDetails(m['details']);
+        run.details = (m['details'] as Map?)?.cast<String, dynamic>();
         run.status = m['isError'] == true ? ToolStatus.failed : ToolStatus.done;
       case 'bashExecution':
         entries.add(NoticeEntry('\$ ${m['command']}\n${m['output']}'));
@@ -1140,6 +1446,9 @@ class AgentController extends ChangeNotifier {
       case 'custom' when m['customType'] == 'griphub_job':
         final job = (m['details'] as Map?)?['job'];
         if (job is Map) entries.add(JobEntry(job.cast<String, dynamic>()));
+      case 'custom' when m['customType'] == 'griphub_verify':
+        final details = m['details'];
+        if (details is Map) entries.add(VerifyEntry(details.cast<String, dynamic>()));
     }
   }
 
@@ -1219,6 +1528,8 @@ class AgentController extends ChangeNotifier {
   void _setBusy(bool value) {
     if (busy == value) return;
     busy = value;
+    if (!value) verifying = null;
+    if (!value && viewing != null) _unlockViewSoon();
     // The foreground service keeps this phone's agent alive; a server agent needs nothing from the phone.
     if (!client.isRemote) client.setBusy(value);
     features.setChatBusy(value);
@@ -1240,6 +1551,7 @@ class AgentController extends ChangeNotifier {
     // Said with every chat's state; an answer without it (an older host) is a coding chat's.
     isChat = s['chatMode'] == 'chat';
     billingNotice = s['billingNotice'] as String?;
+    smartRouter = SmartRouterState.fromJson((s['smartRouter'] as Map?)?.cast<String, dynamic>());
     planMode = s['planMode'] == true;
     approvalMode = s['approvalMode'] as String? ?? approvalMode;
     if (s['isStreaming'] is bool) _setBusy(s['isStreaming'] as bool);
@@ -1278,6 +1590,7 @@ class AgentController extends ChangeNotifier {
     _notifyTimer?.cancel();
     authRecords.close();
     switchProblems.close();
+    viewFinished.close();
     super.dispose();
   }
 }

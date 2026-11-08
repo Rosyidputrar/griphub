@@ -80,6 +80,12 @@ export type CustomModel = {
 	/** False when the endpoint says effort levels make no difference: thinking is just on (or off). */
 	effort?: boolean;
 	input?: string[];
+	/**
+	 * What /v1/models says outright, kept apart from [input]: true or false when the endpoint names the capability,
+	 * absent when it does not. Features that pick a model by themselves (modelcaps.ts) only trust these.
+	 */
+	vision?: boolean;
+	tools?: boolean;
 };
 
 /** A model as saved: only known fields, with sane types. */
@@ -94,6 +100,8 @@ function cleanModel(m: any): CustomModel {
 		...(m.reasoning === true && typeof m.canDisableThinking === "boolean" && { canDisableThinking: m.canDisableThinking }),
 		...(m.reasoning === true && m.effort === false && { effort: false }),
 		...(Array.isArray(m.input) && m.input.includes("image") && { input: ["text", "image"] }),
+		...(typeof m.vision === "boolean" && { vision: m.vision }),
+		...(typeof m.tools === "boolean" && { tools: m.tools }),
 	};
 }
 
@@ -297,9 +305,16 @@ export function capabilitiesOf(m: any): Omit<CustomModel, "id" | "name"> {
 			params.includes("reasoning") ||
 			params.includes("include_reasoning") ||
 			params.includes("reasoning_effort"));
+	const visionSaid = flag(caps.vision, supports.vision, m.vision);
 	const vision =
-		flag(caps.vision, supports.vision, m.vision) ??
+		visionSaid ??
 		(list.includes("vision") || list.includes("image") || m.type === "vlm" || modalities.includes?.("image"));
+	// Tool calling, only as the endpoint states it: an object flag, a capability name, or a supported parameter.
+	const toolsSaid =
+		flag(caps.tools, caps.toolCalling, caps.function_calling, supports.tools, supports.tool_calls, m.tools) ??
+		(list.includes("tools") || list.includes("tool_calls") || list.includes("function_calling") || params.includes("tools")
+			? true
+			: undefined);
 
 	// The prompt limit, when smaller, is what actually fits (a proxy may refuse prompts past it).
 	const context = first(
@@ -330,6 +345,8 @@ export function capabilitiesOf(m: any): Omit<CustomModel, "id" | "name"> {
 		...(reasoning && canDisable !== undefined && { canDisableThinking: canDisable }),
 		...(reasoning && flag(caps.thinkingEffortSupported, caps.reasoningEffortSupported) === false && { effort: false }),
 		...(vision && { input: ["text", "image"] }),
+		...(typeof visionSaid === "boolean" ? { vision: visionSaid } : vision ? { vision: true } : {}),
+		...(typeof toolsSaid === "boolean" && { tools: toolsSaid }),
 	};
 }
 

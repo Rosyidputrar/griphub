@@ -146,9 +146,13 @@ class SessionSummary {
 sealed class ChatEntry {}
 
 class UserEntry extends ChatEntry {
-  UserEntry(this.text, {this.images = 0, this.attachments = const []});
+  UserEntry(this.text, {this.images = 0, this.attachments = const [], this.visionReads = const []});
   final String text;
   final int images;
+
+  /// The pictures of this message (or of an earlier one it asks about) read into text by a vision model for a model
+  /// that cannot read them (agent/src/visiontranslate.ts). Hidden from the bubble; the answer's footer names the reader.
+  final List<VisionRead> visionReads;
 
   /// Files/pictures sent with this message, from the sent-attachments
   /// store. Empty for messages sent before attachment display existed:
@@ -292,6 +296,33 @@ class CompactionEntry extends ChatEntry {
 
 /// A background job's result coming back to its chat: a notice, not a bubble (the user did not send it), and the start
 /// of the turn in which the agent carries on with it.
+/// Evidence of self-verification (agent/src/verify.ts): the project's check, run by the app in this session after the
+/// agent changed files. A block of its own in the chat, never a tool card.
+class VerifyEntry extends ChatEntry {
+  VerifyEntry(Map<String, dynamic> details)
+    : evidence = (details['evidence'] as Map? ?? const {}).cast<String, dynamic>(),
+      next = details['next'] as String? ?? 'close';
+  final Map<String, dynamic> evidence;
+
+  /// What the agent was told to do next: fix (another round) or close.
+  final String next;
+
+  /// passed, failed, none (no test could be run), declined (not allowed to run) or tests-changed.
+  String get status => evidence['status'] as String? ?? 'none';
+  String? get command => evidence['command'] as String?;
+  String? get source => evidence['source'] as String?;
+  int? get exitCode => (evidence['exitCode'] as num?)?.toInt();
+  Duration get took => Duration(milliseconds: (evidence['durationMs'] as num?)?.toInt() ?? 0);
+  String get summary => evidence['summary'] as String? ?? '';
+  String? get outputId => evidence['outputId'] as String?;
+  int get round => (evidence['round'] as num?)?.toInt() ?? 0;
+  int get maxRounds => (evidence['maxRounds'] as num?)?.toInt() ?? 0;
+  List<String> get testsTouched => (evidence['testsTouched'] as List? ?? const []).whereType<String>().toList();
+  String? get reason => evidence['reason'] as String?;
+  bool get timedOut => evidence['timedOut'] == true;
+  bool get passed => status == 'passed';
+}
+
 class JobEntry extends ChatEntry {
   JobEntry(this.job);
 
@@ -320,6 +351,9 @@ class ToolRun {
 
   /// generate_image's progress and result (its `details`), while running and once done.
   ImageJob? imageJob;
+
+  /// The result's `details`, for tools whose card reads them (remember: the memory proposal).
+  Map<String, dynamic>? details;
 }
 
 /// One picture of a generate_image call.
@@ -435,6 +469,41 @@ String contentText(dynamic content) {
     return content.whereType<Map>().where((c) => c['type'] == 'text').map((c) => c['text'] as String? ?? '').join('\n');
   }
   return '';
+}
+
+/// One reading of pictures by the vision translator, as the host adds it to the user's turn.
+class VisionRead {
+  const VisionRead({required this.model, required this.name, required this.kind, this.credits});
+  final String model;
+  final String name;
+
+  /// full (the pictures of this message) or targeted (a detail of an earlier one, for a question about it).
+  final String kind;
+  final double? credits;
+}
+
+final _visionBlock = RegExp(r'\n*<griphub-vision\b([^>]*)>[\s\S]*?</griphub-vision>');
+final _visionAttr = RegExp(r'(\w+)="([^"]*)"');
+
+String _unescapeAttr(String v) =>
+    v.replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
+
+/// A user message's text split into what the user wrote and the readings the host added to it.
+(String, List<VisionRead>) splitVisionReads(String text) {
+  if (!text.contains('<griphub-vision')) return (text, const []);
+  final reads = <VisionRead>[];
+  for (final m in _visionBlock.allMatches(text)) {
+    final a = {for (final x in _visionAttr.allMatches(m.group(1) ?? '')) x.group(1)!: _unescapeAttr(x.group(2)!)};
+    reads.add(
+      VisionRead(
+        model: a['model'] ?? '',
+        name: a['name'] ?? a['model'] ?? '',
+        kind: a['kind'] ?? 'full',
+        credits: double.tryParse(a['credits'] ?? ''),
+      ),
+    );
+  }
+  return (text.replaceAll(_visionBlock, '').trimRight(), reads);
 }
 
 int contentImages(dynamic content) =>
@@ -732,4 +801,171 @@ class QueuedPrompt {
   final String id;
   final String text;
   final int images;
+}
+
+/// The smart router's state for the open chat (agent/src/smartrouter.ts): whether Settings allow it, whether this chat
+/// picks its model automatically, and the class floor earlier failures raised it to.
+class SmartRouterState {
+  const SmartRouterState({this.enabled = false, this.auto = false, this.floor = 0});
+  factory SmartRouterState.fromJson(Map<String, dynamic>? j) => j == null
+      ? const SmartRouterState()
+      : SmartRouterState(
+          enabled: j['enabled'] == true,
+          auto: j['auto'] == true,
+          floor: (j['floor'] as num?)?.toInt() ?? 0,
+        );
+  final bool enabled;
+  final bool auto;
+  final int floor;
+}
+
+/// One entry of a chat's routing log: a model picked for a turn, a class climbed, nothing fitting, a hand pick.
+class RoutingDecision {
+  RoutingDecision(Map<String, dynamic> j)
+    : at = DateTime.fromMillisecondsSinceEpoch((j['at'] as num?)?.toInt() ?? 0),
+      turn = (j['turn'] as num?)?.toInt() ?? 0,
+      kind = j['kind'] as String? ?? 'route',
+      model = j['model'] as String?,
+      modelName = j['modelName'] as String?,
+      band = (j['band'] as num?)?.toInt(),
+      difficulty = (j['difficulty'] as num?)?.toInt(),
+      reason = j['reason'] as String? ?? '',
+      why = (j['why'] as List? ?? const []).whereType<String>().toList(),
+      estimate = (j['estimate'] as num?)?.toDouble();
+  final DateTime at;
+
+  /// User turns before the one this decision was for: the first message of a chat is turn 0.
+  final int turn;
+
+  /// route, none, escalate, manual, on, off or fallback.
+  final String kind;
+  final String? model;
+  final String? modelName;
+  final int? band;
+  final int? difficulty;
+  final String reason;
+
+  /// The reason as codes (agent/src/smartrouter.ts Decision.why), worded by the app.
+  final List<String> why;
+  final double? estimate;
+}
+
+/// The host asks before a paid reading of a picture (Settings → Vision translator → Ask first): which model would read
+/// it, and about what it would cost.
+class VisionAsk {
+  VisionAsk(Map<String, dynamic> j)
+    : model = j['model'] as String? ?? '',
+      modelName = j['modelName'] as String? ?? j['model'] as String? ?? '',
+      estimate = (j['estimate'] as num?)?.toDouble();
+  final String model;
+  final String modelName;
+  final double? estimate;
+}
+
+/// A chat shown read-only while the open chat works (Fitur 8): read from its file (host `session_read`), never opened
+/// on the host, so the chat at work stays the only one. A chat not started yet ([isNew]) waits the same way.
+class ChatView {
+  ChatView.chat(String this.path) : newDir = null, newChatMode = false;
+  ChatView.newChat({this.newDir, this.newChatMode = false}) : path = null, loaded = true;
+
+  /// The chat's file; null for a new chat that starts once the agent is free.
+  final String? path;
+  final String? newDir;
+  final bool newChatMode;
+  bool get isNew => path == null;
+
+  String? sessionId;
+  String? name;
+  bool isChat = false;
+  bool loaded = false;
+  Object? error;
+
+  /// Try again was asked for this chat (a notification's) while the agent worked elsewhere: it runs once the chat
+  /// opens for real.
+  bool retryWhenFree = false;
+  final entries = <ChatEntry>[];
+  final tools = <String, ToolRun>{};
+
+  /// What its draft is kept under: the chat's id once known (as when it is open), else its file or new-chat key.
+  String get key => sessionId ?? path ?? 'new:${newChatMode ? 'chat' : newDir ?? ''}';
+
+  /// No name and no message yet: [title] is then the English stand-in, to be shown translated.
+  bool get untitled =>
+      (name == null || name!.trim().isEmpty) && (entries.whereType<UserEntry>().firstOrNull?.text.trim().isEmpty ?? true);
+
+  /// Its title, as the open chat's: a name, else the first message.
+  String get title {
+    if (name != null && name!.trim().isNotEmpty) return name!;
+    final first = entries.whereType<UserEntry>().firstOrNull?.text.trim();
+    return first == null || first.isEmpty ? 'New chat' : first.split('\n').first;
+  }
+}
+
+/// The last verification evidence in the turn that entry [i] ends (from the turn's user message, or job result, to
+/// [i]), for the quiet note above that entry's footer; null when the turn has none, and when the evidence block is
+/// right above entry [i]: the block says it already, and the signal is said once.
+VerifyEntry? lastVerifyOfTurn(List<ChatEntry> entries, int i) {
+  for (var k = i; k >= 0; k--) {
+    final e = entries[k];
+    if (e is VerifyEntry) return k == i - 1 ? null : e;
+    if (e is UserEntry || e is JobEntry) return null;
+  }
+  return null;
+}
+
+/// A fact in the agent's memory (agent/src/memory.ts).
+class MemoryEntry {
+  MemoryEntry(Map<String, dynamic> j)
+    : id = j['id'] as String? ?? '',
+      text = j['text'] as String? ?? '',
+      source = j['source'] as String? ?? '',
+      sessionId = j['sessionId'] as String?,
+      createdAt = j['createdAt'] as String? ?? '',
+      confirmedAt = j['confirmedAt'] as String? ?? '',
+      replaced = (j['replaced'] as List? ?? const []).whereType<String>().toList();
+  final String id;
+  final String text;
+  final String source;
+  final String? sessionId;
+  final String createdAt;
+  final String confirmedAt;
+  final List<String> replaced;
+}
+
+/// The agent proposed to remember something; the user decides.
+class MemoryProposal {
+  /// Read from a saved chat as it is: a field of another type is taken as missing, never an error.
+  MemoryProposal(Map<String, dynamic> j)
+    : id = _str(j['id']) ?? '',
+      text = _str(j['text']) ?? '',
+      layer = _str(j['layer']) ?? 'global',
+      project = _str(j['project']),
+      replacesText = _str(j['replacesText']),
+      status = _str(j['status']) ?? 'pending';
+
+  static String? _str(Object? v) => v is String ? v : null;
+  final String id;
+  final String text;
+  final String layer;
+  final String? project;
+  final String? replacesText;
+
+  /// pending, saved or rejected.
+  final String status;
+}
+
+/// What a chat started with from memory.
+class MemorySnapshotInfo {
+  MemorySnapshotInfo(Map<String, dynamic> j)
+    : global = [for (final e in (j['global'] as List? ?? const [])) ((e as Map)['text'] as String? ?? '')],
+      project = [for (final e in (j['project'] as List? ?? const [])) ((e as Map)['text'] as String? ?? '')],
+      projectPath = j['projectPath'] as String?,
+      left = (j['left'] as num?)?.toInt() ?? 0;
+  final List<String> global;
+  final List<String> project;
+  final String? projectPath;
+
+  /// Facts left out to stay within the budget.
+  final int left;
+  bool get isEmpty => global.isEmpty && project.isEmpty;
 }

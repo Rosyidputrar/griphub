@@ -51,7 +51,8 @@ export function isInside(path: string, dir: string): boolean {
 }
 
 /** Tools that change nothing; never need approval and stay on in plan mode. */
-const READ_ONLY = new Set(["read", "grep", "find", "ls", "web_search", "web_fetch", "web_screenshot", "todo_write"]);
+// remember only proposes a memory; the user decides on its own card (memory.ts), so it is not asked about twice.
+const READ_ONLY = new Set(["read", "grep", "find", "ls", "web_search", "web_fetch", "web_screenshot", "todo_write", "remember"]);
 
 /**
  * Commands worth a second look before they run. The flag patterns allow any
@@ -292,6 +293,8 @@ function describe(toolName: string, input: Record<string, unknown>) {
 
 /** Why the first subagent of a chat is asked about: it works on its own and spends credits and time while it does. */
 export const SUBAGENT_RISK = "This starts a subagent that works on its own and spends credits";
+/** The first check of a project folder runs code that comes with the project (its test script), not the agent's. */
+export const PROJECT_CHECK_RISK = "This runs the project's own test command, code that comes with the project, for the first time in this folder";
 
 export class Guard {
 	mode: ApprovalMode = "ask_risky";
@@ -307,6 +310,8 @@ export class Guard {
 	private changedThisRun = false;
 	/** Chats where the person has already said yes to a subagent: the next ones there are not asked again. */
 	private subagentChats = new Set<string>();
+	/** Project folders whose own check the person has let run (self-verification): not asked again there. */
+	private checkedProjects = new Set<string>();
 
 	constructor(private readonly hooks: GuardHooks) {}
 
@@ -360,6 +365,107 @@ export class Guard {
 		return new Promise<boolean>((resolve) => this.pending.set(record.approvalId, { resolve, record }));
 	}
 
+	/**
+	 * What the rules say about one tool call: blocked (with the reason the model is given), or allowed, after asking
+	 * the user when the mode wants that. The one place these rules live: tool calls, and commands the host runs for the
+	 * chat itself (the self-verification's test command, verify.ts), go through it alike.
+	 */
+	private async decide(event: { toolName: string; input: Record<string, unknown> }): Promise<{ block: true; reason: string } | undefined> {
+		const input = event.input;
+		const cwd = this.hooks.cwd();
+		const coding = this.hooks.coding?.() ?? true;
+		const planning = this.planMode && coding;
+
+		// The plan in plan mode is the numbered text the user approves; the checklist comes after.
+		if (planning && event.toolName === "todo_write") {
+			return {
+				block: true,
+				reason:
+					"Plan mode is on: write the plan as a numbered list for the user to approve. Call todo_write once it is approved.",
+			};
+		}
+
+		if (planning && !READ_ONLY.has(event.toolName)) {
+			return {
+				block: true,
+				reason:
+					"Plan mode is on: do not change anything yet. Finish the plan as a numbered list and ask the user to approve it.",
+			};
+		}
+
+		// Reading a file of secrets is asked about in every mode but "bypass all", read-only as it is.
+		const secret = this.mode === "auto" ? null : secretReadRisk(event.toolName, input, cwd);
+		const byMode =
+			this.mode === "ask_all"
+				? READ_ONLY.has(event.toolName)
+					? null
+					: "Approval required for every change"
+				: this.mode === "ask_risky"
+					? riskOf(event.toolName, input, cwd)
+					: this.mode === "deny_risky"
+						? riskOf(event.toolName, input, cwd, false)
+						: null;
+		// A subagent can spend up to its limits, three at a time, and nothing in its call looks risky: the first one
+		// of a chat is asked about (every one in "Ask all", as for any change), the person's yes covers the chat.
+		const chat = this.hooks.chat?.() ?? "";
+		const firstSubagent = event.toolName === "subagent" && this.mode === "ask_risky" && !this.subagentChats.has(chat);
+		const risk = secret ?? byMode ?? (firstSubagent ? SUBAGENT_RISK : null);
+		if (risk && this.mode === "deny_risky") {
+			return {
+				block: true,
+				reason: `Refused: nobody is watching this run, so actions that need approval are not allowed (${risk}). Do not look for a way around this; finish what you safely can and say what is left for the user.`,
+			};
+		}
+		if (risk) {
+			// "Always allow" stores the FULL pattern. Storing only the
+			// first two words let `cd app && git push` also allow
+			// `cd app && rm -rf ~`; storing only the tool name let one
+			// write allow every write.
+			const key =
+				event.toolName === "bash" || event.toolName === "background_job"
+					? `${event.toolName}:${String(input.command ?? "").trim().replace(/\s+/g, " ")}`
+					: event.toolName === "write" || event.toolName === "edit"
+						? `${event.toolName}:${String(input.path ?? "")}`
+						: // "Always" for subagents means subagents, not this one task text.
+							event.toolName === "subagent"
+							? "subagent"
+							: `${event.toolName}:${JSON.stringify(input).slice(0, 400)}`;
+			if (!this.allowed.has(key)) {
+				const ok = await this.ask(event.toolName, input, risk, key);
+				if (!ok) return { block: true, reason: "The user declined this action. Ask what they would like instead." };
+			}
+			if (event.toolName === "subagent") this.subagentChats.add(chat);
+		}
+		return undefined;
+	}
+
+	/**
+	 * Whether a command the host runs for the chat (the test command of self-verification) may run, by the very rules a
+	 * bash call of the agent's would meet: the approval mode, "Always allow", plan mode, and no question at all where
+	 * nobody is watching. Asks the user when the mode wants that. Null when it may run, else why not.
+	 */
+	async allowCommand(command: string, project?: { project: string; key: string }): Promise<string | null> {
+		// A test script is the project's code, not a command the agent chose: a freshly cloned repository's `npm test`
+		// runs whatever it says. The first run of a test setup in a folder is asked about in every mode where someone is
+		// there to answer ("Bypass all" is about the agent's own actions, not the project's code), and refused where
+		// nobody watches unless it was allowed before. The yes covers that folder with that setup; a changed setup asks
+		// again.
+		if (project && !this.planMode) {
+			const key = `check:${project.project}:${project.key}`;
+			if (!this.checkedProjects.has(key) && !this.allowed.has(key)) {
+				if (this.mode === "deny_risky") {
+					return `Refused: nobody is watching this run, and this project's own test command has not been allowed to run in this folder yet (${PROJECT_CHECK_RISK}).`;
+				}
+				const ok = await this.ask("bash", { command }, PROJECT_CHECK_RISK, key);
+				if (!ok) return "The user declined running the project's test command.";
+				this.checkedProjects.add(key);
+				return null;
+			}
+		}
+		const verdict = await this.decide({ toolName: "bash", input: { command } });
+		return verdict ? verdict.reason : null;
+	}
+
 	/** The pi extension factory. */
 	extension = (pi: ExtensionAPI) => {
 		pi.on("agent_start", () => {
@@ -370,68 +476,8 @@ export class Guard {
 			const input = event.input as Record<string, unknown>;
 			const cwd = this.hooks.cwd();
 			const coding = this.hooks.coding?.() ?? true;
-			const planning = this.planMode && coding;
-
-			// The plan in plan mode is the numbered text the user approves; the checklist comes after.
-			if (planning && event.toolName === "todo_write") {
-				return {
-					block: true,
-					reason:
-						"Plan mode is on: write the plan as a numbered list for the user to approve. Call todo_write once it is approved.",
-				};
-			}
-
-			if (planning && !READ_ONLY.has(event.toolName)) {
-				return {
-					block: true,
-					reason:
-						"Plan mode is on: do not change anything yet. Finish the plan as a numbered list and ask the user to approve it.",
-				};
-			}
-
-			// Reading a file of secrets is asked about in every mode but "bypass all", read-only as it is.
-			const secret = this.mode === "auto" ? null : secretReadRisk(event.toolName, input, cwd);
-			const byMode =
-				this.mode === "ask_all"
-					? READ_ONLY.has(event.toolName)
-						? null
-						: "Approval required for every change"
-					: this.mode === "ask_risky"
-						? riskOf(event.toolName, input, cwd)
-						: this.mode === "deny_risky"
-							? riskOf(event.toolName, input, cwd, false)
-							: null;
-			// A subagent can spend up to its limits, three at a time, and nothing in its call looks risky: the first one
-			// of a chat is asked about (every one in "Ask all", as for any change), the person's yes covers the chat.
-			const chat = this.hooks.chat?.() ?? "";
-			const firstSubagent = event.toolName === "subagent" && this.mode === "ask_risky" && !this.subagentChats.has(chat);
-			const risk = secret ?? byMode ?? (firstSubagent ? SUBAGENT_RISK : null);
-			if (risk && this.mode === "deny_risky") {
-				return {
-					block: true,
-					reason: `Refused: nobody is watching this run, so actions that need approval are not allowed (${risk}). Do not look for a way around this; finish what you safely can and say what is left for the user.`,
-				};
-			}
-			if (risk) {
-				// "Always allow" stores the FULL pattern. Storing only the
-				// first two words let `cd app && git push` also allow
-				// `cd app && rm -rf ~`; storing only the tool name let one
-				// write allow every write.
-				const key =
-					event.toolName === "bash" || event.toolName === "background_job"
-						? `${event.toolName}:${String(input.command ?? "").trim().replace(/\s+/g, " ")}`
-						: event.toolName === "write" || event.toolName === "edit"
-							? `${event.toolName}:${String(input.path ?? "")}`
-							: // "Always" for subagents means subagents, not this one task text.
-								event.toolName === "subagent"
-								? "subagent"
-								: `${event.toolName}:${JSON.stringify(input).slice(0, 400)}`;
-				if (!this.allowed.has(key)) {
-					const ok = await this.ask(event.toolName, input, risk, key);
-					if (!ok) return { block: true, reason: "The user declined this action. Ask what they would like instead." };
-				}
-				if (event.toolName === "subagent") this.subagentChats.add(chat);
-			}
+			const verdict = await this.decide({ toolName: event.toolName, input });
+			if (verdict) return verdict;
 
 			// First change in this run: snapshot so the user can undo the whole run.
 			if (coding && !READ_ONLY.has(event.toolName) && !this.changedThisRun) {

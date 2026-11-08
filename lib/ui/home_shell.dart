@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:simple_icons/simple_icons.dart';
 
 import '../agent/agent_controller.dart';
+import '../agent/panel.dart';
 import '../agent/agent_fs.dart';
 import '../agent/integrations.dart';
 import '../agent/models.dart';
@@ -22,6 +23,9 @@ import 'image_gen_screen.dart';
 import 'kit.dart';
 import 'illustration.dart';
 import 'mesh.dart';
+import 'usage_screen.dart';
+import 'model_sheet.dart';
+import 'panel_settings_screen.dart';
 import 'new_chat_sheet.dart';
 import 'plus_menu.dart';
 import 'predictive_back.dart';
@@ -281,7 +285,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   /// Opens the chat a notification points at (the open one when [path] is null).
   Future<void> _openChatAt(String? path) async {
-    if (path != null && path != agent.sessionFile) {
+    if (path == agent.sessionFile) {
+      // The chat at work, from a notification: shown again even when another chat was on screen.
+      agent.leaveView();
+    } else if (path != null) {
       final known = (await agent.listSessions()).any((s) => s.path == path);
       if (known && !await agent.openSession(path)) return;
     }
@@ -289,6 +296,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   Future<void> _takeLaunch() async {
+    // The floating panel shows the app now: it takes its own launches (panel_screen.dart).
+    if (PanelState.instance.isPanel) return;
     final launch = await agent.client.takeLaunch();
     if (launch == null || !mounted) return;
     // Close sheets and pages so the new chat opens on top of home — but
@@ -308,7 +317,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         await _openChatAt(launch['path'] as String?);
       case 'retry':
         final path = launch['path'] as String?;
-        if (path != null && path != agent.sessionFile && !await agent.openSession(path)) return;
+        if (path != null && !await agent.openSession(path)) return;
         await agent.retry();
         if (mounted) await openChat(context, agent);
       case 'open_tasks':
@@ -318,6 +327,34 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       case 'voice':
         if (!await agent.newSession()) return;
         if (mounted) await openChat(context, agent, listen: true);
+      // From the widgets (Fitur 7): a plain chat, the model picker, the usage screen.
+      case 'new_plain_chat':
+        if (!await agent.newSession(chat: true)) return;
+        if (mounted) await openChat(context, agent);
+      case 'pick_model':
+        if (!mounted) return;
+        unawaited(openChat(context, agent));
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (mounted) await showModelSheet(context, agent);
+      case 'open_usage':
+        if (mounted) await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => UsageScreen(agent: agent)));
+      // "Tanya GripHub" while the panel may not show over other apps: the selection in a new chat, and the way to the
+      // panel offered once, quietly.
+      case 'selection':
+        final text = (launch['text'] as String? ?? '').trim();
+        if (!await agent.newSession(chat: true)) return;
+        if (!mounted) return;
+        final quoted = text.isEmpty ? null : '${text.split('\n').map((l) => '> $l').join('\n')}\n\n';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(tr('To ask from any app without opening this one, turn on the floating panel.')),
+            action: SnackBarAction(
+              label: tr('Turn on'),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PanelSettingsScreen(agent: agent))),
+            ),
+          ),
+        );
+        await openChat(context, agent, prompt: quoted);
       case 'share':
         final files = [
           for (final f in (launch['files'] as List? ?? const []).cast<Map>())
@@ -1005,8 +1042,9 @@ class _HomeTabState extends State<_HomeTab> with BusyActions {
                             session: s,
                             workspace: agent.info['workspace'] as String? ?? '',
                             busy: agent.switchingTo == s.path,
+                            finished: agent.finishedUnseen.contains(s.path),
                             onTap: () async {
-                              if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                              if (!await agent.openSession(s.path)) return;
                               if (context.mounted) await openChat(context, agent);
                               _refresh();
                             },
@@ -1242,8 +1280,12 @@ class _SessionRow extends StatelessWidget {
     this.onLongPress,
     this.selected,
     this.busy = false,
+    this.finished = false,
   });
   final SessionSummary session;
+
+  /// The agent finished in this chat while another chat was on screen, and it was not opened since (Fitur 8).
+  final bool finished;
   final String workspace;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
@@ -1314,7 +1356,22 @@ class _SessionRow extends StatelessWidget {
                 color: selected! ? p.danger : p.faint,
               )
             else
-              Text(formatAgo(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (finished) ...[
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(color: p.accent, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(tr('Done'), style: TextStyle(fontSize: 11.5, color: p.accentText)),
+                    const SizedBox(width: 6),
+                  ],
+                  Text(formatAgo(session.modified), style: TextStyle(fontSize: 11.5, color: p.faint)),
+                ],
+              ),
           ],
         ),
       ),
@@ -1553,10 +1610,11 @@ class _ChatsTabState extends State<_ChatsTab> {
                         workspace: ws,
                         selected: selecting ? _selected.contains(s.path) : null,
                         busy: switchingTo == s.path,
+                        finished: widget.agent.finishedUnseen.contains(s.path),
                         onLongPress: () => selecting ? _toggle(s) : _menu(s),
                         onTap: () async {
                           if (selecting) return _toggle(s);
-                          if (s.id != agent.sessionId && !await agent.openSession(s.path)) return;
+                          if (!await agent.openSession(s.path)) return;
                           if (context.mounted) await openChat(context, agent);
                           _reload();
                         },
@@ -1624,7 +1682,7 @@ class _ProjectsTabState extends State<_ProjectsTab> {
       final sessions = await agent.listSessions();
       final latest = sessions.where((s) => s.cwd == project.path && s.messageCount > 0).firstOrNull;
       if (latest != null) {
-        if (latest.id != agent.sessionId && !await agent.openSession(latest.path)) return;
+        if (!await agent.openSession(latest.path)) return;
       } else {
         if (!await agent.newSession(dir: project.path)) return;
       }

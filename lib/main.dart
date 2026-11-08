@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 
 import 'agent/agent_client.dart';
 import 'agent/agent_controller.dart';
+import 'agent/widget_sync.dart';
+import 'ui/panel_screen.dart';
 import 'ui/app_lock.dart';
-import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger;
+import 'ui/chat_extras.dart' show StopToSwitchOverlay, rootMessenger, rootNavigator;
 import 'ui/home_shell.dart';
 import 'ui/onboarding.dart';
 import 'ui/predictive_back.dart';
@@ -27,6 +29,18 @@ void main() {
   unawaited(client.isLowRamDevice().then((low) {
     if (low) Appearance.instance.setLowRamDevice();
   }));
+  // The home-screen widgets follow the app's real state, pushed when it changes (Fitur 7).
+  WidgetSync(
+    agent,
+    translate: tr,
+    number: localNumber,
+    private: () => Appearance.instance.appLock,
+    dark: () => switch (Appearance.instance.value) {
+      ThemeMode.dark => true,
+      ThemeMode.light => false,
+      ThemeMode.system => WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.dark,
+    },
+  ).start(also: [Appearance.instance]);
   runApp(GripHubApp(agent: agent));
 }
 
@@ -44,6 +58,7 @@ class GripHubApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         navigatorObservers: [PredictiveBack.instance],
         scaffoldMessengerKey: rootMessenger,
+        navigatorKey: rootNavigator,
         themeMode: appearance.value,
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
@@ -55,7 +70,8 @@ class GripHubApp extends StatelessWidget {
               // Every animation goes through Motion.of / Motion.reduced, which read this.
               disableAnimations: MediaQuery.of(context).disableAnimations || appearance.animationsOff,
             ),
-            child: AppLockGate(child: StopToSwitchOverlay(agent: agent, child: child!)),
+            // The floating panel (Fitur 4) sits inside the app lock: a locked app shows no chat in the panel either.
+            child: AppLockGate(child: PanelGate(agent: agent, appNavigator: rootNavigator, child: StopToSwitchOverlay(agent: agent, child: child!))),
           ),
         ),
         home: ListenableBuilder(

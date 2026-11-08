@@ -10,7 +10,11 @@ const _allowed = {
   'task_log.dart': ['duration: const Duration(seconds: 8)'], // a snackbar's time on screen
   'preview_open.dart': ['duration: const Duration(seconds: 8)'], // a snackbar's time on screen
   'terminal_screen.dart': ['duration: const Duration(seconds: 1)'], // a snackbar's time on screen
-  'chat_screen.dart': ['scroll.animateTo(target, duration: const Duration(milliseconds: 250)'], // jumps when reduced
+  'chat_screen.dart': [
+    'scroll.animateTo(target, duration: const Duration(milliseconds: 250)', // jumps when reduced
+    "replaceAll('{chat}', chat)), duration: const Duration(seconds: 3)", // a snackbar's time on screen
+  ],
+  'read_only_chat.dart': ['AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))'], // stops when reduced
   'onboarding.dart': ['pages.nextPage(duration: const Duration(milliseconds: 320)'], // jumps when reduced
   'message_views.dart': ['AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))'], // stops when reduced
   'live_clock.dart': ['AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))'], // stops when reduced

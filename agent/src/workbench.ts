@@ -350,6 +350,8 @@ export function usageSummary(
 	estimate: (model: string, u: any) => number | null = () => null,
 	/** Only requests at or after this instant (ms). */
 	fromTs?: number,
+	/** A file of `usage` lines for requests whose chat had no file (host.ts USAGE_LEDGER), counted too. */
+	ledger?: string,
 ) {
 	const since = Math.max(Date.now() - days * 86400_000, fromTs ?? 0);
 	const rows = new Map<string, UsageRow>();
@@ -389,6 +391,10 @@ export function usageSummary(
 							add(ts, m.provider, m.model, m.usage);
 						} else if (e.type === "usage" && e.usage && e.model) {
 							add(ts, e.provider, e.model, e.usage);
+						} else if (e.type === "custom" && e.customType === "griphub-usage" && e.data?.usage && e.data?.model && !e.data.ledger) {
+							// A request made for the chat outside its own turns (the vision translator's reading).
+							const at = typeof e.data.at === "number" ? e.data.at : Date.parse(e.timestamp);
+							add(at, e.data.provider, e.data.model, e.data.usage);
 						} else if ((e.type === "compaction" || e.type === "branch_summary") && e.usage && last) {
 							add(ts, last.provider, last.model, e.usage);
 						}
@@ -398,6 +404,14 @@ export function usageSummary(
 		}
 	};
 	walk(sessionsDir);
+	if (ledger && existsSync(ledger)) {
+		for (const line of readFileSync(ledger, "utf8").split("\n")) {
+			try {
+				const e = line ? JSON.parse(line) : null;
+				if (e?.type === "usage" && e.usage && e.model) add(Date.parse(e.timestamp), e.provider, e.model, e.usage);
+			} catch {}
+		}
+	}
 	return [...rows.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
 }
 

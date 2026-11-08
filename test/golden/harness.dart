@@ -98,6 +98,15 @@ class FakeHost {
     'approvalMode': stored['approvalMode'] ?? 'ask_risky',
     'fallbackModels': const [],
     'dailyBudget': stored['dailyBudget'] ?? 0,
+    'smartRouter': stored['smartRouter'] ?? true,
+    'smartRouterBlocked': stored['smartRouterBlocked'] ?? const [],
+    'visionTranslator': stored['visionTranslator'] ?? 'auto',
+    'visionTranslatorModel': stored['visionTranslatorModel'],
+    'visionTranslatorAllowed': stored['visionTranslatorAllowed'],
+    'verify': stored['verify'] ?? true,
+    'verifyRounds': stored['verifyRounds'] ?? 3,
+    'verifyAlways': stored['verifyAlways'] ?? false,
+    'projectVerify': stored['projectVerify'] ?? const {},
     'compactAt': stored['compactAt'],
     'compactAtShare': 0.65,
     'compactAtFloor': 300000,
@@ -162,6 +171,9 @@ class FakeHost {
   }
 
   void emit(Map<String, dynamic> record) => _sink?.success({'kind': 'stdout', 'line': jsonEncode(record)});
+
+  /// An event from the platform side itself (not a host record): a window change, the companion stopping.
+  void emitPlatform(Map<String, dynamic> event) => _sink?.success(event);
 
   List<Map<String, dynamic>> sent(String type) => commands.where((c) => c['type'] == type).toList();
 }

@@ -182,6 +182,36 @@ export interface AppSettings {
 	notify?: { enabled?: boolean; url?: string; topic?: string };
 	/** Tried in order when the current model errors out (rate limits, outages). */
 	fallbackModels?: { provider: string; model: string }[];
+	/**
+	 * Smart router (smartrouter.ts): whether chats may be set to "Otomatis (Pintar)"; unset = on. Off stops it in every
+	 * chat (each keeps the model it had last). [smartRouterBlocked] lists model ids it must never pick.
+	 */
+	smartRouter?: boolean;
+	smartRouterBlocked?: string[];
+	/**
+	 * Vision translator (visiontranslate.ts), for pictures sent to a model that cannot read them: "auto" reads them
+	 * with a vision model, "ask" asks before the first paid reading in a chat, "off" refuses the picture. Unset = auto.
+	 * [visionTranslatorModel]: the user's own translator (wins when it qualifies); unset = the cheapest approved.
+	 * [visionTranslatorAllowed]: the approved translators (quality floor); unset = the default from the metadata.
+	 */
+	visionTranslator?: "auto" | "ask" | "off";
+	/**
+	 * Self-verification (verify.ts): a coding task that changed files is checked by the project's tests before the
+	 * agent may close it. Unset = on. [verifyRounds]: fix rounds after a failure (unset = 3). [verifyAlways]: check
+	 * tasks that changed nothing too (unset = off). [projectVerify]: the command per project folder the user set.
+	 */
+	verify?: boolean;
+	/**
+	 * Agent memory (memory.ts): whether chats start with what the agent remembers and may propose more; unset = on.
+	 * [memoryBudget]: the most tokens of memory a chat starts with (unset = memory.ts DEFAULT_BUDGET).
+	 */
+	memory?: boolean;
+	memoryBudget?: number;
+	verifyRounds?: number;
+	verifyAlways?: boolean;
+	projectVerify?: Record<string, string>;
+	visionTranslatorModel?: string;
+	visionTranslatorAllowed?: string[];
 	/** Daily spend cap in GripHub credits; prompts are refused once reached. 0 or unset = none. */
 	dailyBudget?: number;
 	/**
@@ -372,6 +402,17 @@ export class Integrations {
 			tavilySearch: this.settings.tavilySearch ?? true,
 			approvalMode: approvalMode ?? "ask_risky",
 			fallbackModels: fallbackModels ?? [],
+			smartRouter: this.settings.smartRouter ?? true,
+			smartRouterBlocked: (this.settings.smartRouterBlocked ?? []).filter((id) => typeof id === "string" && id),
+			visionTranslator: this.settings.visionTranslator ?? "auto",
+			verify: this.settings.verify ?? true,
+			memory: this.settings.memory ?? true,
+			memoryBudget: this.settings.memoryBudget ?? 600,
+			verifyRounds: this.settings.verifyRounds ?? 3,
+			verifyAlways: this.settings.verifyAlways ?? false,
+			projectVerify: this.settings.projectVerify ?? {},
+			visionTranslatorModel: this.settings.visionTranslatorModel ?? null,
+			visionTranslatorAllowed: this.settings.visionTranslatorAllowed ?? null,
 			dailyBudget: dailyBudget ?? 0,
 			...imageSettings(this.settings),
 			// Null while the user set nothing: the limit then follows the open chat's model (compactLimit). An app too old
@@ -430,6 +471,42 @@ export class Integrations {
 			throw new Error("The subagent time limit must be 0 (no limit) or a whole number of minutes");
 		}
 		checkImageSettings(next);
+		if (next.smartRouter !== undefined && typeof next.smartRouter !== "boolean") throw new Error("Smart router is on or off");
+		if (next.smartRouterBlocked !== undefined) {
+			if (!Array.isArray(next.smartRouterBlocked) || next.smartRouterBlocked.some((id) => typeof id !== "string" || !id.trim())) {
+				throw new Error("The smart router's blocked list holds model ids");
+			}
+			next.smartRouterBlocked = [...new Set(next.smartRouterBlocked.map((id) => id.trim()))];
+		}
+		if (next.verify !== undefined && typeof next.verify !== "boolean") throw new Error("Self-verification is on or off");
+		if (next.memory !== undefined && typeof next.memory !== "boolean") throw new Error("Memory is on or off");
+		if (next.memoryBudget !== undefined && !(Number.isInteger(next.memoryBudget) && next.memoryBudget >= 100 && next.memoryBudget <= 8000)) {
+			throw new Error("The memory budget is a whole number of tokens from 100 to 8000");
+		}
+		if (next.verifyAlways !== undefined && typeof next.verifyAlways !== "boolean") throw new Error("Self-verification is on or off");
+		if (next.verifyRounds !== undefined && !(Number.isInteger(next.verifyRounds) && next.verifyRounds >= 0 && next.verifyRounds <= 20)) {
+			throw new Error("Fix rounds are a whole number from 0 to 20");
+		}
+		if (next.projectVerify !== undefined) {
+			const pv = next.projectVerify;
+			if (!pv || typeof pv !== "object" || Array.isArray(pv) || Object.values(pv).some((c) => typeof c !== "string")) {
+				throw new Error("A project's verification command is text");
+			}
+			// An empty command removes the project's own and goes back to the detected one.
+			next.projectVerify = Object.fromEntries(Object.entries(pv).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+		}
+		if (next.visionTranslator !== undefined && !["auto", "ask", "off"].includes(next.visionTranslator)) {
+			throw new Error("The vision translator is automatic, ask first, or off");
+		}
+		if (next.visionTranslatorModel !== undefined && (typeof next.visionTranslatorModel !== "string" || !next.visionTranslatorModel.trim())) {
+			throw new Error("The vision translator is a model id");
+		}
+		if (next.visionTranslatorAllowed !== undefined) {
+			if (!Array.isArray(next.visionTranslatorAllowed) || next.visionTranslatorAllowed.some((id) => typeof id !== "string" || !id.trim())) {
+				throw new Error("The approved vision translators are model ids");
+			}
+			next.visionTranslatorAllowed = [...new Set(next.visionTranslatorAllowed.map((id) => id.trim()))];
+		}
 		// 0 turns the host's summaries off (pi's own stay); anything else must be a sane token count.
 		if (next.compactAt !== undefined && !(typeof next.compactAt === "number" && Number.isInteger(next.compactAt) && next.compactAt >= 0)) {
 			throw new Error("The context limit must be 0 (the model's own limit) or a whole number of tokens");

@@ -17,6 +17,8 @@ const ROUTER = "https://griphubrouter.web.id/v1";
 // A 1x1 PNG, for MOCK_IMAGES.
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 let imageCount = 0;
+let chatCount = 0;
+let fixed = false;
 const realFetch = globalThis.fetch;
 
 function chunk(delta, finish = null, extra = {}) {
@@ -68,7 +70,55 @@ globalThis.fetch = async (input, init) => {
 		const system = request.messages?.find((m) => m.role === "system" || m.role === "developer");
 		const text = typeof system?.content === "string" ? system.content : JSON.stringify(system?.content ?? "");
 		const tools = (request.tools ?? []).map((t) => t.function?.name ?? t.name);
-		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary })}\n`);
+		// images: picture parts anywhere in the request, so a test can tell a model was never sent one.
+		const images = JSON.stringify(request.messages ?? []).split('"type":"image_url"').length - 1;
+		const vision = /model lain/i.test(JSON.stringify(last?.content ?? ""));
+		appendFileSync(process.env.MOCK_REQUESTS, `${JSON.stringify({ system: text, tools, summary, model: request.model, images, vision })}\n`);
+	}
+	// A vision translator's reading (visiontranslate.ts: its instruction speaks of "model lain"): MOCK_VISION_TEXT is
+	// what it reads, MOCK_VISION_DELAY_MS delays it, MOCK_VISION_FAIL makes the router refuse it (500), MOCK_VISION_EMPTY makes it read nothing.
+	// Counted in MOCK_LOG as "vision", and not as a chat request.
+	if (!summary && /model lain/i.test(JSON.stringify(last?.content ?? ""))) {
+		if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, "vision\n");
+		// MOCK_VISION_DELAY_MS: the reading takes this long (for Stop while it runs).
+		if (process.env.MOCK_VISION_DELAY_MS) {
+			await new Promise((done, fail) => {
+				const timer = setTimeout(done, Number(process.env.MOCK_VISION_DELAY_MS));
+				init?.signal?.addEventListener("abort", () => {
+					clearTimeout(timer);
+					fail(new DOMException("aborted", "AbortError"));
+				});
+			});
+		}
+		if (process.env.MOCK_VISION_FAIL) {
+			return new Response('{"error":{"message":"Vision upstream failed in the mock router"}}', { status: 500, headers: { "content-type": "application/json" } });
+		}
+		const read = process.env.MOCK_VISION_EMPTY ? "" : (process.env.MOCK_VISION_TEXT ?? "Sebuah gambar.");
+		const usage = { usage: { prompt_tokens: 1_800, completion_tokens: 300 } };
+		const parts = [...(read ? [chunk({ role: "assistant", content: read })] : [chunk({ role: "assistant", content: "" })]), chunk({}, "stop", usage)];
+		return new Response(parts.join("") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+	}
+	// MOCK_FAIL_CHAT: comma-separated numbers of the chat requests (not summaries) the router answers with a 500, as
+	// an upstream outage would; for tests of what the host does after a failed turn.
+	if (!summary) chatCount++; // (vision readings returned above, so they are not counted)
+	if (!summary && (process.env.MOCK_FAIL_CHAT ?? "").split(",").includes(String(chatCount))) {
+		return new Response('{"error":{"message":"Upstream failed in the mock router"}}', { status: 500, headers: { "content-type": "application/json" } });
+	}
+	// Self-verification's evidence (verify.ts) comes back as a user message: MOCK_FIX (a tool call, as MOCK_TOOL) is made
+	// once on the first failed one; otherwise the reply is a closing message that names the status it was given.
+	{
+		const said = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
+		if (last?.role === "user" && said.includes("[Verification evidence")) {
+			const status = /Status: (PASSED|FAILED|NOT ACCEPTED)/.exec(said)?.[1] ?? (said.includes("No test could be run") ? "NO TESTS" : said.includes("Not run:") ? "NOT RUN" : "?");
+			if (process.env.MOCK_LOG) appendFileSync(process.env.MOCK_LOG, `evidence ${status}\n`);
+			if (process.env.MOCK_FIX && status !== "PASSED" && !fixed) {
+				fixed = true;
+				const { name, arguments: args } = JSON.parse(process.env.MOCK_FIX);
+				const call = { index: 0, id: "call_fix", type: "function", function: { name, arguments: JSON.stringify(args) } };
+				return new Response([chunk({ role: "assistant", tool_calls: [call] }), chunk({}, "tool_calls")].join("") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+			}
+			return new Response(chunk({ role: "assistant", content: `Closing: verification ${status}.` }, "stop") + "data: [DONE]\n\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+		}
 	}
 	if (process.env.MOCK_TOOL) {
 		const said = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
