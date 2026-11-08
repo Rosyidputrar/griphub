@@ -449,12 +449,17 @@ class AssistantMessageView extends StatelessWidget {
     this.visionReads = const [],
     this.verified,
     this.readOnly = false,
+    this.companionStep = false,
   });
   final AssistantEntry entry;
   final Map<String, ToolRun> tools;
 
   /// Shown in a chat that is read-only (Fitur 8): its cards answer nothing.
   final bool readOnly;
+
+  /// The answer to a screen companion step: its pointer line ("SOROT: ...") is for the highlight, not for reading.
+  /// Any other answer is shown as written.
+  final bool companionStep;
 
   /// Where relative tool paths resolve, for previews.
   final String? cwd;
@@ -499,7 +504,9 @@ class AssistantMessageView extends StatelessWidget {
       switch (b.kind) {
         case BlockKind.text:
           if (b.text.trim().isNotEmpty) {
-            children.add(TypewriterMarkdown(text: hideCompanionPointer(b.text), live: entry.streaming && identical(b, blocks.last)));
+            children.add(
+              TypewriterMarkdown(text: companionStep ? hideCompanionPointer(b.text) : b.text, live: entry.streaming && identical(b, blocks.last)),
+            );
           }
         case BlockKind.thinking:
           if (b.text.trim().isNotEmpty) {

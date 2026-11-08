@@ -63,7 +63,16 @@ class ScreenCompanion extends ChangeNotifier {
   Future<bool> start(AgentController agent) async {
     final ok = await _method.invokeMethod<bool>('companionStart') ?? false;
     if (!ok) return false;
-    await agent.client.call('companion_start');
+    try {
+      await agent.client.call('companion_start');
+    } catch (_) {
+      // The host did not take it (the agent is busy, the connection dropped): capture, already running on the phone,
+      // stops at once rather than running with no Stop on screen.
+      try {
+        await _method.invokeMethod('companionStop');
+      } catch (_) {}
+      rethrow;
+    }
     active = true;
     // Follows this agent's records (a new start may come with a new client: after a reconnect, in tests).
     unawaited(_records?.cancel());
@@ -90,7 +99,11 @@ class ScreenCompanion extends ChangeNotifier {
       );
       final tree = secure || !(await _method.invokeMethod<bool>('a11yStatus') ?? false)
           ? const <Map<String, dynamic>>[]
-          : [for (final n in (await _method.invokeMethod<List>('a11yTree') ?? const [])) (n as Map).cast<String, dynamic>()];
+          : [
+              // An element without a usable id cannot be pointed at: left out, the rest of the step goes on.
+              for (final n in (await _method.invokeMethod<List>('a11yTree') ?? const []))
+                if (n is Map && n['id'] is String) n.cast<String, dynamic>(),
+            ];
       _nodes
         ..clear()
         ..addEntries(tree.map((n) => MapEntry(n['id'] as String, n)));

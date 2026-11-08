@@ -90,18 +90,20 @@ import {
 	detectVerifyCommand,
 	type Evidence,
 	evidenceText,
+	definitionKey,
 	isTestConfig,
-	isTestPath,
 	outputSummary,
 	runVerify,
 	testDefinition,
 	testDefinitionChanged,
+	testFingerprint,
+	testsChanged,
 	VERIFY_MESSAGE,
 	VERIFY_NOTE,
 	VerifyOutputs,
 } from "./verify.js";
 import { asksAboutPicture, defaultAllowed, SCAN_INSTRUCTION, stripReadings, estimateRead, FULL_INSTRUCTION, pickTranslator, readingBlock, readsImages, targetedInstruction, VisionConsent } from "./visiontranslate.js";
-import { classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
+import { CALM_TURNS, classify, DIFFICULTY_NAMES, type Decision, type Difficulty, failureOf, nextFloor, RoutingStore, select } from "./smartrouter.js";
 import { ModelBoard } from "./modelboard.js";
 import { Hub, LineBuffer, listenOnSocket, PROTOCOL, RestartGate, stdioConn } from "./transport.js";
 
@@ -1030,8 +1032,28 @@ async function routeTurn(s: AgentSession, text: string, images: number, opts: { 
 		if (raised !== floor) {
 			logDecision(s, { kind: "escalate", band: raised, why: [failure], reason: `${failure}: class raised to ${DIFFICULTY_NAMES[raised]}` }, (r) => {
 				r.floor = raised;
+				r.calm = 0;
 			});
 			floor = raised;
+		} else {
+			routing.update(s.sessionId, (r) => {
+				r.calm = 0;
+			});
+		}
+	} else if (state0.last && !opts.step && floor > 0) {
+		// A raised class is not for ever: after a few turns in a row that went well, it comes down one band.
+		const calm = (state0.calm ?? 0) + 1;
+		if (calm >= CALM_TURNS) {
+			const lowered = (floor - 1) as Difficulty;
+			logDecision(s, { kind: "relax", band: lowered, why: ["calm"], reason: `${CALM_TURNS} turns without a failure: class lowered to ${DIFFICULTY_NAMES[lowered]}` }, (r) => {
+				r.floor = lowered;
+				r.calm = 0;
+			});
+			floor = lowered;
+		} else {
+			routing.update(s.sessionId, (r) => {
+				r.calm = calm;
+			});
 		}
 	}
 
@@ -1246,19 +1268,31 @@ async function prepareTurn(s: AgentSession, text: string, images: any[] | undefi
 function verifyExtension(cwd: string) {
 	type Phase = "work" | "fix" | "closing";
 	type Run = {
+		/** The folder at the task's start (checkpoint tree), null when it could not be taken. */
 		base: string | null;
+		/** The tests and how they run at the task's start: what the task may not quietly weaken. */
+		startTests: Record<string, string>;
+		startDefinition: Record<string, string>;
 		phase: Phase;
 		round: number;
 		failTree: string | null;
+		failTests?: Record<string, string>;
 		failDefinition?: Record<string, string>;
 		evidenceTree: string | null;
 		checks: number;
+		/** A tool that can change files ran in this task (for a folder that could not be measured). */
+		wrote: boolean;
 	};
 	let st: Run | null = null;
 	const on = () => integrations.settings.verify !== false;
 	/** A run that ended on an error, kept for the host's own "Continue where you left off" (fallback, Try again). */
 	let carried: Run | null = null;
+	const WRITES = new Set(["write", "edit", "bash", "background_job"]);
 	return (pi: any) => {
+		pi.on("tool_call", (event: any) => {
+			if (st && WRITES.has(event.toolName)) st.wrote = true;
+			return undefined;
+		});
 		// A run that starts from a message (the user's, or a job's result): what the folder is now is what the task
 		// changes are measured from. The agent going on after evidence is the same run (no new start here), so its rounds
 		// and the tests' state at the first failure carry over.
@@ -1274,43 +1308,28 @@ function verifyExtension(cwd: string) {
 				return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
 			}
 			const base = await checkpoints.tree(cwd).catch(() => null);
-			st = { base, phase: "work", round: 0, failTree: null, evidenceTree: null, checks: 0 };
+			st = {
+				base,
+				startTests: testFingerprint(cwd),
+				startDefinition: testDefinition(cwd),
+				phase: "work",
+				round: 0,
+				failTree: null,
+				evidenceTree: null,
+				checks: 0,
+				wrote: false,
+			};
 			return { systemPrompt: `${event.systemPrompt}${VERIFY_NOTE}` };
 		});
 		pi.on("agent_before_settle", async (event: any) => {
 			const run = st;
-			if (!run || !on() || event.outcome !== "completed" || !run.base) {
+			if (!run || !on() || event.outcome !== "completed") {
 				// An error (not the user's Stop) may be continued by the host: the task's start is kept for that.
-				carried = run && event.outcome === "error" && run.base ? run : null;
-				st = null;
-				return undefined;
-			}
-			const now = await checkpoints.tree(cwd).catch(() => null);
-			if (!now) {
-				st = null;
-				return undefined;
-			}
-			if (run.phase === "closing") {
-				// The closing message changed nothing since the evidence: the run may end. Otherwise it is checked again.
-				const since = run.evidenceTree ? await checkpoints.changedBetween(cwd, run.evidenceTree, now).catch(() => []) : [];
-				if (!since.length) {
-					st = null;
-					return undefined;
-				}
-			}
-			const changed = await checkpoints.changedBetween(cwd, run.base, now).catch(() => [] as string[]);
-			if (run.phase === "work" && !changed.length && !integrations.settings.verifyAlways) {
+				carried = run && event.outcome === "error" ? run : null;
 				st = null;
 				return undefined;
 			}
 			const maxRounds = integrations.settings.verifyRounds ?? 3;
-			// A model that keeps changing files in its closing message is not checked forever: the last evidence stands.
-			if (run.checks > maxRounds + 2) {
-				st = null;
-				return undefined;
-			}
-			run.checks++;
-			let after = now;
 			const found = detectVerifyCommand(cwd, integrations.settings.projectVerify?.[cwd]);
 			const evidence: Evidence = {
 				status: "none",
@@ -1325,9 +1344,66 @@ function verifyExtension(cwd: string) {
 				testsTouched: [],
 				at: Date.now(),
 			};
-			if (found) {
-				// The user's own command (project setting) is theirs; one found in the project's files is the project's code.
-				const refused = await guard.allowCommand(found.command, found.source === "project setting" ? undefined : cwd);
+			const settleWith = (next: "fix" | "close") => {
+				send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "done", status: evidence.status });
+				return {
+					entries: [{ type: "custom_message", customType: VERIFY_MESSAGE, content: evidenceText(evidence, next), display: true, details: { evidence, next } }],
+					continue: true,
+				};
+			};
+			const now = run.base ? await checkpoints.tree(cwd).catch(() => null) : null;
+			const changed = run.base && now ? await checkpoints.changedBetween(cwd, run.base, now).catch(() => null) : null;
+			// The folder could not be measured: never a silent "done". Said once, when the task may have changed files.
+			if (changed === null || !now) {
+				st = null;
+				if (!run.wrote && !integrations.settings.verifyAlways) return undefined;
+				evidence.status = "unmeasured";
+				return settleWith("close");
+			}
+			if (run.phase === "closing") {
+				// The closing message changed nothing since the evidence: the run may end. Otherwise it is checked again.
+				const since = run.evidenceTree ? await checkpoints.changedBetween(cwd, run.evidenceTree, now).catch(() => []) : [];
+				if (!since.length) {
+					st = null;
+					return undefined;
+				}
+			}
+			if (run.phase === "work" && !changed.length && !integrations.settings.verifyAlways) {
+				st = null;
+				return undefined;
+			}
+			// A model that keeps changing files in its closing message is not checked forever: the last evidence stands.
+			if (run.checks > maxRounds + 2) {
+				st = null;
+				return undefined;
+			}
+			run.checks++;
+			let after = now;
+			// How the tests run, and the tests, against where they stood at the task's start, and at the failure while
+			// fixing one. Read before anything runs, so a changed setup is never run on trust.
+			const fixing = !!run.failTree;
+			const definition = testDefinition(cwd);
+			const testsNow = testFingerprint(cwd);
+			const since = (tests: Record<string, string>, def: Record<string, string>) => ({
+				setup: testDefinitionChanged(def, definition),
+				// Changed or removed tests, and any new test configuration (a new test file is fine).
+				tests: [...testsChanged(tests, testsNow), ...testsChanged(tests, testsNow, { added: true }).filter(isTestConfig)],
+			});
+			const fromStart = since(run.startTests, run.startDefinition);
+			const fromFail = fixing ? since(run.failTests ?? {}, run.failDefinition ?? {}) : { setup: [], tests: [] };
+			const list = (c: { setup: string[]; tests: string[] }) => [...new Set([...c.tests, ...c.setup])].sort();
+			const setupChanged = fromStart.setup.length ? fromStart.setup : fromFail.setup;
+			if (found && setupChanged.length && found.source !== "project setting") {
+				// Not run: the command would run what the task wrote into the test setup.
+				evidence.testsTouched = list(fromFail.setup.length ? fromFail : fromStart);
+				evidence.status = fromFail.setup.length ? "tests-changed" : "setup-changed";
+			} else if (found) {
+				// The user's own command (project setting) is theirs; one found in the project's files is the project's code,
+				// and a yes covers it as it is now (another setup is asked about again).
+				const refused = await guard.allowCommand(
+					found.command,
+					found.source === "project setting" ? undefined : { project: cwd, key: definitionKey(found.command, definition) },
+				);
 				if (refused) {
 					evidence.status = "declined";
 					evidence.reason = refused;
@@ -1347,20 +1423,18 @@ function verifyExtension(cwd: string) {
 					evidence.timedOut = result.timedOut;
 					evidence.summary = outputSummary(result.output);
 					evidence.outputId = verifyOutputs.save(result.output);
-					evidence.status = result.exitCode === 0 && !result.timedOut ? "passed" : "failed";
+					const passed = result.exitCode === 0 && !result.timedOut;
+					evidence.status = passed ? "passed" : "failed";
 					// What the test run itself wrote (a lockfile, caches, reports) is not the agent's change: the folder is
 					// taken again after it, and later changes are measured from there.
 					after = (await checkpoints.tree(cwd).catch(() => null)) ?? now;
-					// While fixing a failure, test files and the way tests are run must stay as they were at that failure.
-					if (run.failTree) {
-						const touched = [
-							...(await checkpoints.changedBetween(cwd, run.failTree, now).catch(() => [] as string[])).filter((f) => isTestPath(f) || isTestConfig(f)),
-							...testDefinitionChanged(run.failDefinition ?? {}, testDefinition(cwd)),
-						];
-						if (touched.length) {
-							evidence.testsTouched = touched;
-							evidence.status = "tests-changed";
-						}
+					// While fixing, tests changed since the failure are not a pass; a pass of tests the task changed is said so.
+					if (fromFail.tests.length) {
+						evidence.testsTouched = list(fromFail);
+						evidence.status = "tests-changed";
+					} else if (fromStart.tests.length) {
+						evidence.testsTouched = list(fromStart);
+						if (passed) evidence.status = "passed-tests-changed";
 					}
 				}
 			}
@@ -1368,16 +1442,14 @@ function verifyExtension(cwd: string) {
 			const next = failed && run.round < maxRounds ? "fix" : "close";
 			if (failed && !run.failTree) {
 				run.failTree = after;
+				// As they stand after that run (what the run itself writes among the tests is not the agent's change).
+				run.failTests = testFingerprint(cwd);
 				run.failDefinition = testDefinition(cwd);
 			}
 			run.phase = next === "fix" ? "fix" : "closing";
 			run.round += next === "fix" ? 1 : 0;
 			run.evidenceTree = after;
-			send({ type: "verify", sessionId: session?.sessionId ?? null, phase: "done", status: evidence.status });
-			return {
-				entries: [{ type: "custom_message", customType: VERIFY_MESSAGE, content: evidenceText(evidence, next), display: true, details: { evidence, next } }],
-				continue: true,
-			};
+			return settleWith(next);
 		});
 	};
 }
@@ -2258,6 +2330,8 @@ async function handle(cmd: Command): Promise<unknown> {
 			const p = memoryProposals.get(String(cmd.proposalId ?? ""));
 			if (!p) throw new Error("This proposal is no longer known");
 			if (p.status !== "pending") return p;
+			// Only the two answers there are: anything else (a typo, an older or newer app) saves nothing.
+			if (cmd.action !== "save" && cmd.action !== "reject") throw new Error("Unknown answer to a memory proposal");
 			if (cmd.action === "reject") {
 				p.status = "rejected";
 			} else {

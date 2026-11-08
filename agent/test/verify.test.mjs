@@ -2,7 +2,7 @@
 // model is told after each kind of evidence.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bundle, tempDir } from "./helpers.mjs";
 
@@ -80,4 +80,26 @@ test("whole outputs are kept by id, and only ids are read", (t) => {
 	assert.equal(store.read(id), "all of it");
 	assert.throws(() => store.read("../../etc/passwd"), /Unknown output/);
 	assert.throws(() => store.read("zzz-zzz"), /no longer kept/);
+});
+
+test("whole outputs are kept within a count, the oldest go first", (t) => {
+	const dir = tempDir(t);
+	const outputs = new v.VerifyOutputs(dir, 3);
+	const ids = [];
+	for (let i = 0; i < 5; i++) ids.push(outputs.save(`run ${i}`));
+	assert.equal(readdirSync(dir).length, 3);
+	assert.throws(() => outputs.read(ids[0]), /no longer kept/);
+	assert.equal(outputs.read(ids[4]), "run 4");
+});
+
+test("the check's environment keeps the shell's and drops what looks secret", () => {
+	const env = v.verifyEnv({ PATH: "/bin", HOME: "/h", LANG: "id", GRIPHUB_STORE_KEY: "x", GITHUB_TOKEN: "x", OPENAI_API_KEY: "x", DB_PASSWORD: "x", AWS_SECRET_ACCESS_KEY: "x", NPM_CONFIG_CACHE: "/c" });
+	assert.deepEqual(Object.keys(env).sort(), ["CI", "HOME", "LANG", "NPM_CONFIG_CACHE", "PATH"]);
+});
+
+test("test files and setups the old rules missed", () => {
+	for (const f of ["test.js", "src/spec.ts", "tests.py", "vite.config.ts", "jest.setup.js", "src/setupTests.ts", "lib/testFixtures/a.json"]) {
+		assert.ok(v.isTestPath(f) || v.isTestConfig(f), f);
+	}
+	assert.ok(!v.isTestPath("src/latest.js") && !v.isTestConfig("src/contest.ts"));
 });

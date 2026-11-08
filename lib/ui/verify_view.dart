@@ -13,6 +13,9 @@ String verifyStatusLabel(String status) => switch (status) {
   'passed' => tr('Tests passed'),
   'failed' => tr('Tests failed'),
   'tests-changed' => tr('Not accepted: tests were changed'),
+  'passed-tests-changed' => tr('Passed, with tests this task changed'),
+  'setup-changed' => tr('Not run: the task changed how tests run'),
+  'unmeasured' => tr('Not checked: changes could not be measured'),
   'declined' => tr('Not run: not allowed'),
   _ => tr('No test could be run for this project'),
 };
@@ -44,7 +47,7 @@ class VerifyEvidenceView extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final e = entry;
     final color = _statusColor(p, e.status);
-    final ran = e.status == 'passed' || e.status == 'failed' || e.status == 'tests-changed';
+    final ran = e.exitCode != null || e.status == 'passed' || e.status == 'failed' || e.status == 'passed-tests-changed';
     final meta = [
       if (e.command != null) e.command!,
       if (ran) _seconds(e.took),
@@ -95,11 +98,21 @@ class VerifyEvidenceView extends StatelessWidget {
               padding: const EdgeInsets.only(top: 6),
               child: Text(tr('The check was not allowed to run, so the changes are not verified.'), style: text.bodySmall?.copyWith(color: p.muted)),
             ),
+          if (e.status == 'unmeasured' || e.status == 'setup-changed')
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                tr(e.status == 'unmeasured'
+                    ? 'The app could not tell what changed in the folder, so nothing was checked.'
+                    : 'A test setup the task changed is not run by the app. Check it yourself before trusting the change.'),
+                style: text.bodySmall?.copyWith(color: p.muted),
+              ),
+            ),
           if (e.testsTouched.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                '${tr('Test files changed while fixing:')} ${e.testsTouched.join(', ')}',
+                '${tr(e.status == 'tests-changed' ? 'Test files changed while fixing:' : 'Tests changed by this task:')} ${e.testsTouched.join(', ')}',
                 style: text.bodySmall?.copyWith(color: p.muted),
               ),
             ),

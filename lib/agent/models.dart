@@ -889,6 +889,10 @@ class ChatView {
   /// What its draft is kept under: the chat's id once known (as when it is open), else its file or new-chat key.
   String get key => sessionId ?? path ?? 'new:${newChatMode ? 'chat' : newDir ?? ''}';
 
+  /// No name and no message yet: [title] is then the English stand-in, to be shown translated.
+  bool get untitled =>
+      (name == null || name!.trim().isEmpty) && (entries.whereType<UserEntry>().firstOrNull?.text.trim().isEmpty ?? true);
+
   /// Its title, as the open chat's: a name, else the first message.
   String get title {
     if (name != null && name!.trim().isNotEmpty) return name!;
@@ -930,13 +934,16 @@ class MemoryEntry {
 
 /// The agent proposed to remember something; the user decides.
 class MemoryProposal {
+  /// Read from a saved chat as it is: a field of another type is taken as missing, never an error.
   MemoryProposal(Map<String, dynamic> j)
-    : id = j['id'] as String? ?? '',
-      text = j['text'] as String? ?? '',
-      layer = j['layer'] as String? ?? 'global',
-      project = j['project'] as String?,
-      replacesText = j['replacesText'] as String?,
-      status = j['status'] as String? ?? 'pending';
+    : id = _str(j['id']) ?? '',
+      text = _str(j['text']) ?? '',
+      layer = _str(j['layer']) ?? 'global',
+      project = _str(j['project']),
+      replacesText = _str(j['replacesText']),
+      status = _str(j['status']) ?? 'pending';
+
+  static String? _str(Object? v) => v is String ? v : null;
   final String id;
   final String text;
   final String layer;

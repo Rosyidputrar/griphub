@@ -244,17 +244,44 @@ class ProcessTextActivity : Activity() {
 class ShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val source = intent
+        // Exported: only a share goes on, as a fresh intent with what a share carries (text, subject, one content://
+        // stream that is not this app's own). Nothing else the caller put in reaches the panel or the app.
+        val share = cleanShare(this, intent)
+        if (share == null) {
+            finish()
+            return
+        }
         // Text, a link or one picture opens the panel (Fitur 4 butir A2); other files go to the app as they always did.
-        val type = source.type ?: ""
+        val type = share.type ?: ""
         val forPanel = type.startsWith("text/") || type.startsWith("image/")
-        if (!forPanel || !Overlay.openPanel(this, source)) {
+        if (!forPanel || !Overlay.openPanel(this, share)) {
             startActivity(
-                Intent(source).setClass(this, MainActivity::class.java)
+                Intent(share).setClass(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             )
         }
         finish()
+    }
+
+    companion object {
+        /** A single share as a new intent: ACTION_SEND, its type, text, subject and stream; null when it is not one. */
+        fun cleanShare(context: Context, source: Intent?): Intent? {
+            if (source?.action != Intent.ACTION_SEND) return null
+            val out = Intent(Intent.ACTION_SEND)
+            source.type?.let { out.type = it }
+            source.getStringExtra(Intent.EXTRA_TEXT)?.let { out.putExtra(Intent.EXTRA_TEXT, it) }
+            source.getStringExtra(Intent.EXTRA_SUBJECT)?.let { out.putExtra(Intent.EXTRA_SUBJECT, it) }
+            @Suppress("DEPRECATION")
+            val stream = source.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                ?.takeIf { it.scheme == "content" && it.authority?.startsWith(context.packageName) != true }
+            if (stream != null) {
+                out.putExtra(Intent.EXTRA_STREAM, stream)
+                out.clipData = android.content.ClipData.newRawUri("", stream)
+                out.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            if (!out.hasExtra(Intent.EXTRA_TEXT) && stream == null) return null
+            return out
+        }
     }
 }
 
@@ -299,7 +326,8 @@ class BubbleService : Service() {
     }
 
     override fun onDestroy() {
-        view?.let { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) }
+        // The permission may have been taken away meanwhile: the window may already be gone.
+        view?.let { v -> try { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(v) } catch (e: Exception) {} }
         view = null
         super.onDestroy()
     }
@@ -374,6 +402,14 @@ class BubbleService : Service() {
         var startX = 0
         var startY = 0
         var moved = false
+        // The overlay permission can be taken away while the bubble is out: a refused move ends the bubble, not the app.
+        fun move(v: View) {
+            try {
+                wm.updateViewLayout(v, params)
+            } catch (e: Exception) {
+                stopSelf()
+            }
+        }
         bubble.setOnTouchListener { v, e ->
             when (e.action) {
                 MotionEvent.ACTION_DOWN -> {
@@ -386,7 +422,7 @@ class BubbleService : Service() {
                     if (abs(dx) > 8 * density || abs(dy) > 8 * density) moved = true
                     params.x = (startX + dx).toInt()
                     params.y = (startY + dy).toInt()
-                    wm.updateViewLayout(v, params)
+                    move(v)
                     true
                 }
                 MotionEvent.ACTION_UP -> {
@@ -396,7 +432,7 @@ class BubbleService : Service() {
                         moved -> {
                             // Back to the nearest edge, out of the way.
                             params.x = if (e.rawX < metrics.widthPixels / 2) (4 * density).toInt() else metrics.widthPixels - size - (4 * density).toInt()
-                            wm.updateViewLayout(v, params)
+                            move(v)
                         }
                         else -> {
                             Overlay.openPanel(this, null)
@@ -407,7 +443,12 @@ class BubbleService : Service() {
                 else -> false
             }
         }
-        wm.addView(bubble, params)
-        view = bubble
+        try {
+            wm.addView(bubble, params)
+            view = bubble
+        } catch (e: Exception) {
+            // Not allowed over other apps (any more): no bubble, and no service for it.
+            stopSelf()
+        }
     }
 }

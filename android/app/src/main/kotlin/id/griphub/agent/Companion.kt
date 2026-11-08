@@ -117,7 +117,35 @@ object ScreenCompanion {
      * One frame now: JPEG as base64, its size, the screen's size, and brightness statistics (mean, deviation) the app
      * reads to tell a secure (black) screen. Null when the companion is not on or no frame came.
      */
-    fun capture(context: Context): Map<String, Any?>? {
+    /** One capture at a time: a second one would take the first one's listener and both would wait for nothing. */
+    private val captureLock = Any()
+
+    /** The capture waiting for a frame, so Stop ends the wait at once instead of after its timeout. */
+    @Volatile
+    private var waiting: CountDownLatch? = null
+
+    /** Who waits for capture to really begin (the consent's answer to the app), answered once. */
+    private var onBegun: ((Boolean) -> Unit)? = null
+
+    /** [answer] gets true once capture has begun, false when it could not (or not within 10 s). Main thread. */
+    fun awaitBegin(answer: (Boolean) -> Unit) {
+        onBegun?.invoke(false)
+        onBegun = answer
+        Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (onBegun === answer) begun(false)
+        }, 10_000)
+    }
+
+    /** Capture began (or failed to): the one waiting is told. Main thread. */
+    fun begun(ok: Boolean) {
+        val answer = onBegun
+        onBegun = null
+        answer?.invoke(ok)
+    }
+
+    fun capture(context: Context): Map<String, Any?>? = synchronized(captureLock) { captureNow(context) }
+
+    private fun captureNow(context: Context): Map<String, Any?>? {
         val d = display ?: return null
         val screen = screenSize(context)
         // Turned since the last frame: the mirror follows the screen's new shape (else it is letterboxed and the boxes
@@ -131,6 +159,7 @@ object ScreenCompanion {
         }
         val r = reader ?: return null
         val latch = CountDownLatch(1)
+        waiting = latch
         var bitmap: Bitmap? = null
         r.setOnImageAvailableListener({ ir ->
             val image = try { ir.acquireLatestImage() } catch (e: Exception) { null } ?: return@setOnImageAvailableListener
@@ -141,16 +170,21 @@ object ScreenCompanion {
                 full.copyPixelsFromBuffer(plane.buffer)
                 bitmap = Bitmap.createBitmap(full, 0, 0, width, height)
                 if (full !== bitmap) full.recycle()
+            } catch (e: Exception) {
+                // A frame that cannot be read ends the wait now (no frame), not after the timeout.
+                bitmap = null
             } finally {
                 image.close()
+                // Back to rendering into nothing: no frames between requests.
+                d.surface = null
+                latch.countDown()
             }
-            // Back to rendering into nothing: no frames between requests.
-            d.surface = null
-            latch.countDown()
         }, handler)
         d.surface = r.surface
         latch.await(3, TimeUnit.SECONDS)
+        waiting = null
         r.setOnImageAvailableListener(null, null)
+        if (display == null) return null
         d.surface = null
         val b = bitmap ?: return null
         val (mean, deviation) = brightness(b)
@@ -199,6 +233,9 @@ object ScreenCompanion {
             Handler(android.os.Looper.getMainLooper()).post { end(context) }
             return
         }
+        // A capture waiting for a frame stops waiting.
+        waiting?.countDown()
+        begun(false)
         try { display?.release() } catch (e: Exception) {}
         try { reader?.close() } catch (e: Exception) {}
         try { projection?.stop() } catch (e: Exception) {}
@@ -264,7 +301,10 @@ class CompanionService : Service() {
             if (data == null) throw IllegalStateException("No consent")
             ScreenCompanion.begin(this, code, data)
             BridgeActivity.emit(mapOf("kind" to "companion", "active" to true))
+            ScreenCompanion.begun(true)
         } catch (e: Exception) {
+            // The app is told it did not start (its Start answers false), not left believing it runs.
+            ScreenCompanion.begun(false)
             ScreenCompanion.end(this)
             stopSelf()
         }
@@ -355,9 +395,13 @@ class CompanionAccessibilityService : AccessibilityService() {
         @Volatile
         var instance: CompanionAccessibilityService? = null
 
+        private const val MAX_VISITED = 1500
+
         fun enabled(context: Context): Boolean {
             val list = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-            return list.split(':').any { it.endsWith("/.CompanionAccessibilityService") || it.endsWith("CompanionAccessibilityService") }
+            // This app's own service exactly: a class of the same name in another app is not ours.
+            val ours = android.content.ComponentName(context, CompanionAccessibilityService::class.java)
+            return list.split(':').any { android.content.ComponentName.unflattenFromString(it) == ours }
         }
     }
 
@@ -389,16 +433,22 @@ class CompanionAccessibilityService : AccessibilityService() {
         return rootInActiveWindow?.takeIf { it.packageName?.toString() != packageName }
     }
 
-    /** The visible elements with text, and their boxes in screen pixels; password fields carry no text. */
+    /**
+     * The visible elements with text, and their boxes in screen pixels. A password field carries nothing it says (no
+     * text, no description, no hint): only that it is there. Reads at most [MAX_VISITED] nodes (a big web page is not
+     * walked whole). Safe off the main thread.
+     */
     fun tree(): List<Map<String, Any?>> {
         val out = mutableListOf<Map<String, Any?>>()
         val root = appRoot() ?: return out
         var next = 0
+        var visited = 0
         fun walk(n: AccessibilityNodeInfo?, depth: Int) {
-            if (n == null || depth > 40 || out.size >= 150) return
+            if (n == null || depth > 40 || out.size >= 150 || ++visited > MAX_VISITED) return
             if (n.isVisibleToUser) {
-                val text = if (n.isPassword) null else n.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-                val desc = n.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                val secret = n.isPassword
+                val text = if (secret) null else n.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+                val desc = if (secret) null else n.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
                 if (text != null || desc != null || n.isClickable) {
                     val r = Rect()
                     n.getBoundsInScreen(r)

@@ -100,3 +100,16 @@ test("a project's memory: proposed in a project chat, kept for that folder, star
 	await h.turn("Halo");
 	assert.doesNotMatch(h.requests().at(-1).system, /Riverpod/, "a plain chat starts with the global layer only");
 });
+
+test("an answer to a proposal that is neither save nor reject saves nothing", async (t) => {
+	const h = await host(t, { MOCK_TOOL: remember({ text: "Pengguna suka kopi hitam", layer: "global" }) });
+	await h.call("new_session", { chatMode: "chat" });
+	await h.turn("Aku suka kopi hitam");
+	const p = h.records.find((r) => r.type === "memory_proposal").proposal;
+	for (const action of ["maybe", undefined, "SAVE", ""]) {
+		const r = await h.raw("memory_decide", { proposalId: p.id, ...(action === undefined ? {} : { action }) });
+		assert.equal(r.ok, false, `action ${action}`);
+	}
+	assert.deepEqual((await h.call("memory_list", { layer: "global" })).entries, []);
+	assert.equal((await h.call("memory_proposals", { ids: [p.id] }))[p.id].status, "pending", "still the user's to answer");
+});

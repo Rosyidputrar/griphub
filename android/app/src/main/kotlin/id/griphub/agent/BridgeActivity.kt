@@ -123,6 +123,7 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
             recreate()
             return
         }
+        resumed = true
         emit(mapOf("kind" to "surface", "surface" to surface) + surfaceInfo())
         if (pendingLaunch != null && pendingSurface == surface) emit(mapOf("kind" to "launch"))
     }
@@ -272,20 +273,30 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                             result.error("share_failed", e.message, null)
                         }
                     }
+                    // Copies (a big file can take seconds) happen off the main thread; the chooser opens on it after.
                     "shareFile" -> {
-                        try {
-                            val file = shareableFile(File(call.argument<String>("path")!!))
-                            val uri = FileProvider.getUriForFile(this, "id.griphub.agent.files", file)
-                            val send = Intent(Intent.ACTION_SEND).apply {
-                                type = mimeOf(file.name)
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        val path = call.argument<String>("path")
+                        Thread {
+                            try {
+                                val file = shareableFile(File(path!!))
+                                val uri = FileProvider.getUriForFile(this, "id.griphub.agent.files", file)
+                                runOnUiThread {
+                                    try {
+                                        val send = Intent(Intent.ACTION_SEND).apply {
+                                            type = mimeOf(file.name)
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        startActivity(Intent.createChooser(send, file.name))
+                                        result.success(null)
+                                    } catch (e: Exception) {
+                                        result.error("share_failed", e.message, null)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("share_failed", e.message, null) }
                             }
-                            startActivity(Intent.createChooser(send, file.name))
-                            result.success(null)
-                        } catch (e: Exception) {
-                            result.error("share_failed", e.message, null)
-                        }
+                        }.start()
                     }
                     // Explicit recovery after SecureKey.hex() refuses an
                     // un-unwrappable key: rotate it; saved tokens must be
@@ -306,11 +317,15 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                         result.success(null)
                     }
                     "saveToDownloads" -> {
-                        try {
-                            result.success(saveToDownloads(File(call.argument<String>("path")!!)))
-                        } catch (e: Exception) {
-                            result.error("save_failed", e.message, null)
-                        }
+                        val path = call.argument<String>("path")
+                        Thread {
+                            try {
+                                val saved = saveToDownloads(File(path!!))
+                                runOnUiThread { result.success(saved) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("save_failed", e.message, null) }
+                            }
+                        }.start()
                     }
                     "openUrl" -> {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(call.arguments as String)))
@@ -336,7 +351,18 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                     // A picture on the clipboard (copied from a browser, a gallery, a screenshot tool): whether there is one,
                     // for the composer's "Paste image", and a copy of it in the cache to attach.
                     "clipboardHasImage" -> result.success(clipboardImageUri() != null)
-                    "clipboardImage" -> result.success(clipboardImageUri()?.let { copyClipboardImage(it) })
+                    "clipboardImage" -> {
+                        // The clipboard is read here; the copy is made off the main thread.
+                        val uri = clipboardImageUri()
+                        if (uri == null) {
+                            result.success(null)
+                        } else {
+                            Thread {
+                                val copy = copyClipboardImage(uri)
+                                runOnUiThread { result.success(copy) }
+                            }.start()
+                        }
+                    }
                     // Only the window a launch is for takes it (an older app that names none takes any).
                     "takeLaunch" -> {
                         val wanted = call.arguments as? String
@@ -432,7 +458,15 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                         startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         result.success(null)
                     }
-                    "a11yTree" -> result.success(CompanionAccessibilityService.instance?.tree() ?: emptyList<Map<String, Any?>>())
+                    // Walked off the main thread: reading another app's views goes through IPC, node by node.
+                    "a11yTree" -> Thread {
+                        val tree = try {
+                            CompanionAccessibilityService.instance?.tree()
+                        } catch (e: Exception) {
+                            null
+                        } ?: emptyList<Map<String, Any?>>()
+                        runOnUiThread { result.success(tree) }
+                    }.start()
                     // The home-screen widgets' snapshot (Widgets.kt), pushed whenever what they show changes.
                     "widgetState" -> {
                         WidgetState.save(applicationContext, call.arguments as String)
@@ -459,8 +493,13 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
             val service = Intent(this, CompanionService::class.java)
                 .putExtra(CompanionService.EXTRA_CODE, resultCode)
                 .putExtra(CompanionService.EXTRA_DATA, data)
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
-            waiting?.success(true)
+            // Answered once capture has really begun in the service (or could not), not when it was only asked for.
+            ScreenCompanion.awaitBegin { ok -> waiting?.success(ok) }
+            try {
+                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service) else startService(service)
+            } catch (e: Exception) {
+                ScreenCompanion.begun(false)
+            }
             return
         }
         if (requestCode != VOICE_REQUEST) return
@@ -494,18 +533,37 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
                 } else {
                     intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.addAll(it) }
                 }
-                mapOf(
-                    "action" to "share",
-                    "text" to listOfNotNull(
-                        intent.getStringExtra(Intent.EXTRA_SUBJECT),
-                        intent.getStringExtra(Intent.EXTRA_TEXT),
-                    ).joinToString("\n").ifBlank { null },
-                    "files" to uris.mapNotNull { copyShared(it) },
-                )
+                val text = listOfNotNull(
+                    intent.getStringExtra(Intent.EXTRA_SUBJECT),
+                    intent.getStringExtra(Intent.EXTRA_TEXT),
+                ).joinToString("\n").ifBlank { null }
+                if (uris.isEmpty()) {
+                    mapOf("action" to "share", "text" to text, "files" to emptyList<Map<String, Any?>>())
+                } else {
+                    // The files are copied off the main thread (a video can take seconds); the launch follows.
+                    Thread {
+                        val files = uris.mapNotNull { copyShared(it) }
+                        runOnUiThread { launchNow(mapOf("action" to "share", "text" to text, "files" to files)) }
+                    }.start()
+                    return
+                }
             }
             else -> return
         }
         launch(launch)
+    }
+
+    /** A launch that became ready after this window showed: queued, and announced now when this window is the one up. */
+    private fun launchNow(map: Map<String, Any?>) {
+        launch(map)
+        if (resumed && owner?.get() === this) emit(mapOf("kind" to "launch"))
+    }
+
+    private var resumed = false
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
     }
 
     /**
@@ -529,6 +587,8 @@ abstract class BridgeActivity : FlutterFragmentActivity() {
         // URI would make this app read its own private files on another
         // app's behalf (e.g. its own .ssh key) using its own privileges.
         if (uri.scheme != "content") return null
+        // Nor a URI of this app's own provider: another app could name our private files through it.
+        if (uri.authority?.startsWith(packageName) == true) return null
         var name = "shared"
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
             if (c.moveToFirst()) name = c.getString(0) ?: name

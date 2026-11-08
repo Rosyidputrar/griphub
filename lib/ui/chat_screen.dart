@@ -12,6 +12,7 @@ import '../agent/models.dart';
 import '../agent/panel.dart';
 import '../agent/pricing.dart';
 import '../agent/features.dart';
+import 'companion_screen.dart' show isCompanionStep;
 import 'i18n.dart';
 import 'chat_extras.dart';
 import 'deploy_sheet.dart';
@@ -903,7 +904,8 @@ class _ChatScreenState extends State<ChatScreen> {
             icon: const Icon(LucideIcons.chevronLeft, size: 24),
             onPressed: agent.leaveView,
           ),
-          title: Text(tr(view.title), maxLines: 1, overflow: TextOverflow.ellipsis),
+          // A chat's own title is shown as written; only the stand-in for an untitled chat is in the app's language.
+          title: Text(view.untitled ? tr('New chat') : view.title, maxLines: 1, overflow: TextOverflow.ellipsis),
           actions: [ConnectionChip(agent: agent), const SizedBox(width: 4)],
         ),
         body: ContentWidth(
@@ -1028,6 +1030,7 @@ class _ChatScreenState extends State<ChatScreen> {
               footer: footers[i],
               autoRouted: footers[i] != null && routed.isNotEmpty && _routedTurn(entries, i, routed, footers[i]!.model),
               visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
+              companionStep: isCompanionStep(_turnUser(entries, i)),
               verified: footers[i] == null ? null : lastVerifyOfTurn(entries, i),
             ),
             NoticeEntry() => NoticeView(

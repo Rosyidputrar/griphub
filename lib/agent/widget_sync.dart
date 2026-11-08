@@ -12,9 +12,16 @@ import 'models.dart';
 /// jobs, subagents, tasks, approvals and credits, sent to the widgets whenever it changes. Nothing polls: the
 /// snapshot follows the app's own change notifications, a second apart at most.
 class WidgetSync {
-  WidgetSync(this.agent, {required this.translate, String Function(String)? number, this.dark, this.send, DateTime Function()? now})
-    : _now = now ?? DateTime.now,
-      number = number ?? ((s) => s);
+  WidgetSync(
+    this.agent, {
+    required this.translate,
+    String Function(String)? number,
+    this.dark,
+    this.private,
+    this.send,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now,
+       number = number ?? ((s) => s);
 
   final AgentController agent;
 
@@ -26,6 +33,10 @@ class WidgetSync {
 
   /// The app's theme: dark or not (the widgets follow it).
   final bool Function()? dark;
+
+  /// App lock is on: the home screen (outside the lock) shows that work goes on, never what it is about (no chat,
+  /// job, task or schedule names). Commands are never shown there, lock or not.
+  final bool Function()? private;
 
   /// Where the snapshot goes; the platform side by default.
   final Future<void> Function(String json)? send;
@@ -60,13 +71,15 @@ class WidgetSync {
     // The time alone changing is not a change.
     final key = json.replaceFirst(RegExp(r'"at":\d+'), '');
     if (key == _last) return;
-    _last = key;
     try {
       await (send ?? (j) => _method.invokeMethod('widgetState', j))(json);
+      // Only what reached the widgets counts as sent: after a failure the next change (or the same state) goes again.
+      _last = key;
     } on MissingPluginException {
       // No platform side (tests, desktop).
+      _last = key;
     } catch (_) {
-      // The widgets keep their last snapshot.
+      // The widgets keep their last snapshot; this one is sent again on the next push.
     }
   }
 
@@ -75,6 +88,7 @@ class WidgetSync {
   Map<String, dynamic> snapshot() {
     final t = translate;
     final now = _now();
+    final hide = private?.call() ?? false;
     final rows = <Map<String, dynamic>>[];
     Map<String, dynamic> chat(String? path) => {'action': 'open_chat', 'path': ?path};
     const tasks = {'action': 'open_tasks'};
@@ -84,9 +98,9 @@ class WidgetSync {
       final started = agent.turnStartedAt;
       rows.add({
         'kind': 'session',
-        'title': t('Working in {chat}').replaceAll('{chat}', agent.chatTitle),
+        'title': hide ? t('The agent is working') : t('Working in {chat}').replaceAll('{chat}', agent.chatTitle),
         'sub': agent.verifying != null
-            ? t('Checking: {command}').replaceAll('{command}', agent.verifying!)
+            ? t('Running the project\'s check')
             : started == null
             ? ''
             : t('For {time}').replaceAll('{time}', _duration(now.difference(started))),
@@ -98,8 +112,9 @@ class WidgetSync {
     for (final j in jobs.take(2)) {
       rows.add({
         'kind': 'job',
-        'title': j.label.isEmpty ? j.command : j.label,
-        'sub': t('Background job · {time}').replaceAll('{time}', _duration(now.difference(j.startedAt))),
+        'title': hide || j.label.isEmpty ? t('Background job') : j.label,
+        // The kind is said once: in the title when the job has no name of its own.
+        'sub': (hide || j.label.isEmpty ? t('For {time}') : t('Background job · {time}')).replaceAll('{time}', _duration(now.difference(j.startedAt))),
         'launch': chat(j.sessionFile),
       });
     }
@@ -113,7 +128,7 @@ class WidgetSync {
       byChat.putIfAbsent(s.parentSessionFile, () => []).add(s);
     }
     for (final e in byChat.entries) {
-      final title = (e.value.first.parentTitle as String).isEmpty ? t('a chat') : e.value.first.parentTitle as String;
+      final title = hide || (e.value.first.parentTitle as String).isEmpty ? t('a chat') : e.value.first.parentTitle as String;
       rows.add({
         'kind': 'subagent',
         'title': e.value.length == 1 ? t('A subagent is working') : t('{n} subagents are working').replaceAll('{n}', '${e.value.length}'),
@@ -123,14 +138,14 @@ class WidgetSync {
     }
     // Background tasks running now.
     for (final r in agent.features.runs.where((r) => r.active).take(2)) {
-      rows.add({'kind': 'job', 'title': r.title, 'sub': t('Background task'), 'launch': tasks});
+      rows.add({'kind': 'job', 'title': hide ? t('Background task') : r.title, 'sub': hide ? '' : t('Background task'), 'launch': tasks});
     }
     // The next scheduled task.
     final next = nextScheduled(agent.features.schedules, now);
     if (next != null) {
       rows.add({
         'kind': 'schedule',
-        'title': next.$1.name,
+        'title': hide ? t('Scheduled task') : next.$1.name,
         'sub': t('Next at {time}').replaceAll('{time}', _clock(next.$2, now)),
         'launch': tasks,
       });
@@ -151,7 +166,11 @@ class WidgetSync {
       'approvalsLaunch': chat(agent.sessionFile),
       'rows': rows,
       'empty': t('Nothing running'),
-      'emptySub': next == null ? '' : t('Next task: {name} at {time}').replaceAll('{name}', next.$1.name).replaceAll('{time}', _clock(next.$2, now)),
+      'emptySub': next == null
+          ? ''
+          : hide
+          ? t('Next task at {time}').replaceAll('{time}', _clock(next.$2, now))
+          : t('Next task: {name} at {time}').replaceAll('{name}', next.$1.name).replaceAll('{time}', _clock(next.$2, now)),
       'askHint': t('Ask anything…'),
       'askLabel': t('Ask'),
       'voiceLabel': t('Voice'),

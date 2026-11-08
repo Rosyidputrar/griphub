@@ -244,3 +244,75 @@ test("Try again after an error continues the same task: its changes are still ve
 	assert.equal(ev.length, 1, "measured from where the task began, so notes.txt counts");
 	assert.equal(ev[0].evidence.status, "passed");
 });
+
+// --- Review findings: tests weakened by the task itself, setups that change, the folder that cannot be measured, the
+// environment the check runs in.
+
+test("tests weakened in the task itself (before any failure) are never a plain PASSED", async (t) => {
+	// The task breaks ok.txt and rewrites the existing test to always pass, in one go.
+	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt && echo 'console.log(\"1 passing\")' > test/check.test.js") });
+	approveAll(h, t);
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Ubah ok.txt");
+	const ev = await evidence(h);
+	assert.equal(ev.length, 1);
+	assert.equal(ev[0].evidence.status, "passed-tests-changed");
+	assert.deepEqual(ev[0].evidence.testsTouched, ["test/check.test.js"]);
+	const said = (await h.call("messages")).findLast((m) => m.customType === "griphub_verify").content;
+	assert.match(said, /PASSED, BUT THIS TASK CHANGED EXISTING TESTS/);
+	assert.match(said, /Do not present it as the original tests passing/);
+});
+
+test("a test script changed by the task is not run at all, and says why", async (t) => {
+	const weaken = "node -e \"const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.scripts.test='echo 1 passing';fs.writeFileSync('package.json',JSON.stringify(p))\"";
+	const h = await host(t, { MOCK_TOOL: bash(`echo bad > ok.txt && ${weaken}`) });
+	approveAll(h, t);
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Ubah ok.txt");
+	const ev = await evidence(h);
+	assert.equal(ev[0].evidence.status, "setup-changed");
+	assert.deepEqual(ev[0].evidence.testsTouched, ["package.json (test)"]);
+	assert.equal(ev[0].evidence.exitCode, null);
+	assert.ok(!h.records.some((r) => r.type === "verify" && r.phase === "running"), "nothing ran");
+	assert.ok(!h.records.some((r) => r.type === "approval"), "nothing to approve: nothing runs");
+});
+
+test("tests in a folder that .gitignore names are still watched", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo bad > ok.txt && echo 'console.log(\"1 passing\")' > test/check.test.js") });
+	approveAll(h, t);
+	const dir = project(h.ws);
+	writeFileSync(join(dir, ".gitignore"), "test/\n");
+	await h.call("new_session", { cwd: dir });
+	await h.turn("Ubah ok.txt");
+	const ev = await evidence(h);
+	assert.equal(ev[0].evidence.status, "passed-tests-changed");
+	assert.deepEqual(ev[0].evidence.testsTouched, ["test/check.test.js"]);
+});
+
+test("a folder that cannot be measured is said, never a silent done", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo extra > notes.txt") });
+	// The checkpoint store cannot be made: every measurement fails.
+	writeFileSync(join(h.agentDir, "griphub", "checkpoints"), "not a folder");
+	await h.call("new_session", { cwd: project(h.ws) });
+	await h.turn("Tambah notes.txt");
+	const ev = await evidence(h);
+	assert.equal(ev.length, 1);
+	assert.equal(ev[0].evidence.status, "unmeasured");
+	assert.match(JSON.stringify((await lastAfterEvidence(h)).content), /verification/i);
+});
+
+test("the check runs without the host's secrets in its environment", async (t) => {
+	const h = await host(t, { MOCK_TOOL: bash("echo extra > notes.txt"), SOME_API_TOKEN: "tok-should-not-leak" });
+	approveAll(h, t);
+	const dir = project(h.ws);
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "p", scripts: { test: "env && node test/check.test.js" } }));
+	await h.call("new_session", { cwd: dir });
+	await h.turn("Tambah notes.txt");
+	const ev = await evidence(h);
+	assert.equal(ev[0].evidence.status, "passed");
+	const full = (await h.call("verify_output", { outputId: ev[0].evidence.outputId })).output;
+	assert.match(full, /^CI=1$/m, "the environment was printed");
+	assert.doesNotMatch(full, /tok-should-not-leak/);
+	assert.doesNotMatch(full, /abababab/, "nor the store key");
+	assert.doesNotMatch(full, /GRIPHUB_STORE_KEY/);
+});

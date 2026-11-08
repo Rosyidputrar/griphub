@@ -444,19 +444,21 @@ export class Guard {
 	 * bash call of the agent's would meet: the approval mode, "Always allow", plan mode, and no question at all where
 	 * nobody is watching. Asks the user when the mode wants that. Null when it may run, else why not.
 	 */
-	async allowCommand(command: string, project?: string): Promise<string | null> {
+	async allowCommand(command: string, project?: { project: string; key: string }): Promise<string | null> {
 		// A test script is the project's code, not a command the agent chose: a freshly cloned repository's `npm test`
-		// runs whatever it says. The first one in a folder is asked about ("Ask risky"), or refused where nobody watches
-		// ("deny risky") unless the person let it run there before; the yes covers the folder.
-		if (project && !this.planMode && (this.mode === "ask_risky" || this.mode === "deny_risky")) {
-			const key = `check:${project}`;
-			if (!this.checkedProjects.has(project) && !this.allowed.has(key)) {
+		// runs whatever it says. The first run of a test setup in a folder is asked about in every mode where someone is
+		// there to answer ("Bypass all" is about the agent's own actions, not the project's code), and refused where
+		// nobody watches unless it was allowed before. The yes covers that folder with that setup; a changed setup asks
+		// again.
+		if (project && !this.planMode) {
+			const key = `check:${project.project}:${project.key}`;
+			if (!this.checkedProjects.has(key) && !this.allowed.has(key)) {
 				if (this.mode === "deny_risky") {
 					return `Refused: nobody is watching this run, and this project's own test command has not been allowed to run in this folder yet (${PROJECT_CHECK_RISK}).`;
 				}
 				const ok = await this.ask("bash", { command }, PROJECT_CHECK_RISK, key);
 				if (!ok) return "The user declined running the project's test command.";
-				this.checkedProjects.add(project);
+				this.checkedProjects.add(key);
 				return null;
 			}
 		}

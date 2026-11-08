@@ -21,6 +21,59 @@ WidgetSync sync(AgentController agent, {List<String>? sent}) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  AgentController busyWithEverything() {
+    final agent = AgentController(AgentClient())
+      ..sessionFile = '/s/a.jsonl'
+      ..sessionName = 'Rahasia klien X'
+      ..busy = true
+      ..verifying = 'npm test -- --token=abc'
+      ..turnStartedAt = _now.subtract(const Duration(minutes: 3));
+    agent.jobStore.apply({'id': 'j1', 'sessionFile': '/s/b.jsonl', 'command': 'curl -H "Authorization: x" api', 'label': '', 'cwd': '/w', 'status': 'running', 'limitMinutes': 30, 'elapsedMs': 1000});
+    agent.subagentStore.applyRecord({
+      'type': 'subagent_started',
+      'subagent': {'id': 'sa1', 'parentSessionFile': '/s/c.jsonl', 'parentTitle': 'Gaji karyawan', 'task': 'cari', 'status': 'running', 'profile': 'read'},
+    });
+    agent.features.schedules = [
+      ScheduleInfo({'id': 'a', 'name': 'Tagih utang Budi', 'prompt': 'x', 'enabled': true, 'dailyAt': '14:00'}),
+    ];
+    return agent;
+  }
+
+  test('commands never reach the home screen, lock or not', () {
+    FakeHost();
+    final json = jsonEncode(sync(busyWithEverything()).snapshot());
+    expect(json, isNot(contains('npm test')));
+    expect(json, isNot(contains('curl')));
+    expect(json, contains('Running the project\'s check'));
+    expect(json, contains('Background job'));
+  });
+
+  test('with app lock on, the home screen says work goes on, never what it is about', () {
+    FakeHost();
+    final s = WidgetSync(busyWithEverything(), translate: (k) => k, now: () => _now, private: () => true).snapshot();
+    final json = jsonEncode(s);
+    for (final secret in ['Rahasia klien X', 'Gaji karyawan', 'Tagih utang Budi', 'npm test', 'curl']) {
+      expect(json, isNot(contains(secret)), reason: secret);
+    }
+    expect(json, contains('The agent is working'));
+    expect(json, contains('Scheduled task'));
+  });
+
+  test('a push that failed is sent again, not taken as sent', () async {
+    FakeHost();
+    final agent = AgentController(AgentClient());
+    var fail = true;
+    final got = <String>[];
+    final w = WidgetSync(agent, translate: (k) => k, now: () => _now, send: (j) async {
+      if (fail) throw StateError('no widget host');
+      got.add(j);
+    });
+    await w.push();
+    fail = false;
+    await w.push();
+    expect(got, hasLength(1), reason: 'the same state goes again after a failure');
+  });
+
   test('times and credits in the app\'s language, as the app shows them', () {
     FakeHost();
     final agent = AgentController(AgentClient())

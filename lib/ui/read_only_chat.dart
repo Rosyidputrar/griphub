@@ -3,6 +3,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/models.dart';
+import 'companion_screen.dart' show isCompanionStep;
 import 'i18n.dart';
 import 'kit.dart';
 import 'message_views.dart';
@@ -255,6 +256,7 @@ class ReadOnlyTranscript extends StatelessWidget {
             modelLabel: agent.modelLabel,
             footer: footers[i],
             visionReads: footers[i] == null ? const [] : _turnUser(entries, i)?.visionReads ?? const [],
+            companionStep: isCompanionStep(_turnUser(entries, i)),
             verified: footers[i] == null ? null : lastVerifyOfTurn(entries, i),
             readOnly: true,
           ),

@@ -387,9 +387,19 @@ class _EntryRow extends StatelessWidget {
 }
 
 /// What the open chat started with from memory ("what the agent remembered when this chat began").
-class MemorySnapshotScreen extends StatelessWidget {
+class MemorySnapshotScreen extends StatefulWidget {
   const MemorySnapshotScreen({super.key, required this.agent});
   final AgentController agent;
+
+  @override
+  State<MemorySnapshotScreen> createState() => _MemorySnapshotScreenState();
+}
+
+class _MemorySnapshotScreenState extends State<MemorySnapshotScreen> {
+  AgentController get agent => widget.agent;
+
+  /// Asked once when the screen opens: a rebuild (theme, text size, keyboard) does not ask the host again.
+  late final Future<MemorySnapshotInfo?> _snapshot = agent.memorySnapshot();
 
   @override
   Widget build(BuildContext context) {
@@ -398,7 +408,7 @@ class MemorySnapshotScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(tr('What the agent remembered'))),
       body: FutureBuilder<MemorySnapshotInfo?>(
-        future: agent.memorySnapshot(),
+        future: _snapshot,
         builder: (context, snap) {
           if (snap.hasError) return ErrorNotice(error: snap.error, center: true);
           if (snap.connectionState != ConnectionState.done) return const Center(child: BusySpinner.page());

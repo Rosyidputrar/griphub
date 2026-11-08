@@ -34,6 +34,7 @@ void main() {
     agent,
     translate: tr,
     number: localNumber,
+    private: () => Appearance.instance.appLock,
     dark: () => switch (Appearance.instance.value) {
       ThemeMode.dark => true,
       ThemeMode.light => false,

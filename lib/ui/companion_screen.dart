@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../agent/agent_controller.dart';
 import '../agent/companion.dart';
+import '../agent/models.dart';
 import 'errors.dart';
 import 'i18n.dart';
 import 'kit.dart';
@@ -12,6 +13,12 @@ import 'theme.dart';
 
 /// A reply without the screen companion's pointer line (agent/src/companion.ts): the user reads the step, and the
 /// highlight on screen does the pointing.
+/// The mark the host puts at the start of a screen companion step (agent/src/companion.ts COMPANION_MARK).
+const companionStepMark = '[Pendamping layar]';
+
+/// Whether [user] (a turn's message) is a screen companion step: only its answer has a pointer line to hide.
+bool isCompanionStep(UserEntry? user) => user?.text.trimLeft().startsWith(companionStepMark) ?? false;
+
 String hideCompanionPointer(String text) =>
     text.contains('SOROT') ? text.split('\n').where((l) => !RegExp(r'^\s*SOROT\s*:', caseSensitive: false).hasMatch(l)).join('\n').trimRight() : text;
 

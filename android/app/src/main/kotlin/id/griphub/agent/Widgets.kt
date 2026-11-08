@@ -57,7 +57,7 @@ object WidgetState {
     else Triple(0xFF111113.toInt(), 0x99111113.toInt(), 0xFFF7F7F8.toInt())
 
     /** Opens the app with [launch] (the notifications' own safe way in: a per-install token). */
-    fun open(context: Context, code: Int, launch: Map<String, Any?>?): PendingIntent = Notifications.openIntent(context, code, launch)
+    fun open(context: Context, code: Int, launch: Map<String, Any?>?): PendingIntent = Notifications.openIntent(context, code, launch, "widget")
 
     fun map(o: JSONObject?): Map<String, Any?>? =
         o?.keys()?.asSequence()?.associateWith { k -> o.opt(k).takeUnless { it == JSONObject.NULL } }

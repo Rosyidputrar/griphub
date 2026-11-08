@@ -857,10 +857,11 @@ class AgentController extends ChangeNotifier {
 
   /// What the user decided about the proposals in the loaded chat.
   Future<void> _loadMemoryDecisions() async {
+    // Ids as the host wrote them; anything else in a saved chat (another type, a hand-edited file) is passed over.
     final ids = [
       for (final r in tools.values)
-        if (r.details?['proposal'] case final Map p) p['id'] as String? ?? '',
-    ].where((id) => id.isNotEmpty).toList();
+        if (r.details?['proposal'] case {'id': final String id} when id.isNotEmpty) id,
+    ];
     if (ids.isEmpty) return;
     try {
       final r = (await client.call<Map>('memory_proposals', {'ids': ids})).cast<String, dynamic>();

@@ -66,6 +66,24 @@ test("a failed turn makes the next one climb a class, and the escalation is logg
 	assert.notEqual(second[0].model, "glm-5.3-flash");
 });
 
+test("a raised class comes down again after a few turns that went well, and that is logged", async (t) => {
+	const h = await host(t, { MOCK_FAIL_CHAT: "1" });
+	await h.call("new_session", { chatMode: "chat" });
+	await h.call("smart_router_set", { on: true });
+	await h.turn("halo");
+	await h.turn("halo lagi");
+	assert.equal((await h.call("state")).smartRouter.floor, 1, "raised after the failure");
+	await h.turn("Ibu kota Jepang apa?");
+	await h.turn("Ibu kota Korea apa?");
+	assert.equal((await h.call("state")).smartRouter.floor, 1, "two calm turns are not enough");
+	const sent = await h.turn("Ibu kota Prancis apa?");
+	assert.equal((await h.call("state")).smartRouter.floor, 0);
+	assert.deepEqual(sent.map((r) => r.model), ["glm-5.3-flash"], "the cheapest again");
+	const relax = (await h.call("routing_log")).log.find((d) => d.kind === "relax");
+	assert.equal(relax.band, 0);
+	assert.deepEqual(relax.why, ["calm"]);
+});
+
 test("a model picked by hand stops the automatic choice for that chat", async (t) => {
 	const h = await host(t);
 	await h.call("new_session", { chatMode: "chat" });

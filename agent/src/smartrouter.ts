@@ -209,6 +209,9 @@ export function failureOf(last: { stopReason?: string } | null, previousText: st
 	return null;
 }
 
+/** Turns in a row without a failure after which a raised floor comes down one band. */
+export const CALM_TURNS = 3;
+
 /** The chat's new floor after a failure: one band above what the failed turn used. */
 export function nextFloor(floor: Difficulty, failedBand: Difficulty | null): Difficulty {
 	return Math.min(2, Math.max(floor, (failedBand ?? floor) + 1)) as Difficulty;
@@ -221,7 +224,7 @@ export interface Decision {
 	at: number;
 	/** User turns before this one: the app matches decisions to turns with it. */
 	turn: number;
-	kind: "route" | "none" | "escalate" | "manual" | "on" | "off" | "fallback";
+	kind: "route" | "none" | "escalate" | "relax" | "manual" | "on" | "off" | "fallback";
 	model?: string;
 	modelName?: string;
 	band?: Difficulty;
@@ -241,6 +244,8 @@ export interface ChatRouting {
 	version: 1;
 	auto: boolean;
 	floor: Difficulty;
+	/** Routed turns in a row with no failure since the floor last moved: enough of them lower it again. */
+	calm?: number;
 	/** What the last routed turn used and was asked, for escalation. */
 	last?: { model: string; band: Difficulty; text: string };
 	log: Decision[];
@@ -261,7 +266,14 @@ export class RoutingStore {
 			const f = this.file(sessionId);
 			if (existsSync(f)) {
 				const v = JSON.parse(readFileSync(f, "utf8"));
-				if (v?.version === 1 && Array.isArray(v.log)) return { auto: v.auto === true, floor: clampBand(v.floor), log: v.log, version: 1, ...(v.last && { last: v.last }) };
+				if (v?.version === 1 && Array.isArray(v.log)) return {
+						auto: v.auto === true,
+						floor: clampBand(v.floor),
+						log: v.log,
+						version: 1,
+						...(v.last && { last: v.last }),
+						...(typeof v.calm === "number" && { calm: v.calm }),
+					};
 			}
 		} catch {
 			// Unreadable: as if routing was never used here.

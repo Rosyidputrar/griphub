@@ -10,7 +10,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 
@@ -94,14 +95,16 @@ function pythonTests(dir: string): boolean {
 // ---------------------------------------------------------------------------
 // Test files: a failure is fixed in the code, never by changing the tests
 
-const TEST_PATH = /(^|\/)(test|tests|__tests__|spec|specs|androidTest)\/|(^|\/)[^/]*([._-](test|spec))\.[a-z0-9]+$|(^|\/)test_[^/]*\.py$|_test\.(go|dart|py|rs)$/i;
+const TEST_PATH =
+	/(^|\/)(test|tests|__tests__|spec|specs|androidTest|testFixtures)\/|(^|\/)[^/]*([._-](test|spec))\.[a-z0-9]+$|(^|\/)(test|tests|spec|specs)\.[a-z0-9]+$|(^|\/)test_[^/]*\.py$|_test\.(go|dart|py|rs)$/i;
 
 export function isTestPath(path: string): boolean {
 	return TEST_PATH.test(path);
 }
 
 /** Files that only configure how tests run: changing them while fixing a failure changes the tests too. */
-const TEST_CONFIG = /(^|\/)(pytest\.ini|tox\.ini|conftest\.py|phpunit\.xml(\.dist)?|karma\.conf\.[cm]?[jt]s|(jest|vitest|playwright|cypress)\.config\.[cm]?[jt]s|\.mocharc\.[a-z]+|\.nycrc(\.[a-z]+)?|dart_test\.yaml)$/i;
+const TEST_CONFIG =
+	/(^|\/)(pytest\.ini|tox\.ini|conftest\.py|phpunit\.xml(\.dist)?|karma\.conf\.[cm]?[jt]s|(jest|vitest|vite|playwright|cypress)\.config\.[cm]?[jt]s|vitest\.workspace\.[cm]?[jt]s|(jest\.setup|setupTests)\.[cm]?[jt]sx?|\.mocharc\.[a-z]+|\.nycrc(\.[a-z]+)?|dart_test\.yaml)$/i;
 
 export function isTestConfig(path: string): boolean {
 	return TEST_CONFIG.test(path);
@@ -124,11 +127,20 @@ export function testDefinition(cwd: string): Record<string, string> {
 	const pkg = read("package.json");
 	if (pkg !== null) {
 		try {
-			const scripts = JSON.parse(pkg)?.scripts ?? {};
-			for (const [k, v] of Object.entries(scripts)) if (/^(pre|post)?test(:|$)/.test(k)) out[`package.json (${k})`] = String(v);
+			const json = JSON.parse(pkg) ?? {};
+			for (const [k, v] of Object.entries(json.scripts ?? {})) if (/^(pre|post)?test(:|$)/.test(k)) out[`package.json (${k})`] = String(v);
+			// Test runners configured inside package.json.
+			for (const k of ["jest", "vitest", "mocha", "ava", "c8", "nyc"]) if (json[k] !== undefined) out[`package.json (${k})`] = JSON.stringify(json[k]);
 		} catch {
 			out["package.json (test)"] = "unreadable";
 		}
+	}
+	// Gradle: the blocks that say how tests run (test { }, tasks.test, withType<Test>, testOptions).
+	for (const f of ["build.gradle", "build.gradle.kts", "app/build.gradle", "app/build.gradle.kts"]) {
+		const g = read(f);
+		if (g === null) continue;
+		const blocks = gradleTestBlocks(g);
+		if (blocks.length) out[`${f} (test)`] = blocks.join("\n");
 	}
 	const make = read("Makefile");
 	if (make !== null) {
@@ -141,6 +153,81 @@ export function testDefinition(cwd: string): Record<string, string> {
 		if (m) out["pyproject.toml (pytest)"] = m[0];
 	}
 	return out;
+}
+
+/** The `test { ... }`-like blocks of a Gradle build file, braces matched. */
+function gradleTestBlocks(text: string): string[] {
+	const out: string[] = [];
+	const start = /^\s*(tasks\.)?(test|testOptions|withType<Test>|withType\(Test\)|named\(["']test["']\)|tasks\.named<Test>\(["']test["']\))\b[^\n{]*\{/gm;
+	for (const m of text.matchAll(start)) {
+		let depth = 0;
+		let i = (m.index ?? 0) + m[0].length - 1;
+		const from = m.index ?? 0;
+		for (; i < text.length; i++) {
+			if (text[i] === "{") depth++;
+			else if (text[i] === "}" && --depth === 0) break;
+		}
+		out.push(text.slice(from, i + 1));
+	}
+	return out;
+}
+
+/** Folders never looked into for tests: dependencies, builds and caches (not the project's own tests). */
+const SKIP_DIRS = new Set(["node_modules", ".git", ".dart_tool", ".gradle", "build", "dist", "out", "target", ".next", ".venv", "venv", "__pycache__", ".pytest_cache", "coverage", ".idea", "Pods", ".pub-cache"]);
+
+/**
+ * The project's test files and test configuration, each with a hash of its content, read from the folder itself (not
+ * the checkpoint repository, which skips what .gitignore names: a test folder in .gitignore is still seen here).
+ */
+export function testFingerprint(cwd: string, limit = 20_000): Record<string, string> {
+	const out: Record<string, string> = {};
+	let seen = 0;
+	const walk = (dir: string, rel: string) => {
+		let names: import("node:fs").Dirent[];
+		try {
+			names = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const d of names) {
+			if (++seen > limit) return;
+			const r = rel ? `${rel}/${d.name}` : d.name;
+			const p = join(dir, d.name);
+			if (d.isDirectory()) {
+				if (!SKIP_DIRS.has(d.name)) walk(p, r);
+			} else if (d.isFile() && (isTestPath(r) || isTestConfig(r))) {
+				try {
+					const st = statSync(p);
+					out[r] = st.size > 4_000_000 ? `size:${st.size}:${st.mtimeMs}` : createHash("sha1").update(readFileSync(p)).digest("hex");
+				} catch {}
+			}
+		}
+	};
+	walk(cwd, "");
+	return out;
+}
+
+/** Test files changed between two fingerprints: changed or removed always; added only when [added] says so. */
+export function testsChanged(before: Record<string, string>, after: Record<string, string>, { added = false } = {}): string[] {
+	const out = Object.keys(before).filter((f) => after[f] !== before[f]);
+	if (added) out.push(...Object.keys(after).filter((f) => !(f in before)));
+	return out.sort();
+}
+
+/** A short fingerprint of how tests run here: the command and its definition (for the approval that covers it). */
+export function definitionKey(command: string, def: Record<string, string>): string {
+	return createHash("sha1").update(JSON.stringify([command, Object.entries(def).sort()])).digest("hex").slice(0, 16);
+}
+
+/**
+ * The environment the check runs in: the host's, without what looks like a secret (keys, tokens, passwords). The
+ * project's test code is not the agent's and has no business with GripHub's or GitHub's credentials.
+ */
+export function verifyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const secret = /(TOKEN|SECRET|PASSW|API_?KEY|ACCESS_?KEY|PRIVATE|CREDENTIAL|AUTH|COOKIE|SESSION|_KEY$|^KEY$)/i;
+	const out: NodeJS.ProcessEnv = {};
+	for (const [k, v] of Object.entries(env)) if (!secret.test(k)) out[k] = v;
+	return { ...out, CI: "1" };
 }
 
 /** The names in [testDefinition] that differ between two readings of it. */
@@ -178,7 +265,7 @@ export function runVerify(command: string, cwd: string, shellPath: string | unde
 		const child = spawn(shell.shell, [...shell.args, command], {
 			cwd,
 			detached: true,
-			env: { ...process.env, CI: "1" },
+			env: verifyEnv(),
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		const add = (chunk: Buffer) => {
@@ -227,7 +314,13 @@ export function outputSummary(output: string, lines = 40, chars = 3_000): string
 // ---------------------------------------------------------------------------
 // The evidence
 
-export type VerifyStatus = "passed" | "failed" | "none" | "declined" | "tests-changed";
+/**
+ * passed / failed: the check ran. tests-changed: tests or their setup were changed while fixing a failure (not taken as
+ * a pass). passed-tests-changed: it passed, but the task changed tests that were there before (said, not hidden).
+ * setup-changed: the task changed how tests run (the test script, the runner's config), so the app did not run that.
+ * unmeasured: the folder could not be measured, so nothing could be checked. none / declined: nothing ran.
+ */
+export type VerifyStatus = "passed" | "failed" | "none" | "declined" | "tests-changed" | "passed-tests-changed" | "setup-changed" | "unmeasured";
 
 export interface Evidence {
 	status: VerifyStatus;
@@ -240,7 +333,7 @@ export interface Evidence {
 	outputId: string | null;
 	round: number;
 	maxRounds: number;
-	/** Test files changed while fixing a failure (the result is then not taken as a pass). */
+	/** Test files (or their setup) changed by the task, or while fixing a failure (the result is then not taken as a pass). */
 	testsTouched: string[];
 	/** Why it did not run (declined). */
 	reason?: string;
@@ -259,20 +352,27 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 /** What the model reads: the facts, then exactly what it must do next. */
 export function evidenceText(e: Evidence, next: NextStep): string {
 	const head = `[Verification evidence #${e.round + 1}, run by the app in this session, not a claim]`;
+	const touched = e.testsTouched.length ? e.testsTouched.join(", ") : "";
 	const facts =
 		e.status === "none"
 			? ["No test could be run for this project (no test command found, and none is set in the project's settings)."]
 			: e.status === "declined"
 				? [`Command: ${e.command}`, `Not run: ${e.reason ?? "the user did not allow it"}.`]
-				: [
-						`Command: ${e.command}`,
-						`Status: ${e.status === "passed" ? "PASSED" : e.status === "tests-changed" ? "NOT ACCEPTED (tests were changed)" : "FAILED"}${e.exitCode !== null ? ` (exit code ${e.exitCode})` : ""}${e.timedOut ? " (stopped: took too long)" : ""}, ${seconds(e.durationMs)}`,
-						...(e.testsTouched.length ? [`Test files changed while fixing: ${e.testsTouched.join(", ")}`] : []),
-						"Output (end):",
-						"```",
-						e.summary || "(no output)",
-						"```",
-					];
+				: e.status === "unmeasured"
+					? ["Not checked: the app could not measure what changed in the folder, so it ran nothing."]
+					: e.status === "setup-changed"
+						? [`Command: ${e.command}`, `Not run: this task changed how the tests run (${touched}). The app does not run a test setup the task changed.`]
+						: e.status === "tests-changed" && e.exitCode === null
+							? [`Command: ${e.command}`, `Status: NOT ACCEPTED (how the tests run was changed while fixing: ${touched}); not run.`]
+							: [
+									`Command: ${e.command}`,
+									`Status: ${e.status === "passed" ? "PASSED" : e.status === "passed-tests-changed" ? "PASSED, BUT THIS TASK CHANGED EXISTING TESTS" : e.status === "tests-changed" ? "NOT ACCEPTED (tests were changed)" : "FAILED"}${e.exitCode !== null ? ` (exit code ${e.exitCode})` : ""}${e.timedOut ? " (stopped: took too long)" : ""}, ${seconds(e.durationMs)}`,
+									...(touched ? [`Existing tests changed by this task: ${touched}`] : []),
+									"Output (end):",
+									"```",
+									e.summary || "(no output)",
+									"```",
+								];
 	const ask =
 		next === "fix"
 			? [
@@ -284,8 +384,13 @@ export function evidenceText(e: Evidence, next: NextStep): string {
 				]
 			: e.status === "passed"
 				? ["Write a short closing message for the user that states this verification result (passed, with the command). Do not change files any more."]
-				: e.status === "none" || e.status === "declined"
-					? ["Write a short closing message for the user that says plainly the change was not verified by tests, and why. Do not say it works. Do not change files any more."]
+				: e.status === "passed-tests-changed"
+					? [
+							"Write a short closing message that states the tests passed AND, plainly, which existing tests this task changed and why.",
+							"Do not present it as the original tests passing. Do not change files any more.",
+						]
+					: e.status === "none" || e.status === "declined" || e.status === "unmeasured" || e.status === "setup-changed"
+						? ["Write a short closing message for the user that says plainly the change was not verified by tests, and why. Do not say it works. Do not change files any more."]
 					: [
 							"No fix rounds are left. Write a closing message that reports this failure as it is, with the last result.",
 							"Do NOT say the task is done or works. Do not change files any more.",
@@ -306,13 +411,29 @@ export const VERIFY_NOTE = [
 // Whole outputs, for "show the full output"
 
 export class VerifyOutputs {
-	constructor(private readonly dir: string) {}
+	/** At most [keep] outputs and [maxBytes] in all stay (the oldest go first). */
+	constructor(private readonly dir: string, private readonly keep = 60, private readonly maxBytes = 50_000_000) {}
 
 	save(output: string): string {
 		mkdirSync(this.dir, { recursive: true });
 		const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 		writeFileSync(join(this.dir, `${id}.log`), output, { mode: 0o600 });
+		this.prune();
 		return id;
+	}
+
+	private prune() {
+		try {
+			const files = readdirSync(this.dir)
+				.filter((n) => n.endsWith(".log"))
+				.map((n) => ({ n, st: statSync(join(this.dir, n)) }))
+				.sort((a, b) => b.st.mtimeMs - a.st.mtimeMs || b.n.localeCompare(a.n));
+			let bytes = 0;
+			files.forEach((f, i) => {
+				bytes += f.st.size;
+				if (i >= this.keep || bytes > this.maxBytes) rmSync(join(this.dir, f.n), { force: true });
+			});
+		} catch {}
 	}
 
 	read(id: string): string {

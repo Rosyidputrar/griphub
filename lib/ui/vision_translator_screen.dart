@@ -18,9 +18,9 @@ String visionTranslatorSummary(AppSettings? s) => switch (s?.visionTranslator ??
 /// A vision model the translator can use, from the router's metadata (vision_translator_info).
 class _VisionModel {
   _VisionModel(Map<String, dynamic> j)
-    : id = j['id'] as String,
-      name = j['name'] as String? ?? j['id'] as String,
-      credits = (j['credits'] as num?)?.toDouble(),
+    : id = j['id'] is String ? j['id'] as String : '',
+      name = j['name'] is String ? j['name'] as String : (j['id'] is String ? j['id'] as String : ''),
+      credits = j['credits'] is num ? (j['credits'] as num).toDouble() : null,
       available = j['available'] != false;
   final String id;
   final String name;
@@ -59,10 +59,16 @@ class _VisionTranslatorScreenState extends State<VisionTranslatorScreen> {
       final r = (await agent.client.call<Map>('vision_translator_info')).cast<String, dynamic>();
       if (!mounted) return;
       setState(() {
-        _models = [for (final m in (r['models'] as List? ?? const [])) _VisionModel((m as Map).cast<String, dynamic>())]
+        // A row the host sent broken (no id) is left out; the rest of the screen stays.
+        _models = [
+          for (final m in (r['models'] is List ? r['models'] as List : const [])) if (m is Map) _VisionModel(m.cast<String, dynamic>()),
+        ].where((m) => m.id.isNotEmpty).toList()
           ..sort((a, b) => (a.credits ?? 1e9).compareTo(b.credits ?? 1e9));
-        _defaults = (r['defaultAllowed'] as List? ?? const []).whereType<String>().toList();
-        _current = (r['current'] as Map?)?['name'] as String?;
+        _defaults = (r['defaultAllowed'] is List ? r['defaultAllowed'] as List : const []).whereType<String>().toList();
+        _current = switch (r['current']) {
+          {'name': final String name} => name,
+          _ => null,
+        };
         _error = null;
       });
     } catch (e) {

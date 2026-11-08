@@ -64,6 +64,7 @@ String smartRouterReason(String code) => switch (code) {
   'cut-off' => tr('the last reply was cut off'),
   'resent' => tr('the same request was sent again'),
   'rejected' => tr('you said the last answer was wrong'),
+  'calm' => tr('the last turns went well'),
   'tools' => tr('none can use tools'),
   'context' => tr('none holds this conversation'),
   'price' => tr('none has a live price'),
@@ -263,6 +264,10 @@ class RoutingDecisionRow extends StatelessWidget {
       'escalate' => (
         LucideIcons.trendingUp,
         tr('Class raised to {class}').replaceAll('{class}', smartRouterClassName(d.band)),
+      ),
+      'relax' => (
+        LucideIcons.trendingDown,
+        tr('Class lowered to {class}').replaceAll('{class}', smartRouterClassName(d.band)),
       ),
       'none' => (LucideIcons.circleAlert, tr('No model fit message {n}').replaceAll('{n}', '${d.turn + 1}')),
       'manual' => (LucideIcons.hand, tr('Chosen by hand: {model}').replaceAll('{model}', d.modelName ?? d.model ?? '')),
