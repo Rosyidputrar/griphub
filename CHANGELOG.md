@@ -13,6 +13,12 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
 
 ## Belum dirilis
 
+_Belum ada perubahan._
+
+---
+
+## v1.0.137 (8 November 2026)
+
 ### Baru
 - **Router Pintar: "Otomatis (Pintar)" di pilihan model.** Chat yang memakainya memilih sendiri model termurah yang sanggup untuk tiap pesan, berdasarkan data GripHub Router tentang kemampuan dan harga terkini tiap model.
   - Gambar terlampir hanya dikirim ke model yang bisa membaca gambar; chat Coding hanya ke model yang bisa memakai tools.
@@ -61,8 +67,6 @@ Versi yang hanya berisi pemeliharaan (tes, proses build) ditandai begitu.
   - Agent menjelaskan satu langkah dan menyorot elemen yang dimaksud; ketuk "Sudah" untuk langkah berikutnya. Agent tidak pernah mengetuk, menggeser, atau mengetik untukmu.
   - Opsional: nyalakan "GripHub Pendamping Layar" di pengaturan aksesibilitas Android agar sorotan lebih tepat (hanya membaca, tanpa kolom kata sandi; dijelaskan dulu di aplikasi).
   - Layar aplikasi bank dan kolom kata sandi tidak bisa dilihat; agent mengatakannya, bukan menebak.
-
----
 
 ## v1.0.133 (5 November 2026)
 
